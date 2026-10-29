@@ -13,3 +13,5 @@ __pycache__/
 *.sbi
 *.mcd
 *.mcr
+# OpenBIOS is built from MIT source and bundled (bios/openbios/README.md); not a dump
+!bios/openbios/openbios.bin

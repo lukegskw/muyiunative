@@ -1,5 +1,5 @@
-# Tests that need no game files, BIOS or GPU (plan.md, Testing): the runtime's unit tests, plain and under ASan and UBSan; the tool tests; and the Mac app, built, packed,
-# signed and checked, which is phase 0's exit criterion. docs/development.md says how to run each one locally.
+# Tests that need no game files, retail BIOS or GPU (plan.md, Testing): the runtime's unit tests, plain and under ASan and UBSan, OpenBIOS's boot among them; the tool
+# tests; and the Mac app, built, packed, signed, checked and run without a window. docs/development.md says how to run each one locally.
 name: tests
 
 on:
@@ -53,7 +53,7 @@ jobs:
         run: python -m unittest discover -s tools/tests -v
 
   build:
-    name: Mac app (phase 0, empty)
+    name: Mac app
     runs-on: xcode-27
     timeout-minutes: 15
     steps:
@@ -71,3 +71,5 @@ jobs:
           codesign --verify --strict --verbose=2 "$app"
           codesign --display --verbose=2 "$app" 2>&1 | grep -E 'flags=0x[0-9a-f]+\([^)]*runtime'   # the hardened runtime
           test "$(lipo -archs "$app/Contents/MacOS/ps1native")" = arm64
+      - name: Boot OpenBIOS from the app's Resources, without a window
+        run: shell/mac/build/ps1native.app/Contents/MacOS/ps1native --headless --frames 60

@@ -4,12 +4,13 @@
 
 ## How it is built
 
-| Part         | Where                                    | Built with                                                | State                                                   |
-| ------------ | ---------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------- |
-| Runtime      | `runtime/` (C)                           | compiled into the host                                    | The machine's memories and its memory map (`mem.c`)     |
-| Presentation | `gfx/metal/` (Objective-C, Metal)        | compiled into the host                                    | Clears the window to black                              |
-| Mac host     | `shell/mac/` (C and Objective-C, AppKit) | `make -C shell/mac` → `shell/mac/build/ps1native`         | Makes the machine and opens the window                  |
-| Mac app      | `tools/pack_app.py`                      | `make -C shell/mac app` → `shell/mac/build/ps1native.app` | The host alone, ad-hoc signed with the hardened runtime |
+| Part         | Where                                    | Built with                                                | State                                                                                                                                                           |
+| ------------ | ---------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Runtime      | `runtime/` (C)                           | compiled into the host                                    | The interpreter, memory, COP0 and interrupts, timers, DMA and the software GPU; the CD-ROM drive (no disc), the SPU's registers and the controller port (empty) |
+| BIOS         | `bios/openbios/`                         | built from nugget's source, then committed (its README)   | OpenBIOS with its shell, which boots in phase 1                                                                                                                 |
+| Presentation | `gfx/metal/` (Objective-C, Metal)        | compiled into the host                                    | Shows the GPU's picture, stretched to the window                                                                                                                |
+| Mac host     | `shell/mac/` (C and Objective-C, AppKit) | `make -C shell/mac` → `shell/mac/build/ps1native`         | Runs the machine on a thread of its own at the console's speed; `--headless` runs it without a window                                                           |
+| Mac app      | `tools/pack_app.py`                      | `make -C shell/mac app` → `shell/mac/build/ps1native.app` | The host, with `bios/openbios` in its Resources, ad-hoc signed with the hardened runtime                                                                        |
 
 There is no Xcode project for the Mac, and nothing to install beyond Xcode and Python: plain Makefiles drive clang (`make -C <folder>`), and Python scripts pack what clang built, as in nxnative. The iOS app (phase 7) will get its Xcode project generated (XcodeGen). Build outputs go to `build/` beside each Makefile, which git ignores.
 
@@ -17,20 +18,21 @@ The host is built for Apple silicon (`arm64`) and macOS 14 or later (`MINOS` in 
 
 ## Tests
 
-Tests need no game files, BIOS or GPU: they build their inputs in code. They sit beside the code they test.
+Tests need no game files, retail BIOS or GPU: they build their inputs in code, and the boot test runs the bundled OpenBIOS. They sit beside the code they test.
 
-| What                                                               | Command                                                       |
-| ------------------------------------------------------------------ | ------------------------------------------------------------- |
-| Runtime unit tests                                                 | `make -C runtime/tests run`                                   |
-| The same under ASan and UBSan, in a build folder of their own      | `make -C runtime/tests asan`                                  |
-| Tool tests: the app packer, the docs' links and AGENTS.md's length | `python3 -m unittest discover -s tools/tests -v`              |
-| The app                                                            | `make -C shell/mac app && open shell/mac/build/ps1native.app` |
+| What                                                               | Command                                                                  |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------ |
+| Runtime unit tests, and OpenBIOS booted to its shell (`t_boot`)    | `make -C runtime/tests run`                                              |
+| The same under ASan and UBSan, in a build folder of their own      | `make -C runtime/tests asan`                                             |
+| Tool tests: the app packer, the docs' links and AGENTS.md's length | `python3 -m unittest discover -s tools/tests -v`                         |
+| The app                                                            | `make -C shell/mac app && open shell/mac/build/ps1native.app`            |
+| The host without a window: 300 frames, the last one's hash and PNG | `shell/mac/build/ps1native --headless --frames 300 --png /tmp/frame.png` |
 
-A C test (`runtime/tests/t_<what>.c`) includes the files it tests (`#include "../mem.c"`, so their static functions can be tested too), counts its checks with `CHECK`, prints `<what>: N checks, M failed` and exits non-zero on a failure; add it to `TESTS` in `runtime/tests/Makefile`. A Python test is a `unittest` file, `tools/tests/test_<what>.py`, whose docstring says what it checks. A `[RED]` line in a test's output is the runtime reporting what it does not model yet, not a failure.
+A C test (`runtime/tests/t_<what>.c`) includes `ps1.h` and links the whole runtime, built once into objects; it counts its checks with `CHECK`, prints `<what>: N checks, M failed` and exits non-zero on a failure; add it to `TESTS` in `runtime/tests/Makefile`. A Python test is a `unittest` file, `tools/tests/test_<what>.py`, whose docstring says what it checks. A `[RED]` line in a test's output is the runtime reporting what it does not model yet, not a failure. A PNG of a frame stays outside the repository; a frame is compared by its hash (`ps1_frame_hash`).
 
 ## Continuous integration
 
-`.github/workflows/tests.yml` runs on every pull request and push to `main`, on GitHub's `xcode-27` macOS image with Xcode 27.1 named by path in `DEVELOPER_DIR` (a new default Xcode on the image does not move CI): the runtime's unit tests, plain and under ASan and UBSan; the tool tests; and the Mac app, built, packed and checked (`plutil -lint`, `codesign --verify --strict`, the hardened runtime flag, `lipo -archs`), which is phase 0's exit criterion.
+`.github/workflows/tests.yml` runs on every pull request and push to `main`, on GitHub's `xcode-27` macOS image with Xcode 27.1 named by path in `DEVELOPER_DIR` (a new default Xcode on the image does not move CI): the runtime's unit tests, plain and under ASan and UBSan; the tool tests; and the Mac app, built, packed and checked (`plutil -lint`, `codesign --verify --strict`, the hardened runtime flag, `lipo -archs`), then run without a window from inside the bundle, which boots the OpenBIOS in its Resources.
 
 `.github/workflows/lint-python.yml` runs ruff and pyright over the tools (configured in `pyproject.toml`), at the versions pinned in `.github/requirements/lint.txt`. Every finding fails the job: fix it, or silence it on its line (`# noqa: <rule>`, `# pyright: ignore[<rule>]`) with a reason. With the same versions locally, in a venv outside the repository:
 

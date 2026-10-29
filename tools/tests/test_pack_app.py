@@ -1,5 +1,6 @@
 """tools/pack_app.py turns a host into an app that macOS takes: the bundle's layout, an Info.plist with the host's deployment target, a signature with the hardened runtime
-that codesign verifies, a second pack over the first, and its refusals: an output that is not an .app, and an existing app with another bundle ID, which stays as it was.
+that codesign verifies, resources (a file and a folder) inside the signed bundle, a second pack over the first, and its refusals: an output that is not an .app, a missing
+resource, and an existing app with another bundle ID, which stays as it was.
 Needs Xcode's command-line tools (clang, otool, codesign); no game files."""
 import os, plistlib, shutil, subprocess, sys, tempfile, unittest
 from pathlib import Path
@@ -40,6 +41,19 @@ class PackApp(unittest.TestCase):
     def test_refuses_an_output_that_is_not_an_app(self):
         r = self.pack(self.tmp / 'Empty')
         self.assertNotEqual(r.returncode, 0); self.assertIn('must end in .app', r.stderr)
+
+    def test_resources_inside_the_signature(self):
+        data = self.tmp / 'data'; data.mkdir(); (data / 'rom.dat').write_bytes(b'\x00\x01'); (data / 'LICENSE').write_text('MIT\n')
+        note = self.tmp / 'note.txt'; note.write_text('hello\n')
+        app = self.tmp / 'Res.app'
+        r = self.pack(app, '--name', 'Res', '--resource', data, '--resource', note); self.assertEqual(r.returncode, 0, r.stderr)
+        res = app / 'Contents/Resources'
+        self.assertEqual(((res / 'data/rom.dat').read_bytes(), (res / 'data/LICENSE').read_text(), (res / 'note.txt').read_text()), (b'\x00\x01', 'MIT\n', 'hello\n'))
+        v = subprocess.run(['codesign', '--verify', '--strict', '--verbose=2', app], capture_output=True, text=True)
+        self.assertEqual(v.returncode, 0, v.stderr)
+        r = self.pack(self.tmp / 'Missing.app', '--name', 'Missing', '--resource', self.tmp / 'nothing')
+        self.assertNotEqual(r.returncode, 0); self.assertIn('no resource', r.stderr)
+        self.assertFalse((self.tmp / 'Missing.app').exists())
 
     def test_never_replaces_another_app(self):
         other = self.tmp / 'Other.app'; (other / 'Contents').mkdir(parents=True)

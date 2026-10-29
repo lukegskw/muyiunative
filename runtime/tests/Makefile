@@ -1,17 +1,25 @@
 # Runtime unit tests in one command: make -C runtime/tests run (seconds; builds into build/, which git ignores). make asan: the same tests under ASan and UBSan, built in
-# build/asan so the plain build stays as it is. A test includes the files it tests (t_mem.c includes ../mem.c), so every runtime file is a dependency of every test
+# build/asan so the plain build stays as it is. Each test links the whole runtime, built once into objects; t_boot runs the bundled OpenBIOS (bios/openbios)
 B = build
 SAN ?=
 CFLAGS = -O1 -g -Wall -Wextra -I.. $(SAN)
-TESTS = t_mem
+TESTS = t_mem t_cpu t_dma t_timers t_gpu t_cdrom t_boot
+RT = $(sort $(wildcard ../*.c))
+OBJ = $(patsubst ../%.c,$(B)/rt/%.o,$(RT))
+BIOS = $(abspath ../../bios/openbios/openbios.bin)
 .DEFAULT_GOAL := run
+.SECONDARY: $(OBJ)
 
 run: $(addprefix $(B)/,$(TESTS))
 	@set -e; for t in $^; do $$t; done
 
-$(B)/t_%: t_%.c $(wildcard ../*.c ../*.h) Makefile
+$(B)/rt/%.o: ../%.c $(wildcard ../*.h) Makefile
+	@mkdir -p $(@D)
+	clang $(CFLAGS) -c -o $@ $<
+
+$(B)/t_%: t_%.c $(OBJ) Makefile
 	@mkdir -p $(B)
-	clang $(CFLAGS) -o $@ $<
+	clang $(CFLAGS) -DBIOS_PATH='"$(BIOS)"' -o $@ $< $(OBJ)
 
 asan:
 	ASAN_OPTIONS=halt_on_error=1:detect_stack_use_after_return=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \

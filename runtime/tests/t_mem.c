@@ -1,6 +1,7 @@
 // The memory map (mem.c): the segments' views of physical memory, RAM through its 8 MB window, the scratchpad not through KSEG1, the BIOS as ROM, unaligned accesses,
 // and what is not modelled yet. The [RED] lines it prints are the accesses to unmodelled space it makes on purpose
-#include "../mem.c"
+#include "ps1.h"
+#include <string.h>
 
 static int checks, fails;
 #define CHECK(c, msg) do { checks++; if (!(c)) { fails++; fprintf(stderr, "FAIL: %s\n", msg); } } while (0)

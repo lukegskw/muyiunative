@@ -1,7 +1,13 @@
-// Mac front end (front.h): AppKit owns the main thread; the window is 640x480 points (the console's 320x240 at 2x) and resizable, and its view's CAMetalLayer has a drawable
-// of the view's size in pixels, presented again whenever the view needs drawing
+// Mac front end (front.h): AppKit owns the main thread and the machine runs on a thread of its own. The window keeps the console's 4:3 picture at any size (640x480 points
+// to start). Frames are handed over through one slot, so the main thread presents only the newest and a slow main thread never holds the machine back
 #import <Cocoa/Cocoa.h>
+#import <ImageIO/ImageIO.h>
 #import <QuartzCore/CAMetalLayer.h>
+#include <os/lock.h>
+#include <pthread.h>
+#include <stdatomic.h>
+#include <stdlib.h>
+#include <string.h>
 #include "front.h"
 #include "present.h"
 #include "ps1.h"
@@ -11,29 +17,56 @@
 
 @implementation FrontView
 - (CALayer *)makeBackingLayer { return [CAMetalLayer layer]; }
-- (BOOL)wantsUpdateLayer { return YES; }
-- (void)updateLayer { present_frame(); }
-- (void)fit {
-    CGFloat s = self.window ? self.window.backingScaleFactor : 1;
-    CAMetalLayer *l = (CAMetalLayer *)self.layer;
-    l.contentsScale = s; l.drawableSize = CGSizeMake(self.bounds.size.width * s, self.bounds.size.height * s);
-    self.needsDisplay = YES;
-}
-- (void)setFrameSize:(NSSize)size { [super setFrameSize:size]; [self fit]; }
-- (void)viewDidChangeBackingProperties { [super viewDidChangeBackingProperties]; [self fit]; }
 @end
 
 @interface FrontApp : NSObject <NSApplicationDelegate>
 @end
 
 @implementation FrontApp
-- (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)app { return YES; }
+- (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)app { (void)app; return YES; }
 @end
+
+typedef struct frame { uint32_t *px; size_t cap; int w, h; } frame;
+typedef struct job { void (*run)(void *); void *arg; } job;
 
 static FrontApp *g_app;   // NSApplication holds its delegate weakly
 static NSWindow *g_win;
+static os_unfair_lock g_lock = OS_UNFAIR_LOCK_INIT;   // guards g_new, g_fresh and the swap
+static frame g_new, g_shown;                          // the newest frame (the machine's thread writes it) and the one presented (main thread)
+static bool g_fresh;
+static atomic_bool g_queued;                          // a present is queued on the main thread
 
-void front_run(const char *title) {
+static int fit(frame *f, size_t n) {
+    if (n <= f->cap) return 1;
+    uint32_t *p = realloc(f->px, n * sizeof *p);
+    if (!p) return 0;
+    f->px = p; f->cap = n; return 1;
+}
+
+void front_present(const uint32_t *px, int w, int h) {
+    size_t n = (size_t)w * (size_t)h;
+    os_unfair_lock_lock(&g_lock);
+    if (fit(&g_new, n)) { memcpy(g_new.px, px, n * sizeof *px); g_new.w = w; g_new.h = h; g_fresh = true; }
+    os_unfair_lock_unlock(&g_lock);
+    if (atomic_exchange(&g_queued, true)) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        atomic_store(&g_queued, false);
+        os_unfair_lock_lock(&g_lock);
+        bool fresh = g_fresh;
+        if (fresh) { frame t = g_shown; g_shown = g_new; g_new = t; g_fresh = false; }
+        os_unfair_lock_unlock(&g_lock);
+        if (fresh) present_frame(g_shown.px, g_shown.w, g_shown.h);
+    });
+}
+
+static void *machine_thread(void *p) {
+    job j = *(job *)p; free(p);
+    j.run(j.arg);
+    dispatch_async(dispatch_get_main_queue(), ^{ [NSApp terminate:nil]; });
+    return NULL;
+}
+
+void front_run(const char *title, void (*run)(void *arg), void *arg) {
     NSApplication *app = NSApplication.sharedApplication;
     g_app = [FrontApp new]; app.delegate = g_app;
     app.activationPolicy = NSApplicationActivationPolicyRegular;   // a Dock icon and a menu bar, also when started from a terminal
@@ -44,12 +77,34 @@ void front_run(const char *title) {
     g_win = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 640, 480)
                                         styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable
                                           backing:NSBackingStoreBuffered defer:NO];
-    g_win.title = name; g_win.releasedWhenClosed = NO;
+    g_win.title = name; g_win.releasedWhenClosed = NO; g_win.contentAspectRatio = NSMakeSize(4, 3);
     FrontView *v = [[FrontView alloc] initWithFrame:NSMakeRect(0, 0, 640, 480)];
-    v.wantsLayer = YES; v.layerContentsRedrawPolicy = NSViewLayerContentsRedrawDuringViewResize;
+    v.wantsLayer = YES; v.layerContentsRedrawPolicy = NSViewLayerContentsRedrawNever;
+    v.layer.backgroundColor = CGColorGetConstantColor(kCGColorBlack);
     g_win.contentView = v;
     if (!present_init((__bridge void *)v.layer)) RED("front end: no Metal device, the window stays empty");
-    [v fit]; [g_win center]; [g_win makeKeyAndOrderFront:nil];
+    [g_win center]; [g_win makeKeyAndOrderFront:nil];
+    job *j = malloc(sizeof *j);
+    pthread_attr_t at; pthread_t t;
+    pthread_attr_init(&at); pthread_attr_setstacksize(&at, 8 << 20); pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
+    if (!j || (*j = (job){run, arg}, pthread_create(&t, &at, machine_thread, j))) { free(j); RED("front end: cannot start the machine's thread"); }
+    pthread_attr_destroy(&at);
     [app activate];
     [app run];
+}
+
+int front_write_png(const char *path, const uint32_t *px, int w, int h) {
+    bool ok = false;
+    CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    CGDataProviderRef data = CGDataProviderCreateWithData(NULL, px, (size_t)w * (size_t)h * 4, NULL);
+    CGImageRef img = CGImageCreate((size_t)w, (size_t)h, 8, 32, (size_t)w * 4, cs, (CGBitmapInfo)kCGImageAlphaNoneSkipFirst | kCGBitmapByteOrder32Little, data, NULL, false,
+                                   kCGRenderingIntentDefault);
+    CFURLRef url = CFURLCreateFromFileSystemRepresentation(NULL, (const UInt8 *)path, (CFIndex)strlen(path), false);
+    CGImageDestinationRef dst = url ? CGImageDestinationCreateWithURL(url, CFSTR("public.png"), 1, NULL) : NULL;
+    if (dst && img) { CGImageDestinationAddImage(dst, img, NULL); ok = CGImageDestinationFinalize(dst); }
+    if (dst) CFRelease(dst);
+    if (url) CFRelease(url);
+    CGImageRelease(img); CGDataProviderRelease(data); CGColorSpaceRelease(cs);
+    if (!ok) RED("front end: cannot write a PNG to %s", path);
+    return ok ? 0 : -1;
 }

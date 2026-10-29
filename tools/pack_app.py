@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # Pack a Mac app (plan.md, phases 0 and 5): the host as the bundle's executable, an Info.plist whose LSMinimumSystemVersion is the deployment target the host was linked for
 # (LC_BUILD_VERSION), PkgInfo, and the signature: codesign --force --options runtime --sign <identity> ('-' = ad-hoc). The hardened runtime is on, as nothing is generated or
-# mapped executable at run time (plan.md, core rule). Phase 0's app is the host alone, which opens an empty window; the game's code and data join it from phase 5 on.
+# mapped executable at run time (plan.md, core rule). Phase 1's app is the host and its resources (the bundled OpenBIOS, with its licenses); the game's code and data join
+# it from phase 5 on. A resource, file or folder, is copied into Contents/Resources under its own name.
 # The app is written to <out.app>.partial, then moved into place, so a failed pack leaves the previous app as it was. An existing <out.app> is replaced only when it carries
 # the same bundle ID: the script never deletes an app it did not pack.
-# Usage: pack_app.py <out.app> --exe <host> [--name ps1native] [--bundle-id org.ps1native.<name>] [--version 0.0] [--sign -]
+# Usage: pack_app.py <out.app> --exe <host> [--resource <path>]... [--name ps1native] [--bundle-id org.ps1native.<name>] [--version 0.0] [--sign -]
 import argparse, plistlib, re, shutil, subprocess, sys
 from pathlib import Path
 from xml.parsers.expat import ExpatError
@@ -41,11 +42,18 @@ def pack(a):
     if out.suffix != '.app': raise SystemExit(f'the output must end in .app: {out}')
     if not exe.is_file(): raise SystemExit(f'no host at {exe}')
     if not a.name.strip() or '/' in a.name: raise SystemExit(f'not a name for an app: {a.name!r}')
+    res = [Path(r).resolve() for r in a.resource]
+    for r in res:
+        if not r.exists(): raise SystemExit(f'no resource at {r}')
+    if len({r.name for r in res}) < len(res): raise SystemExit('two resources with one name: ' + ', '.join(str(r) for r in res))
     if out.exists() and packed_id(out) != bundle_id(a): raise SystemExit(f'{out} exists and is not an app with bundle ID {bundle_id(a)}: remove it, or pack elsewhere')
     minos = min_os(exe)
     tmp = out.with_name(out.name + '.partial'); shutil.rmtree(tmp, ignore_errors=True)
-    c = tmp / 'Contents'; (c / 'MacOS').mkdir(parents=True)
+    c = tmp / 'Contents'; (c / 'MacOS').mkdir(parents=True); (c / 'Resources').mkdir()
     shutil.copyfile(exe, c / 'MacOS' / a.name); (c / 'MacOS' / a.name).chmod(0o755)
+    for r in res:
+        if r.is_dir(): shutil.copytree(r, c / 'Resources' / r.name)
+        else: shutil.copyfile(r, c / 'Resources' / r.name)
     (c / 'Info.plist').write_bytes(plistlib.dumps(info_plist(a, minos)))
     (c / 'PkgInfo').write_text('APPL????')
     run(['codesign', '--force', '--options', 'runtime', '--sign', a.sign, tmp])
@@ -58,6 +66,7 @@ def parse(argv):
     ap = argparse.ArgumentParser(prog='pack_app.py', description='Pack and sign a Mac app of the host')
     ap.add_argument('out', help='the app (<name>.app)')
     ap.add_argument('--exe', required=True, help='the host (shell/mac/build/ps1native)')
+    ap.add_argument('--resource', action='append', default=[], help='a file or folder for Contents/Resources (repeatable)')
     ap.add_argument('--name', default='ps1native', help="the app's name, also its executable's (default: ps1native)")
     ap.add_argument('--bundle-id', help='default: org.ps1native.<name>')
     ap.add_argument('--version', default='0.0')
