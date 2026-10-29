@@ -1,0 +1,17 @@
+# Configuration of the Python lint and type checks only (.github/workflows/lint-python.yml): the repository is not a Python package, and its tools run in place.
+
+[tool.pyright]
+include = ["tools"]
+typeCheckingMode = "basic"
+pythonVersion = "3.12"   # the oldest Python README supports
+pythonPlatform = "Darwin"
+
+[tool.ruff]
+target-version = "py312"
+include = ["tools/**/*.py"]
+
+# Rules that find bugs (pyflakes, syntax, bugbear, pylint's errors and warnings, a few of ruff's own), not style: the dense layout (several statements on a line, short names)
+# is the house style, so those rules are off, and `ruff format` is not used. nxnative's rules
+[tool.ruff.lint]
+select = ["F", "E7", "E9", "B", "PLE", "PLW", "PIE", "ISC001", "T10", "RUF006", "RUF008", "RUF009", "RUF013", "RUF016", "RUF017", "RUF018", "RUF024", "RUF026"]
+ignore = ["E701", "E702", "E731", "E741", "B007", "B905", "PLW0603", "PLW1510", "PLW2901"]

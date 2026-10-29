@@ -1,0 +1,73 @@
+# Tests that need no game files, BIOS or GPU (plan.md, Testing): the runtime's unit tests, plain and under ASan and UBSan; the tool tests; and the Mac app, built, packed,
+# signed and checked, which is phase 0's exit criterion. docs/development.md says how to run each one locally.
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The toolchain the project supports (README: Xcode 27.1), on GitHub's xcode-27 image, named by path so the image's default moving to another Xcode does not move CI
+  DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
+
+defaults:
+  run:
+    shell: bash
+
+# Actions are pinned to commit SHAs (the tag in the comment): a tag can be moved, a SHA cannot
+jobs:
+  runtime-tests:
+    name: Runtime unit tests (plain, then ASan and UBSan)
+    runs-on: xcode-27
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Runtime unit tests (runtime/tests)
+        run: make -C runtime/tests -j3 run
+      - name: The same under ASan and UBSan
+        run: make -C runtime/tests -j3 asan
+
+  tool-tests:
+    name: Tool tests
+    runs-on: xcode-27
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.14'
+      - name: The test files (tools/tests)
+        run: python -m unittest discover -s tools/tests -v
+
+  build:
+    name: Mac app (phase 0, empty)
+    runs-on: xcode-27
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        run: xcodebuild -version
+      - name: Host and app (make -C shell/mac app)
+        run: make -C shell/mac app
+      - name: Check the app
+        run: |
+          app=shell/mac/build/ps1native.app
+          plutil -lint "$app/Contents/Info.plist"
+          codesign --verify --strict --verbose=2 "$app"
+          codesign --display --verbose=2 "$app" 2>&1 | grep -E 'flags=0x[0-9a-f]+\([^)]*runtime'   # the hardened runtime
+          test "$(lipo -archs "$app/Contents/MacOS/ps1native")" = arm64

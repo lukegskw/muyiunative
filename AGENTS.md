@@ -1,0 +1,26 @@
+# Notes for agents
+
+- This repository turns PlayStation (PS1) games into native apps for the Mac, later the iPhone: the game's MIPS code is translated to C and compiled ahead of time on the Mac (`tools/`), linked with a C runtime that models the console (`runtime/`), and shown through Metal (`gfx/metal/`) in a front end (`shell/mac/`). An interpreter in the runtime runs whatever was not compiled, and is the reference the native code is checked against. [plan.md](plan.md) is the design: the approach, the architecture, the phases with their exit criteria, the risks and the decision log. [README.md](README.md) is the user-facing page; [docs/development.md](docs/development.md) says how everything is built, tested and checked, and the house style. The conventions follow [nxnative](https://github.com/seedds/nxnative), which does the same for Switch games.
+- Where to start:
+
+  | Task | Read first |
+  |---|---|
+  | What to work on | [plan.md, Phases and exit criteria](plan.md#4-phases-and-exit-criteria): the current phase's exit criterion |
+  | Building, tests, CI, house style | [docs/development.md](docs/development.md) |
+  | How a part of the console works | [psx-spx](https://psx-spx.consoledev.net/), the public hardware documentation, then the comment at the top of the file that models it |
+  | Checking a change before a pull request | [CONTRIBUTING.md](CONTRIBUTING.md#a-pull-request) |
+
+- **Clean room.** Write the runtime and the tools from public documentation (psx-spx, MIPS manuals) and from observation (test programs, the interpreter). Never copy, translate or closely paraphrase code from emulators or recompilers whose license is not permissive (most PS1 emulators are GPL or more restrictive), and do not read their source for the part being written. Code from permissive projects (MIT, zlib, BSD, such as nxnative) may be adapted, with credit. Third-party code keeps its license file beside it. An external emulator may be run as a black box for comparison, never linked.
+- **No game data.** Disc images, BIOS dumps, memory cards, save states and anything extracted from them stay outside the repository: never in a commit, a test fixture, an issue or a log pasted into one. Tests build their inputs in code. Frame comparisons keep hashes only; screenshots stay local. `.gitignore` refuses the usual image extensions as a backstop, not as permission.
+- **The interpreter is the reference.** Native code is right when it matches the interpreter in lockstep: registers and memory after each call (plan.md, Testing). When the two differ, find which one is wrong against psx-spx or a test program before changing either; never bend the interpreter to agree.
+- **Nothing is generated on the device.** All code is compiled on the Mac at build time; the apps never write executable memory, so the Mac app runs with the hardened runtime and the same runtime builds for iOS. Code the build did not compile runs in the interpreter.
+- **All machine state in one struct.** The runtime keeps the console's state in its `ps1` struct (`runtime/ps1.h`), never in globals or function statics, so two machines can run side by side (the lockstep comparison). Front ends and presentation may keep their own.
+- **General rules, per-game profiles.** Prefer a fix that holds for every game to a game-specific rule. Knowledge about one game (hashes, overlays, function hints, patches) goes in its profile, `profiles/<serial>/game.toml`, never in the code of the runtime or the tools.
+- **Root causes, not workarounds.** Before changing code, find why it happens: the instruction, the value that went wrong and who wrote it, the hardware behaviour the runtime gets wrong. Fix that place. A stub, a skipped call, a clamp, a retry or a longer timeout that only hides the symptom is a workaround: use one only when the cause is known and cannot be fixed where it lies, or when the user asks for a stopgap, and say so in the code comment, with what is still open.
+- **Measure, then change.** Each fix starts from an observation: a log line, a lockstep difference, a test program's result. Write the evidence, and the psx-spx section a hardware fact comes from, into the comment beside the fix.
+- **Tests sit beside their code** (`runtime/tests`, `tools/tests`) and need no game files, BIOS or GPU; CI runs them on every pull request. A change comes with the test that shows it works ([docs/development.md](docs/development.md#tests)).
+- **Decisions.** plan.md's decision log changes only with the user's decision; a new decision gets a row there, with its alternatives and why.
+- **Scripts and tools.** Scripts the user runs will live in `scripts/` at the repository root, each runnable from a terminal and exiting non-zero on error; tools that only other scripts or agents call stay under `tools/`.
+- **Language and logs.** Everything is in English: docs, code comments, log lines, script output. A log line that marks something unimplemented or wrong starts with `[RED] ` (`RED()` in the runtime), so a run's gaps can be found with grep.
+- This file changes only when a rule does. `tools/tests/test_docs.py` keeps it at most 1,500 words and checks every relative link and anchor in the Markdown files.
+- Commit only when asked.

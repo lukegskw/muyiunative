@@ -1,0 +1,15 @@
+# Build outputs (each Makefile builds into build/ beside it)
+build/
+__pycache__/
+.DS_Store
+# Game data never goes into the repository (AGENTS.md). These are refused as a backstop, not as the rule: disc images, BIOS dumps, memory cards
+*.bin
+*.cue
+*.img
+*.iso
+*.chd
+*.ecm
+*.pbp
+*.sbi
+*.mcd
+*.mcr

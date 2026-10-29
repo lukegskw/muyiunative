@@ -1,0 +1,21 @@
+name: Feature request
+description: Ask for something ps1native does not do yet
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A new platform, a second implementation of an existing path, or a change of more than about 1,000 lines: agree on the scope here first (CONTRIBUTING.md, "Large changes and other platforms").
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is missing
+      description: What you want to do and what stops you today. A game or a log line helps.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you propose
+      description: How it could work, and the parts of ps1native it touches, if you know them.
+    validations:
+      required: false

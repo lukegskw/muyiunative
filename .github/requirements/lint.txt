@@ -1,0 +1,3 @@
+# The Python lint job's tools (.github/workflows/lint-python.yml), pinned: their findings change with their versions, so raising one goes with fixing what it newly finds
+ruff==0.17.2
+pyright==1.1.414

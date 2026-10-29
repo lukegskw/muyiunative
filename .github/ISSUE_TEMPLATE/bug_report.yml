@@ -1,0 +1,66 @@
+name: Bug report
+description: Something that crashes, hangs, draws or sounds wrong, or a build step that fails
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. The fields below are what a problem is traced with; without them the first reply is a request for them.
+        Never attach disc images, BIOS dumps, memory cards or anything extracted from a game. Logs and screenshots are fine.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did and what you saw. The last log lines, a `[RED]` line or a screenshot help. Say whether it happens every time.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: false
+  - type: input
+    id: commit
+    attributes:
+      label: ps1native commit
+      description: "`git rev-parse --short HEAD` in the checkout you built from."
+    validations:
+      required: true
+  - type: input
+    id: game
+    attributes:
+      label: Game and serial
+      description: The game's name and its serial (on the disc's label, or in SYSTEM.CNF), if a game was involved.
+    validations:
+      required: false
+  - type: input
+    id: device
+    attributes:
+      label: Mac and macOS version
+      description: The Mac with its chip, and the macOS version (Apple menu > About This Mac).
+      placeholder: MacBook Pro M2 Max, macOS 26.1
+    validations:
+      required: true
+  - type: textarea
+    id: how
+    attributes:
+      label: How it was built and run
+      description: The commands, for example `make -C shell/mac app`, and how the app was started.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        The whole output of the run from its start, not excerpts (drag the file here). From a terminal,
+        `shell/mac/build/ps1native.app/Contents/MacOS/ps1native 2>&1 | tee run.log` keeps it in run.log. For a build failure, the build's full output.
+    validations:
+      required: true
+  - type: checkboxes
+    id: no-game-data
+    attributes:
+      label: No game data
+      options:
+        - label: Nothing attached here contains disc images, BIOS dumps, memory cards or data extracted from a game.
+          required: true
