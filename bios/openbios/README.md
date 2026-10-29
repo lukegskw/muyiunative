@@ -9,6 +9,10 @@
 | Size       | 524,288 bytes (512 KB, the console's BIOS ROM)                                                                                                                             |
 | SHA-256    | `caf2162eb498408f86e19f9b3a3c5e083e34c25a43baae33ffc3641afffa54c8` (the build is reproducible: a clean rebuild gives the same hash)                                        |
 
+## What the shell shows
+
+With no disc, the shell's CD check fails and the cube turns to its error colours. In 480-line interlaced mode the shell clears (0,256) 640x480 every frame (psyqo's `GPU::getNextClear`; a temporary log of the fills showed it in 295 of 300 frames), which wraps at VRAM's line 512 (psx-spx, GPU Memory Transfer Commands: Wrapping) and so never clears rows 224 to 255: the cube leaves trails there. The GPU wraps as psx-spx says; the trails are the shell's, not a runtime bug.
+
 ## Licenses
 
 | Part                                                     | License       | File                                  |
