@@ -105,18 +105,18 @@ Dump it with an accurate ripping tool (e.g. redumper) to `.cue`/`.bin`.
 
 ## 8. Decision log
 
-| Decision                                 | Alternatives                            | Why                                                           |
-| ---------------------------------------- | --------------------------------------- | ------------------------------------------------------------- |
-| MIT license                              | GPL-3.0                                 | Maximum reuse; independence                                   |
-| Mac first, then iOS                      | iOS first                               | Mac is the development and debugging machine                  |
-| Python tools, C runtime, Metal           | Rust, C++                               | Fast iteration; C runs everywhere, including iOS              |
-| Interpreter first                        | Recompiler first                        | Gives a reference to compare against and a permanent fallback |
-| Software GPU first                       | Metal first                             | Correctness before speed                                      |
-| No code generation on the device         | Compile on the device (as 2Xtreme does) | Required for iOS; works with Apple's hardened runtime         |
-| OpenBIOS bundled                         | Retail BIOS required                    | Legal, and no BIOS dump needed                                |
-| Clean-room, permissive dependencies only | Fork psxrecomp                          | Independence and license freedom                              |
-| Conventions from nxnative (MIT): build, front end, tools, rules for contributors and agents | Own conventions | A working project of the same shape: native games on Apple platforms |
-| Plain Makefiles and clang; Python scripts pack the apps | CMake, an Xcode project, SwiftPM | Nothing to install beyond Xcode and Python; the iOS project is generated (XcodeGen) in phase 7 |
-| Objective-C with AppKit for the Mac front end | Swift, SwiftUI | Calls the C runtime directly, as nxnative's host does |
-| Python tools: standard library, unittest, ruff (bug rules) and pyright; not a package | pytest, a formatter, a pip package | They run in place, with no install |
-| Apple silicon, macOS 14 or later | Intel Macs, universal binaries | One architecture to build and test, as on GitHub's runners |
+| Decision                                                                                    | Alternatives                            | Why                                                                                            |
+| ------------------------------------------------------------------------------------------- | --------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| MIT license                                                                                 | GPL-3.0                                 | Maximum reuse; independence                                                                    |
+| Mac first, then iOS                                                                         | iOS first                               | Mac is the development and debugging machine                                                   |
+| Python tools, C runtime, Metal                                                              | Rust, C++                               | Fast iteration; C runs everywhere, including iOS                                               |
+| Interpreter first                                                                           | Recompiler first                        | Gives a reference to compare against and a permanent fallback                                  |
+| Software GPU first                                                                          | Metal first                             | Correctness before speed                                                                       |
+| No code generation on the device                                                            | Compile on the device (as 2Xtreme does) | Required for iOS; works with Apple's hardened runtime                                          |
+| OpenBIOS bundled                                                                            | Retail BIOS required                    | Legal, and no BIOS dump needed                                                                 |
+| Clean-room, permissive dependencies only                                                    | Fork psxrecomp                          | Independence and license freedom                                                               |
+| Conventions from nxnative (MIT): build, front end, tools, rules for contributors and agents | Own conventions                         | A working project of the same shape: native games on Apple platforms                           |
+| Plain Makefiles and clang; Python scripts pack the apps                                     | CMake, an Xcode project, SwiftPM        | Nothing to install beyond Xcode and Python; the iOS project is generated (XcodeGen) in phase 7 |
+| Objective-C with AppKit for the Mac front end                                               | Swift, SwiftUI                          | Calls the C runtime directly, as nxnative's host does                                          |
+| Python tools: standard library, unittest, ruff (bug rules) and pyright; not a package       | pytest, a formatter, a pip package      | They run in place, with no install                                                             |
+| Apple silicon, macOS 14 or later                                                            | Intel Macs, universal binaries          | One architecture to build and test, as on GitHub's runners                                     |

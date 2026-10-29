@@ -4,12 +4,12 @@
 
 ## How it is built
 
-| Part | Where | Built with | State |
-|---|---|---|---|
-| Runtime | `runtime/` (C) | compiled into the host | The machine's memories and its memory map (`mem.c`) |
-| Presentation | `gfx/metal/` (Objective-C, Metal) | compiled into the host | Clears the window to black |
-| Mac host | `shell/mac/` (C and Objective-C, AppKit) | `make -C shell/mac` → `shell/mac/build/ps1native` | Makes the machine and opens the window |
-| Mac app | `tools/pack_app.py` | `make -C shell/mac app` → `shell/mac/build/ps1native.app` | The host alone, ad-hoc signed with the hardened runtime |
+| Part         | Where                                    | Built with                                                | State                                                   |
+| ------------ | ---------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------- |
+| Runtime      | `runtime/` (C)                           | compiled into the host                                    | The machine's memories and its memory map (`mem.c`)     |
+| Presentation | `gfx/metal/` (Objective-C, Metal)        | compiled into the host                                    | Clears the window to black                              |
+| Mac host     | `shell/mac/` (C and Objective-C, AppKit) | `make -C shell/mac` → `shell/mac/build/ps1native`         | Makes the machine and opens the window                  |
+| Mac app      | `tools/pack_app.py`                      | `make -C shell/mac app` → `shell/mac/build/ps1native.app` | The host alone, ad-hoc signed with the hardened runtime |
 
 There is no Xcode project for the Mac, and nothing to install beyond Xcode and Python: plain Makefiles drive clang (`make -C <folder>`), and Python scripts pack what clang built, as in nxnative. The iOS app (phase 7) will get its Xcode project generated (XcodeGen). Build outputs go to `build/` beside each Makefile, which git ignores.
 
@@ -19,12 +19,12 @@ The host is built for Apple silicon (`arm64`) and macOS 14 or later (`MINOS` in 
 
 Tests need no game files, BIOS or GPU: they build their inputs in code. They sit beside the code they test.
 
-| What | Command |
-|---|---|
-| Runtime unit tests | `make -C runtime/tests run` |
-| The same under ASan and UBSan, in a build folder of their own | `make -C runtime/tests asan` |
-| Tool tests: the app packer, the docs' links and AGENTS.md's length | `python3 -m unittest discover -s tools/tests -v` |
-| The app | `make -C shell/mac app && open shell/mac/build/ps1native.app` |
+| What                                                               | Command                                                       |
+| ------------------------------------------------------------------ | ------------------------------------------------------------- |
+| Runtime unit tests                                                 | `make -C runtime/tests run`                                   |
+| The same under ASan and UBSan, in a build folder of their own      | `make -C runtime/tests asan`                                  |
+| Tool tests: the app packer, the docs' links and AGENTS.md's length | `python3 -m unittest discover -s tools/tests -v`              |
+| The app                                                            | `make -C shell/mac app && open shell/mac/build/ps1native.app` |
 
 A C test (`runtime/tests/t_<what>.c`) includes the files it tests (`#include "../mem.c"`, so their static functions can be tested too), counts its checks with `CHECK`, prints `<what>: N checks, M failed` and exits non-zero on a failure; add it to `TESTS` in `runtime/tests/Makefile`. A Python test is a `unittest` file, `tools/tests/test_<what>.py`, whose docstring says what it checks. A `[RED]` line in a test's output is the runtime reporting what it does not model yet, not a failure.
 

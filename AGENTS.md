@@ -3,12 +3,12 @@
 - This repository turns PlayStation (PS1) games into native apps for the Mac, later the iPhone: the game's MIPS code is translated to C and compiled ahead of time on the Mac (`tools/`), linked with a C runtime that models the console (`runtime/`), and shown through Metal (`gfx/metal/`) in a front end (`shell/mac/`). An interpreter in the runtime runs whatever was not compiled, and is the reference the native code is checked against. [plan.md](plan.md) is the design: the approach, the architecture, the phases with their exit criteria, the risks and the decision log. [README.md](README.md) is the user-facing page; [docs/development.md](docs/development.md) says how everything is built, tested and checked, and the house style. The conventions follow [nxnative](https://github.com/seedds/nxnative), which does the same for Switch games.
 - Where to start:
 
-  | Task | Read first |
-  |---|---|
-  | What to work on | [plan.md, Phases and exit criteria](plan.md#4-phases-and-exit-criteria): the current phase's exit criterion |
-  | Building, tests, CI, house style | [docs/development.md](docs/development.md) |
-  | How a part of the console works | [psx-spx](https://psx-spx.consoledev.net/), the public hardware documentation, then the comment at the top of the file that models it |
-  | Checking a change before a pull request | [CONTRIBUTING.md](CONTRIBUTING.md#a-pull-request) |
+  | Task                                    | Read first                                                                                                                            |
+  | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+  | What to work on                         | [plan.md, Phases and exit criteria](plan.md#4-phases-and-exit-criteria): the current phase's exit criterion                           |
+  | Building, tests, CI, house style        | [docs/development.md](docs/development.md)                                                                                            |
+  | How a part of the console works         | [psx-spx](https://psx-spx.consoledev.net/), the public hardware documentation, then the comment at the top of the file that models it |
+  | Checking a change before a pull request | [CONTRIBUTING.md](CONTRIBUTING.md#a-pull-request)                                                                                     |
 
 - **Clean room.** Write the runtime and the tools from public documentation (psx-spx, MIPS manuals) and from observation (test programs, the interpreter). Never copy, translate or closely paraphrase code from emulators or recompilers whose license is not permissive (most PS1 emulators are GPL or more restrictive), and do not read their source for the part being written. Code from permissive projects (MIT, zlib, BSD, such as nxnative) may be adapted, with credit. Third-party code keeps its license file beside it. An external emulator may be run as a black box for comparison, never linked.
 - **No game data.** Disc images, BIOS dumps, memory cards, save states and anything extracted from them stay outside the repository: never in a commit, a test fixture, an issue or a log pasted into one. Tests build their inputs in code. Frame comparisons keep hashes only; screenshots stay local. `.gitignore` refuses the usual image extensions as a backstop, not as permission.
