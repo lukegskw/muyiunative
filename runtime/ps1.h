@@ -84,6 +84,7 @@ typedef struct ps1 {
     uint8_t *exe; size_t exe_n;      // a PS-X EXE waiting for the BIOS to reach its shell (exe.c)
     const ps1_native_set *native[4]; int nnative;   // the native code this machine runs where memory holds the code it was made from (native.c)
     uint64_t native_runs, interp_steps;   // entries into native code from the dispatcher, and instructions interpreted: how much runs native
+    uint32_t native_pc, native_fn;   // where native code was last entered, and its guest function (for lockstep reports)
     int frame_done, exit_requested, exit_code;
     unsigned red, unmapped;          // [RED] reports already made: features (RED_ONCE bits), and unmapped accesses (a count)
 } ps1;
@@ -126,6 +127,11 @@ void cpu_run(ps1 *m);                           // runs until the end of a block
 void cpu_exception(ps1 *m, uint32_t code);
 int ps1_native_add(ps1 *m, const ps1_native_set *set);   // 0, or -1 after a [RED] line when the machine has no room for more
 int native_run(ps1 *m);                         // runs native code from the CPU's pc, where some matches memory: 1 if it ran
+
+// The lockstep comparison (lockstep.c): two machines from the same state, ref interpreting and nat with native code, stop together at the end of the first block
+// `step` cycles on (0 or 1: every block); the CPU is compared at each stop, all memory and the devices every full_every stops (0: only at the end of each frame)
+typedef struct ps1_lockstep { uint64_t stops; unsigned step, full_every; char report[400]; } ps1_lockstep;
+int ps1_lockstep_frame(ps1 *ref, ps1 *nat, ps1_lockstep *ls);   // one frame in step: 0 while they agree, else -1 with the first difference in ls->report
 
 // The devices, each by its register offset
 void sched_run(ps1 *m);                         // runs the events that are due (sched.c)

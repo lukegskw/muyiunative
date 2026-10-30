@@ -7,7 +7,7 @@
 #include "cpu_ops.h"
 
 typedef struct ps1_native_fn {
-    void (*run)(ps1 *m);
+    void (*run)(ps1 *m); uint32_t start;   // start: the guest function's address
     const uint32_t (*runs)[2]; unsigned nruns; const uint32_t *words;   // the guest code it was made from: runs of addresses [start, end), and their words in order
 } ps1_native_fn;
 typedef struct ps1_native_entry { uint32_t pc, fn; } ps1_native_entry;   // a block's start and the function it is in, sorted by pc

@@ -54,7 +54,7 @@ flowchart LR
 ps1native/            (working name)
   tools/              Python: disc, exe, mips, analyze, codegen, capture, package
   scripts/            Python, run by the user: disc_info (what identifies a disc in its profile)
-  runtime/            C: cpu, cpu_ops, interp, native, mem, gte, gpu_sw, spu, cdrom, mdec, sio, sched
+  runtime/            C: cpu, cpu_ops, interp, native, lockstep, mem, gte, gpu_sw, spu, cdrom, mdec, sio, sched
   gfx/metal/          Metal presentation, later the hardware renderer
   shell/mac/  shell/ios/
   bios/openbios/      MIT, bundled

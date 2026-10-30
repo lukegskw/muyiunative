@@ -52,7 +52,7 @@ def generate(word, program, name):   # the C source of a native code set named `
         out.append(f'static const uint32_t w{f.start:08x}[] = {{' + ', '.join(f'0x{w:08x}u' for w in words) + '};')
         out.append('')
     out.append('static const ps1_native_fn fns[] = {')
-    out += [f'    {{f{f.start:08x}, r{f.start:08x}, {len(runs(f))}, w{f.start:08x}}},' for f in fns]
+    out += [f'    {{f{f.start:08x}, 0x{f.start:08x}u, r{f.start:08x}, {len(runs(f))}, w{f.start:08x}}},' for f in fns]
     out.append('};')
     entries = sorted((s, i) for i, f in enumerate(fns) for s in f.blocks)
     out.append('static const ps1_native_entry entries[] = {')
