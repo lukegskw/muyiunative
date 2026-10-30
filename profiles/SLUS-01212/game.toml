@@ -11,7 +11,8 @@ tracks = [
 ]
 
 # Local interpreter acceptance route; only a frame hash is retained. Frames are zero-based, and button masks are active-high (Start = 0008h). The runtimes of commits
-# 8680bf2 and a0d26af both reach this frame; on the way the game twice draws a GPU list that comes back on itself (docs/development.md, phase 2)
+# 8680bf2 and a0d26af both reach this frame; on the way the game twice draws a GPU list that comes back on itself (docs/development.md, phase 2). With the runtime of
+# commit 52cedd3, scripts/native_game.py made the boot executable 723 functions of native code, which agree with the interpreter in lockstep to this frame (phase 3)
 [validation]
 date = "2026-10-30"
 screen = "title/main menu"

@@ -6,7 +6,7 @@ The aim is native code, not emulation: the game's MIPS code is translated to C a
 
 ## Status
 
-Phase 2 of [the plan](plan.md#4-phases-and-exit-criteria), hardware breadth, has met its exit criterion: the interpreter has the CD-ROM drive with its audio, the full software GPU, the GTE, the SPU, the MDEC, digital pads and memory cards, passes the hardware test programs of [ps1-tests](tests/ps1-tests/README.md) in CI, and takes Metal Slug X (USA) to its title menu. Gameplay, broader compatibility and timing accuracy still need validation.
+Phase 3 of [the plan](plan.md#4-phases-and-exit-criteria), the recompiler, has met its exit criterion: Metal Slug X (USA)'s main executable, translated to C and compiled on the Mac, runs as native code beside OpenBIOS's and agrees with the interpreter in lockstep to its title menu. Phase 2 gave the interpreter the CD-ROM drive with its audio, the full software GPU, the GTE, the SPU, the MDEC, digital pads and memory cards, and it passes the hardware test programs of [ps1-tests](tests/ps1-tests/README.md) in CI. Gameplay, broader compatibility, timing accuracy and speed still need work: the game runs no faster native than interpreted, as its time goes elsewhere than in its code.
 
 ## Build from the command line
 
@@ -25,7 +25,7 @@ shell/mac/build/ps1native --disc /external/path/disc.cue
 
 The keyboard controls a digital pad in port 1: arrows for the D-pad; Z/X/A/S for Cross/Circle/Square/Triangle; Q/W for L1/R1; 1/2 for L2/R2; Return for Start and Space for Select. Sound is played through the Mac's default output. Memory cards currently have in-memory protocol support; the host leaves the slots empty. Supported disc layouts, reproducible headless inputs and remaining gaps are in [Development](docs/development.md#phase-2-hardware-breadth).
 
-OpenBIOS runs as native code, compiled with the app from its bundled binary; a game's own code is still interpreted until phase 3 is done. `--interpret` runs everything in the interpreter, and `--headless --lockstep` runs an interpreting machine beside the native one and stops at their first difference ([Development](docs/development.md#phase-3-the-recompiler)).
+OpenBIOS runs as native code, compiled with the app from its bundled binary; a game's code is interpreted until you make it native, as below. `--interpret` runs everything in the interpreter, and `--headless --lockstep` runs an interpreting machine beside the native one and stops at their first difference ([Development](docs/development.md#phase-3-the-recompiler)).
 
 To turn a game with a profile in `profiles/` into native code on your Mac, and check it against the interpreter along the profile's route:
 
@@ -33,7 +33,7 @@ To turn a game with a profile in `profiles/` into native code on your Mac, and c
 scripts/native_game.py /external/path/disc.cue
 ```
 
-It writes the game's code into `shell/mac/build`, where it stays: never commit or share it.
+It writes the game's code into `shell/mac/build`, where it stays: never commit or share it. It also builds a host with that code, which runs the game in a window: `shell/mac/build/game/ps1native --disc /external/path/disc.cue`.
 
 ### For developers
 

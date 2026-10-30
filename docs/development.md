@@ -79,6 +79,14 @@ The capture, the generated C and that host hold the game's code: they stay in `s
 
 That run also found two things, now fixed in the tools: the capture's RAM can hold long zeroed areas where a program ran before, which the analysis would decode as NOPs, so 64 zero words in a row end a run of code ([analyze.py](../tools/analyze.py)); and one C file for a whole program can exhaust the compiler's memory, so the C is split. `t_lockstep` builds `gpu/triangle` from four such files.
 
+On the first game, Metal Slug X (USA), with its profile's route to the title menu and the runtime of commit 52cedd3, on 2026-10-30, the script met phase 3's exit criterion:
+
+- 506 addresses captured; 723 functions and 7,788 blocks of native code, in four files.
+- In lockstep the two machines agree to frame 2400, over 13,044,729 stops, on the profile's frame hash `a3d45a4b667b9f54`: the cycle model of phase 3 did not move the route's last frame.
+- 4,655,433 of the route's 637,171,075 instructions are interpreted (0.73%).
+
+The route takes 87.1 seconds natively and 90.4 interpreted, on the same Mac: native code takes 99.3% of the instructions off the interpreter, but only 4% off the time. So in this game the time goes elsewhere than in its code and OpenBIOS's, 36 ms a frame where the console takes 16.7, and a window shows it at about half speed; where it goes is still open.
+
 ## Continuous integration
 
 `.github/workflows/tests.yml` runs on every pull request and push to `main`, on GitHub's `xcode-27` macOS image with Xcode 27.1 named by path in `DEVELOPER_DIR` (a new default Xcode on the image does not move CI): the runtime's unit tests, plain and under ASan and UBSan; the tool tests; and the Mac app, built, packed and checked (`plutil -lint`, `codesign --verify --strict`, the hardened runtime flag, `lipo -archs`), then run without a window from inside the bundle, which boots the OpenBIOS in its Resources.

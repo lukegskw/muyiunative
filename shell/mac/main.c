@@ -55,13 +55,15 @@ static void run(void *arg) {   // the machine's thread: a frame, shown, then a w
     LOG("host: the machine asked to exit (%d)", h->m->exit_code);
 }
 
-static const char *default_bios(char *buf, size_t cap) {   // in the app's Resources, else in the repository the host was built in (shell/mac/build)
+static const char *default_bios(char *buf, size_t cap) {   // in the app's Resources, else in the repository the host was built in (shell/mac/build, or build/game)
     char exe[PATH_MAX], real[PATH_MAX]; uint32_t n = sizeof exe;
     if (_NSGetExecutablePath(exe, &n) || !realpath(exe, real)) return NULL;
     *strrchr(real, '/') = 0;
     snprintf(buf, cap, "%s/../Resources/openbios/openbios.bin", real);
     if (!access(buf, R_OK)) return buf;
     snprintf(buf, cap, "%s/../../../bios/openbios/openbios.bin", real);
+    if (!access(buf, R_OK)) return buf;
+    snprintf(buf, cap, "%s/../../../../bios/openbios/openbios.bin", real);
     return access(buf, R_OK) ? NULL : buf;
 }
 
