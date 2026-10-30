@@ -65,6 +65,20 @@ The lockstep comparison, `ps1_lockstep_frame` in [lockstep.c](../runtime/lockste
 
 OpenBIOS is recompiled too, in each build of the host and of the tests ([its page](../bios/openbios/README.md#as-native-code)). `tools/capture.c` runs it in the interpreter for 60 frames and keeps RAM and the addresses the CPU called or jumped to through a register, which `tools/codegen.py --bios --capture` analyzes beside the ROM. `t_lockstep` runs it from reset into its shell, 50 frames, in lockstep with the interpreter at every block: 6,504 of its 4,286,852 instructions are interpreted, and the ps1-tests programs, run with both their own native code and OpenBIOS's, interpret under 1% of theirs, but for `gte/test-all`, whose own jumps through registers no capture has given yet. The host runs OpenBIOS natively unless `--interpret` is given: 300 frames headless take 0.65 seconds instead of 1.31, to the same frame hash, and `--headless --lockstep` runs an interpreting machine beside it, comparing them at block ends 64 cycles apart and stopping at the first difference (exit code 3). The generated C of OpenBIOS is 1.6 MB; with every instruction inlined, clang instrumenting it for AddressSanitizer took minutes, so the sanitized build leaves the inlining to the compiler ([cpu_ops.h](../runtime/cpu_ops.h)), and `make -C runtime/tests asan` takes 76 seconds from clean at `-j3`.
 
+`scripts/native_game.py <disc.cue> [--profile <game.toml>] [--frames <n>] [--input <frame>:<hex-buttons>]` makes a game native on the Mac it runs on, the last step of phase 3. It finds the profile by the serial in the boot executable's name and checks the executable's SHA-256 against it, then:
+
+1. Builds the host and runs the profile's route with the game interpreted and `--capture` (OpenBIOS stays native, so the capture is the game's).
+2. Generates the game's native code from the boot executable, the capture and the profile's `[analysis]` hints, split into files of about 20,000 instructions (`--max-ops`), and builds a host with it (`make -C shell/mac game`, into `shell/mac/build/game`).
+3. Runs the route again in lockstep with an interpreting machine, which must agree to the end on the same frame hash, and times it natively and interpreted.
+
+The capture, the generated C and that host hold the game's code: they stay in `shell/mac/build` (AGENTS.md: no game data). When the route no longer ends on the profile's hash, because the runtime has changed since the route was recorded, the script says so and keeps the last frame as `shell/mac/build/gen/route.png` to look at locally. On a disc built from `gpu/triangle` in a scratch folder:
+
+- 79 addresses captured, 72 functions generated.
+- The 900-frame route agrees in lockstep over 5,411,542 stops.
+- 0.46% of instructions are interpreted, and the route runs in 1.6 seconds instead of 3.1.
+
+That run also found two things, now fixed in the tools: the capture's RAM can hold long zeroed areas where a program ran before, which the analysis would decode as NOPs, so 64 zero words in a row end a run of code ([analyze.py](../tools/analyze.py)); and one C file for a whole program can exhaust the compiler's memory, so the C is split. `t_lockstep` builds `gpu/triangle` from four such files.
+
 ## Continuous integration
 
 `.github/workflows/tests.yml` runs on every pull request and push to `main`, on GitHub's `xcode-27` macOS image with Xcode 27.1 named by path in `DEVELOPER_DIR` (a new default Xcode on the image does not move CI): the runtime's unit tests, plain and under ASan and UBSan; the tool tests; and the Mac app, built, packed and checked (`plutil -lint`, `codesign --verify --strict`, the hardened runtime flag, `lipo -archs`), then run without a window from inside the bundle, which boots the OpenBIOS in its Resources.

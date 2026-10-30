@@ -41,7 +41,10 @@ endef
 $(eval $(call native_exe,cop,cpu/cop/cop.exe))
 $(eval $(call native_exe,test_all,gte/test-all/test-all.exe))
 $(eval $(call native_exe,otc_test,dma/otc-test/otc-test.exe))
-$(eval $(call native_exe,triangle,gpu/triangle/triangle.exe))
+# gpu/triangle's is split into files of about 400 instructions, as a game's is (scripts/native_game.py), so that the split's C links and runs here too
+$(B)/gen/triangle/triangle.c: $(TESTS_DIR)/ps1-tests/gpu/triangle/triangle.exe $(CODEGEN)
+	@mkdir -p $(@D)
+	python3 $(TOOLS)/codegen.py $< --name triangle -o $@ --max-ops 400
 
 # OpenBIOS's native code: the capture runs it in the interpreter to its shell, for the RAM it copies its kernel and shell into and the functions it reaches there
 $(B)/capture: $(TOOLS)/capture.c $(OBJ) Makefile
@@ -51,10 +54,10 @@ $(B)/gen/openbios.cap.txt: $(B)/capture $(BIOS)
 	$(B)/capture $(BIOS) 60 $(B)/gen/openbios.cap
 $(B)/gen/openbios.c: $(B)/gen/openbios.cap.txt $(CODEGEN)
 	python3 $(TOOLS)/codegen.py $(BIOS) --bios --capture $(B)/gen/openbios.cap --name openbios -o $@
-LOCKSTEP_GEN = $(addprefix $(B)/gen/,openbios.c cop.c test_all.c otc_test.c triangle.c)
+LOCKSTEP_GEN = $(addprefix $(B)/gen/,openbios.c cop.c test_all.c otc_test.c triangle/triangle.c)
 
 $(B)/t_lockstep: t_lockstep.c $(LOCKSTEP_GEN) $(OBJ) Makefile
-	clang $(CFLAGS) -DBIOS_PATH='"$(BIOS)"' -DTESTS_DIR='"$(TESTS_DIR)"' -o $@ t_lockstep.c $(LOCKSTEP_GEN) $(OBJ)
+	clang $(CFLAGS) -DBIOS_PATH='"$(BIOS)"' -DTESTS_DIR='"$(TESTS_DIR)"' -o $@ t_lockstep.c $(filter-out %/triangle.c,$(LOCKSTEP_GEN)) $(B)/gen/triangle/*.c $(OBJ)
 
 asan:
 	ASAN_OPTIONS=halt_on_error=1:detect_stack_use_after_return=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \

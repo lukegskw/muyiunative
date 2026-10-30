@@ -13,6 +13,9 @@ from dataclasses import dataclass, field
 import exe, mips
 
 EXITS = ('fall', 'branch', 'jump', 'call', 'tail', 'return', 'switch', 'indirect', 'exception', 'stop')
+# A compiler puts a NOP (the zero word) in a delay slot or after a load, rarely more than a few in a row: a longer run is zero-filled memory, code that is gone (a
+# capture's RAM where a program loaded later cleared what ran there) or never was, and decoding it would make a function of it
+ZEROS = 64
 
 
 @dataclass
@@ -48,10 +51,12 @@ def analyze(word, entries, hints=None):   # word(address) -> the 32-bit word the
     def explore(f, starts):   # the code reachable from f inside its function: each word decoded (delay slots too), the words scanned from a block's start,
         insns, scanned, leaders, ends, calls, work = {}, set(), {f}, {}, set(), [f]   # the block leaders, how each run of code ends, and the calls made
         while work:
-            a = work.pop()
+            a, zeros = work.pop(), 0
             while a not in scanned:
                 w = code(a)
                 if w is None: note(f'{a:08x}: no code here (data, or outside the image)'); break
+                zeros = zeros + 1 if w == 0 else 0
+                if zeros > ZEROS: note(f'{a - 4 * ZEROS:08x}: {ZEROS} zero words in a row: memory, not code'); break
                 op = insns[a] = mips.decode(w); scanned.add(a)
                 if op.delay_slot:
                     d = code(a + 4)

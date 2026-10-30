@@ -34,10 +34,25 @@ $(GEN)/openbios.cap.txt: $(B)/capture $(BIOS)/openbios.bin
 $(GEN)/openbios.c: $(GEN)/openbios.cap.txt $(CODEGEN)
 	python3 $(TOOLS)/codegen.py $(BIOS)/openbios.bin --bios --capture $(GEN)/openbios.cap --name openbios -o $@
 
+# A game's host (scripts/native_game.py): GAME_C is the native code tools/codegen.py wrote for it, set native_game, in build/gen: one file, or the tables and the files of
+# functions it was split into, each compiled on its own (make -j). It goes to build/game, apart from the host above, and like the C it is built from it holds the game's
+# code: it stays on the Mac that built it
+GAME_C ?=
+GAME_O = $(patsubst %.c,$(B)/game/%.o,$(notdir $(GAME_C)))
+game: $(B)/game/ps1native
+
+$(B)/game/%.o: $(GEN)/%.c $(HDR) Makefile
+	@mkdir -p $(@D)
+	clang $(CFLAGS) -c -o $@ $<
+
+$(B)/game/ps1native: $(SRC) $(HDR) $(GAME_O) Makefile
+	@test -n "$(GAME_C)" || { echo "make game needs GAME_C=<the game's generated C, in build/gen>" >&2; exit 1; }
+	clang $(CFLAGS) -DNATIVE_GAME -o $@ $(SRC) $(GAME_O) $(FRAMEWORKS)
+
 app: $(B)/ps1native $(wildcard $(BIOS)/*)
 	python3 ../../tools/pack_app.py $(B)/ps1native.app --exe $(B)/ps1native --resource $(BIOS)
 
 clean:
 	rm -rf $(B)
 
-.PHONY: host app clean
+.PHONY: host app game clean
