@@ -113,8 +113,8 @@ int main(void) {
     fresh(); m->cpu.r[1] = 0x80002000; mem_write32(m, 0x80002000, 0x11223344); dw(12, 1); dw(13, 2); dw(14, 3);
     RUN(I(0x32, 1, 15, 0), I(0x3a, 1, 15, 4));
     CHECK(D[12] == 2 && D[13] == 3 && mem_read32(m, 0x80002004) == 0x11223344, "LWC2/SWC2 use SXYP push and mirror semantics");
-    fresh(); irs(2, 3, 4); RUN(0x4a000028, M2(0, 2, 25), 0);
-    CHECK(m->cpu.r[2] == 4 && D[26] == 9 && D[27] == 16 && m->cycles >= 9, "COP2 command dispatch and dependent MFC2 interlock execute through interpreter");
+    fresh(); irs(2, 3, 4); RUN(0x4a000028, M2(0, 2, 25), 0);   // cached: a cycle each, and MFC2 waits out SQR's 5
+    CHECK(m->cpu.r[2] == 4 && D[26] == 9 && D[27] == 16 && m->cycles == 7, "COP2 command dispatch and dependent MFC2 interlock execute through interpreter");
     ps1 *other = ps1_new(); CHECK(other && !other->cpu.cop2d[25] && !other->cpu.gte_busy && D[25] == 4, "GTE registers and deadlines are independent per machine"); ps1_free(other);
     printf("gte: %d checks, %d failed\n", checks, fails); ps1_free(m); return fails != 0;
 }

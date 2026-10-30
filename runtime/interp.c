@@ -1,7 +1,9 @@
 // The R3000A interpreter (psx-spx, CPU Specifications; the MIPS I instruction set): one instruction per step. A loaded register reaches the CPU one instruction late (the
 // load delay slot: the next instruction still sees the old value, and its own write to that register wins), LWL/LWR merge with a load in flight, and the instruction after
 // a branch or jump runs before the branch takes effect (the branch delay slot). Interrupts are taken between instructions. COP2 reaches the GTE, including its register
-// side effects and busy interlocks. This interpreter is the reference the recompiled code is checked against (AGENTS.md)
+// side effects and busy interlocks. An instruction takes the cycles of its fetch, plus a load's wait (mem.c); MULT and DIV run on beside the CPU, 6, 9 or 13 cycles
+// by the size of rs and 36, and MFHI/MFLO wait for them (psx-spx, CPU Specifications, Multiply/divide). This interpreter is the reference the recompiled code is
+// checked against (AGENTS.md)
 #include "ps1.h"
 
 #define RS (op >> 21 & 31)
@@ -23,14 +25,20 @@ static void unusable(ps1 *m, uint32_t cop) { cpu_exception(m, EXC_CPU); m->cpu.c
 // commands (the hardware log of ps1-tests cpu/cop); what else they do is not known, so here they do nothing
 static void no_effect(ps1 *m, uint32_t op) { RED_ONCE(m, RED_COP0, "cpu: coprocessor instruction %08x at %08x has no documented effect: nothing done", op, m->cpu.cur_pc); }
 
+static unsigned mult_cycles(uint32_t rs, int sign) {   // a negative rs counts by its complement: FFFFF800h is as fast as 7FFh
+    uint32_t v = sign && (int32_t)rs < 0 ? ~rs : rs;
+    return v < 0x800 ? 6 : v < 0x100000 ? 9 : 13;
+}
+
 void cpu_step(ps1 *m) {
     ps1_cpu *c = &m->cpu;
     uint32_t *c0 = c->cop0, op;
-    m->cycles += CPU_CPI;
     c->delay = c->branch; c->branch = 0; c->cur_pc = c->pc;
-    if ((c0[C0_SR] & 1) && (c0[C0_SR] & c0[C0_CAUSE] & 0xff00)) { cpu_exception(m, EXC_INT); return; }
-    if (c->pc & 3) { addr_error(m, c->pc, EXC_ADEL); return; }
-    if (!mem_fetch(m, c->pc, &op)) { cpu_exception(m, EXC_IBE); return; }
+    if ((c0[C0_SR] & 1) && (c0[C0_SR] & c0[C0_CAUSE] & 0xff00)) { m->cycles++; cpu_exception(m, EXC_INT); return; }
+    if (c->pc & 3) { m->cycles++; addr_error(m, c->pc, EXC_ADEL); return; }
+    if (!mem_fetch(m, c->pc, &op)) { m->cycles++; cpu_exception(m, EXC_IBE); return; }
+    unsigned fetch = mem_fetch_cycles(c->pc);
+    m->cycles += fetch;
     c->pc = c->next_pc; c->next_pc += 4;
     uint32_t ld_r = c->ld_r, ld_v = c->ld_v, s = c->r[RS], t = c->r[RT], a = s + SIMM;   // the previous load lands after this instruction
     c->ld_r = 0;
@@ -38,6 +46,8 @@ void cpu_step(ps1 *m) {
 #define W(d, x) do { uint32_t d_ = (d), x_ = (x); if (d_) { c->r[d_] = x_; if (d_ == ld_r) ld_r = 0; } } while (0)
 #define LOAD(d, x) do { uint32_t d_ = (d), x_ = (x); if (d_) { c->ld_r = d_; c->ld_v = x_; } } while (0)
 #define BRANCH(cond) do { if (cond) c->next_pc = c->pc + (SIMM << 2); c->branch = 1; } while (0)
+#define WAIT(n) (m->cycles += mem_load_cycles(a, n) - 1)   // before the read, so a device sees the time its data leaves
+#define HILO() do { if (m->cycles - fetch < c->hilo_busy) m->cycles = c->hilo_busy + fetch; } while (0)
     switch (op >> 26) {
     case 0x00:
         switch (op & 0x3f) {
@@ -51,18 +61,19 @@ void cpu_step(ps1 *m) {
         case 0x09: W(RD, c->pc + 4); c->next_pc = s; c->branch = 1; break;
         case 0x0c: cpu_exception(m, EXC_SYS); break;
         case 0x0d: cpu_exception(m, EXC_BP); break;
-        case 0x10: W(RD, c->hi); break;
+        case 0x10: HILO(); W(RD, c->hi); break;
         case 0x11: c->hi = s; break;
-        case 0x12: W(RD, c->lo); break;
+        case 0x12: HILO(); W(RD, c->lo); break;
         case 0x13: c->lo = s; break;
-        case 0x18: { int64_t p = (int64_t)(int32_t)s * (int32_t)t; c->lo = (uint32_t)p; c->hi = (uint32_t)((uint64_t)p >> 32); break; }
-        case 0x19: { uint64_t p = (uint64_t)s * t; c->lo = (uint32_t)p; c->hi = (uint32_t)(p >> 32); break; }
+        case 0x18: { int64_t p = (int64_t)(int32_t)s * (int32_t)t; c->lo = (uint32_t)p; c->hi = (uint32_t)((uint64_t)p >> 32); c->hilo_busy = m->cycles + mult_cycles(s, 1); break; }
+        case 0x19: { uint64_t p = (uint64_t)s * t; c->lo = (uint32_t)p; c->hi = (uint32_t)(p >> 32); c->hilo_busy = m->cycles + mult_cycles(s, 0); break; }
         case 0x1a:   // division by zero and the one overflowing case give fixed results (psx-spx, CPU Arithmetic Opcodes)
             if (!t) { c->hi = s; c->lo = (int32_t)s < 0 ? 1 : 0xffffffff; }
             else if (s == 0x80000000 && t == 0xffffffff) { c->hi = 0; c->lo = 0x80000000; }
             else { c->lo = (uint32_t)((int32_t)s / (int32_t)t); c->hi = (uint32_t)((int32_t)s % (int32_t)t); }
+            c->hilo_busy = m->cycles + 36;
             break;
-        case 0x1b: if (!t) { c->hi = s; c->lo = 0xffffffff; } else { c->lo = s / t; c->hi = s % t; } break;
+        case 0x1b: if (!t) { c->hi = s; c->lo = 0xffffffff; } else { c->lo = s / t; c->hi = s % t; } c->hilo_busy = m->cycles + 36; break;
         case 0x20: { int32_t r; if (__builtin_add_overflow((int32_t)s, (int32_t)t, &r)) cpu_exception(m, EXC_OV); else W(RD, (uint32_t)r); break; }
         case 0x21: W(RD, s + t); break;
         case 0x22: { int32_t r; if (__builtin_sub_overflow((int32_t)s, (int32_t)t, &r)) cpu_exception(m, EXC_OV); else W(RD, (uint32_t)r); break; }
@@ -114,12 +125,13 @@ void cpu_step(ps1 *m) {
         }
         break;
     case 0x11: case 0x13: if (c0[C0_SR] >> (28 + (op >> 26 & 3)) & 1) no_effect(m, op); else unusable(m, op >> 26 & 3); break;
-    case 0x20: LOAD(RT, (uint32_t)(int8_t)mem_read8(m, a)); break;
-    case 0x21: if (a & 1) addr_error(m, a, EXC_ADEL); else LOAD(RT, (uint32_t)(int16_t)mem_read16(m, a)); break;
-    case 0x23: if (a & 3) addr_error(m, a, EXC_ADEL); else LOAD(RT, mem_read32(m, a)); break;
-    case 0x24: LOAD(RT, mem_read8(m, a)); break;
-    case 0x25: if (a & 1) addr_error(m, a, EXC_ADEL); else LOAD(RT, mem_read16(m, a)); break;
+    case 0x20: WAIT(1); LOAD(RT, (uint32_t)(int8_t)mem_read8(m, a)); break;
+    case 0x21: if (a & 1) addr_error(m, a, EXC_ADEL); else { WAIT(2); LOAD(RT, (uint32_t)(int16_t)mem_read16(m, a)); } break;
+    case 0x23: if (a & 3) addr_error(m, a, EXC_ADEL); else { WAIT(4); LOAD(RT, mem_read32(m, a)); } break;
+    case 0x24: WAIT(1); LOAD(RT, mem_read8(m, a)); break;
+    case 0x25: if (a & 1) addr_error(m, a, EXC_ADEL); else { WAIT(2); LOAD(RT, mem_read16(m, a)); } break;
     case 0x22: case 0x26: {   // LWL / LWR: the bytes of an unaligned word on each side of a word boundary, merged into rt
+        WAIT(4);
         uint32_t w = mem_read32(m, a & ~3u), cur = ld_r == RT ? ld_v : t, sh = (a & 3) * 8;
         if (op >> 26 == 0x22) LOAD(RT, (cur & (0x00ffffffu >> sh)) | w << (24 - sh));
         else LOAD(RT, (cur & ~(0xffffffffu >> sh)) | w >> sh);
@@ -139,7 +151,7 @@ void cpu_step(ps1 *m) {
     case 0x32:
         if (!(c0[C0_SR] & 1u << 30)) unusable(m, 2);
         else if (a & 3) addr_error(m, a, EXC_ADEL);
-        else gte_write(m, RT, mem_read32(m, a), 0);
+        else { WAIT(4); gte_write(m, RT, mem_read32(m, a), 0); }
         break;
     case 0x3a:
         if (!(c0[C0_SR] & 1u << 30)) unusable(m, 2);
@@ -154,6 +166,8 @@ void cpu_step(ps1 *m) {
 #undef W
 #undef LOAD
 #undef BRANCH
+#undef WAIT
+#undef HILO
     if (ld_r) c->r[ld_r] = ld_v;
 }
 

@@ -13,7 +13,7 @@
 _Static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "the console and the host are both little-endian: memory is read and written as host integers");
 
 enum { RAM_SIZE = 2 << 20, SCRATCH_SIZE = 1 << 10, BIOS_SIZE = 512 << 10, SPU_RAM_SIZE = 512 << 10, VRAM_W = 1024, VRAM_H = 512 };
-enum { CPU_HZ = 33868800, CPU_CPI = 2 };   // CPU_CPI: cycles charged per instruction, an average until phase 3 counts them per block (plan.md, Main risks)
+enum { CPU_HZ = 33868800 };
 enum { IRQ_VBLANK, IRQ_GPU, IRQ_CDROM, IRQ_DMA, IRQ_TMR0, IRQ_TMR1, IRQ_TMR2, IRQ_SIO0, IRQ_SIO1, IRQ_SPU, IRQ_PIO };   // I_STAT bits (psx-spx, Interrupts)
 enum { C0_BADVADDR = 8, C0_SR = 12, C0_CAUSE = 13, C0_EPC = 14, C0_PRID = 15 };
 enum { EXC_INT = 0, EXC_ADEL = 4, EXC_ADES = 5, EXC_IBE = 6, EXC_DBE = 7, EXC_SYS = 8, EXC_BP = 9, EXC_RI = 10, EXC_CPU = 11, EXC_OV = 12 };   // CAUSE.Excode
@@ -24,7 +24,7 @@ typedef struct ps1_cpu {
     uint32_t ld_r, ld_v;   // the load in flight: it reaches its register after the next instruction (the load delay slot)
     int branch, delay;     // the instruction just run was a branch / the one running is in its delay slot
     uint32_t cop0[32], cop2d[32], cop2c[32];
-    uint64_t gte_busy;
+    uint64_t gte_busy, hilo_busy;   // the cycles at which the GTE's command and MULT/DIV's result are done (reading early waits)
 } ps1_cpu;
 
 typedef struct ps1_dma { uint32_t madr, bcr, chcr, addr, block_left, block_size, blocks; uint64_t left; int active; } ps1_dma;
@@ -106,6 +106,8 @@ void mem_write8(ps1 *m, uint32_t addr, uint32_t v);    // v: the whole register 
 void mem_write16(ps1 *m, uint32_t addr, uint32_t v);
 void mem_write32(ps1 *m, uint32_t addr, uint32_t v);
 int mem_fetch(ps1 *m, uint32_t addr, uint32_t *op);   // an instruction word; 0 where nothing executable is mapped (a bus error)
+unsigned mem_load_cycles(uint32_t addr, unsigned n);   // the CPU cycles a load of n bytes takes, its instruction's included
+unsigned mem_fetch_cycles(uint32_t pc);              // the CPU cycles fetching the instruction at pc takes
 void irq_raise(ps1 *m, int n);
 void irq_update(ps1 *m);                        // CAUSE.IP2 follows I_STAT AND I_MASK
 

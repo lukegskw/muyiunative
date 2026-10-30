@@ -17,7 +17,8 @@ static int checks, fails;
 #define CHECK(c, ...) do { checks++; if (!(c)) { fails++; fprintf(stderr, "FAIL: " __VA_ARGS__); fputc('\n', stderr); } } while (0)
 
 typedef struct { int x, y, w, h; } area;
-// frames: a log program's limit, a drawing program's run. extra: lines the release's program prints that its console log predates, from tests added later. Two
+// frames: a log program's limit, a drawing program's run, both from reset; OpenBIOS reaches its shell, where the program starts, at frame 37, most of it spent in the
+// uncached ROM. extra: lines the release's program prints that its console log predates, from tests added later. Two
 // areas are left out: gpu/lines draws two polylines with a fourth colour it never sets (its source sets the third one twice), and outside transparency's 320x240
 // picture the console's VRAM holds what was there before
 static const struct { const char *exe, *log, *extra; int frames; area at, skip[2]; uint64_t hash; } programs[] = {
@@ -28,17 +29,17 @@ static const struct { const char *exe, *log, *extra; int frames; area at, skip[2
     {"gpu/mask-bit/mask-bit.exe", "gpu/mask-bit/psx.log", "", 300, {0}, {{0}}, 0},
     {"dma/otc-test/otc-test.exe", "dma/otc-test/psx.log", "pass - testOtcBigTransfer\npass - testOtcControlBitsAfterTransferWithChopping\n", 300, {0}, {{0}}, 0},
     {"dma/dpcr/dpcr.exe", "dma/dpcr/psx.log", "", 300, {0}, {{0}}, 0},
-    {"gpu/triangle/triangle.exe", NULL, NULL, 60, {0, 0, VRAM_W, VRAM_H}, {{0}}, 0xa1c558a466507d56},
-    {"gpu/quad/quad.exe", NULL, NULL, 60, {0, 0, VRAM_W, VRAM_H}, {{0}}, 0x6f3c652377236b65},
-    {"gpu/uv-interpolation/uv-interpolation.exe", NULL, NULL, 60, {0, 0, VRAM_W, VRAM_H}, {{0}}, 0xb61825f4d5bba173},
-    {"gpu/rectangles/rectangles.exe", NULL, NULL, 60, {0, 0, VRAM_W, VRAM_H}, {{0}}, 0x36ae789d0f519b54},
-    {"gpu/texture-flip/texture-flip.exe", NULL, NULL, 60, {0, 0, VRAM_W, VRAM_H}, {{0}}, 0x714cf7b7ac9b668f},
-    {"gpu/texture-overflow/texture-overflow.exe", NULL, NULL, 60, {0, 0, VRAM_W, VRAM_H}, {{0}}, 0x7096f4fdf06e3ed9},
-    {"gpu/vram-to-vram-overlap/vram-to-vram-overlap.exe", NULL, NULL, 60, {0, 0, VRAM_W, VRAM_H}, {{0}}, 0x0cf90a98cd6a505d},
-    {"gpu/clut-cache/clut-cache.exe", NULL, NULL, 60, {0, 0, VRAM_W, VRAM_H}, {{0}}, 0x76d31cd6324668a7},
-    {"gpu/clipping/clipping.exe", NULL, NULL, 60, {0, 0, VRAM_W, VRAM_H}, {{0}}, 0xd2848b88ad6376a5},
-    {"gpu/lines/lines.exe", NULL, NULL, 60, {0, 0, VRAM_W, VRAM_H}, {{150, 140, 33, 33}, {210, 140, 33, 33}}, 0x713eb4cec1b8f58f},
-    {"gpu/transparency/transparency.exe", NULL, NULL, 60, {0, 0, 320, 240}, {{0}}, 0x42d2ac766c753f25},
+    {"gpu/triangle/triangle.exe", NULL, NULL, 100, {0, 0, VRAM_W, VRAM_H}, {{0}}, 0xa1c558a466507d56},
+    {"gpu/quad/quad.exe", NULL, NULL, 100, {0, 0, VRAM_W, VRAM_H}, {{0}}, 0x6f3c652377236b65},
+    {"gpu/uv-interpolation/uv-interpolation.exe", NULL, NULL, 100, {0, 0, VRAM_W, VRAM_H}, {{0}}, 0xb61825f4d5bba173},
+    {"gpu/rectangles/rectangles.exe", NULL, NULL, 100, {0, 0, VRAM_W, VRAM_H}, {{0}}, 0x36ae789d0f519b54},
+    {"gpu/texture-flip/texture-flip.exe", NULL, NULL, 100, {0, 0, VRAM_W, VRAM_H}, {{0}}, 0x714cf7b7ac9b668f},
+    {"gpu/texture-overflow/texture-overflow.exe", NULL, NULL, 100, {0, 0, VRAM_W, VRAM_H}, {{0}}, 0x7096f4fdf06e3ed9},
+    {"gpu/vram-to-vram-overlap/vram-to-vram-overlap.exe", NULL, NULL, 100, {0, 0, VRAM_W, VRAM_H}, {{0}}, 0x0cf90a98cd6a505d},
+    {"gpu/clut-cache/clut-cache.exe", NULL, NULL, 100, {0, 0, VRAM_W, VRAM_H}, {{0}}, 0x76d31cd6324668a7},
+    {"gpu/clipping/clipping.exe", NULL, NULL, 100, {0, 0, VRAM_W, VRAM_H}, {{0}}, 0xd2848b88ad6376a5},
+    {"gpu/lines/lines.exe", NULL, NULL, 100, {0, 0, VRAM_W, VRAM_H}, {{150, 140, 33, 33}, {210, 140, 33, 33}}, 0x713eb4cec1b8f58f},
+    {"gpu/transparency/transparency.exe", NULL, NULL, 100, {0, 0, 320, 240}, {{0}}, 0x42d2ac766c753f25},
 };
 
 typedef struct { char **line; int n, cap; } lines;
