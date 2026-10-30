@@ -6,7 +6,7 @@ The aim is native code, not emulation: the game's MIPS code is translated to C a
 
 ## Status
 
-Phase 2 of [the plan](plan.md#4-phases-and-exit-criteria) has met its exit criterion: the CPU/GTE/GPU homebrew tests pass, and Metal Slug X (USA) reaches its title/menu screen on the interpreter. CD-ROM data reads, textures, GTE, SPU audio and reverb, MDEC, digital controllers and memory-card protocols have synthetic tests. Gameplay, broader compatibility and hardware timing accuracy still need validation.
+Phase 2 of [the plan](plan.md#4-phases-and-exit-criteria), hardware breadth: the interpreter has the CD-ROM drive with its audio, the full software GPU, the GTE, the SPU, the MDEC, digital pads and memory cards, and passes the hardware test programs of [ps1-tests](tests/ps1-tests/README.md) in CI. Metal Slug X (USA) reached its title menu on the interpreter before the latest changes to drawing, the CD-ROM and the timers, and is to reach it again before phase 3. Gameplay, broader compatibility and timing accuracy still need validation.
 
 ## Build from the command line
 
@@ -31,7 +31,7 @@ The keyboard controls a digital pad in port 1: arrows for the D-pad; Z/X/A/S for
 
 ### Acknowledgements
 
-ps1native takes its build, its Mac front end and its rules for contributors and agents from **[nxnative](https://github.com/seedds/nxnative)** (MIT), which runs Switch games natively on Apple platforms. The console's hardware is modelled from **[psx-spx](https://psx-spx.consoledev.net/)**, the public PlayStation specifications. The BIOS is **OpenBIOS** from [nugget](https://github.com/pcsx-redux/nugget) (MIT), by the PCSX-Redux authors.
+ps1native takes its build, its Mac front end and its rules for contributors and agents from **[nxnative](https://github.com/seedds/nxnative)** (MIT), which runs Switch games natively on Apple platforms. The console's hardware is modelled from **[psx-spx](https://psx-spx.consoledev.net/)**, the public PlayStation specifications. The BIOS is **OpenBIOS** from [nugget](https://github.com/pcsx-redux/nugget) (MIT), by the PCSX-Redux authors. The hardware test programs are **[ps1-tests](https://github.com/JaCzekanski/ps1-tests)** (MIT) by Jakub Czekański, built with [PSn00bSDK](https://github.com/Lameguy64/PSn00bSDK) (MPL-2.0).
 
 ### License
 

@@ -53,6 +53,7 @@ flowchart LR
 ```
 ps1native/            (working name)
   tools/              Python: disc, exe, analyze, codegen, capture, package
+  scripts/            Python, run by the user: disc_info (what identifies a disc in its profile)
   runtime/            C: cpu, interp, mem, gte, gpu_sw, spu, cdrom, mdec, sio, sched
   gfx/metal/          Metal presentation, later the hardware renderer
   shell/mac/  shell/ios/
@@ -64,7 +65,7 @@ ps1native/            (working name)
 
 ## 4. Phases and exit criteria
 
-Phases 0–2 have met their exit criteria. Phase 2 was checked on 2026-10-30 with the repository-owned CPU/GTE/GPU programs and a local title/main-menu run of the [first game](profiles/SLUS-01212/game.toml). [Development](docs/development.md#phase-2-hardware-breadth) records the checks and remaining accuracy/compatibility gaps. Phase 3 is next.
+Phases 0 and 1 have met their exit criteria. In phase 2 the homebrew tests pass in CI: the hardware test programs of [ps1-tests](tests/ps1-tests/README.md). The [first game](profiles/SLUS-01212/game.toml) reached its title menu on 2026-10-30; drawing, the CD-ROM and the timers have changed since, so it is to reach it again before phase 3 starts. [Development](docs/development.md#phase-2-hardware-breadth) records the checks and the remaining gaps.
 
 | #   | Phase                                                                                                                                                                                                 | Done when                                                                                   |
 | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
@@ -92,7 +93,7 @@ Phases 0–2 have met their exit criteria. Phase 2 was checked on 2026-10-30 wit
 ## 6. Testing
 
 - **Instruction tests**: each MIPS instruction checked in recompiled form against the interpreter.
-- **Homebrew test programs in CI**: the repository-owned CPU/GTE/GPU programs are emitted from MIPS instruction encodings and run through the interpreter without an SDK. External homebrew suites can extend coverage; check each license.
+- **Homebrew test programs in CI**: built with homebrew SDKs; check each license.
 - **Lockstep comparison**: run recompiled code and the interpreter side by side and compare registers and memory after each call.
 - **Frame hashes**: screenshots stay local, only hashes go in the repo. An external emulator can be run separately for comparison (black box, never linked).
 
@@ -123,4 +124,6 @@ Dump it with an accurate ripping tool (e.g. redumper) to `.cue`/`.bin`.
 | Python tools: standard library, unittest, ruff (bug rules) and pyright; not a package       | pytest, a formatter, a pip package      | They run in place, with no install                                                             |
 | Apple silicon, macOS 14 or later                                                            | Intel Macs, universal binaries          | One architecture to build and test, as on GitHub's runners                                     |
 | OpenBIOS committed as a binary, built from source (its commit and hash in bios/openbios)    | Build it from a submodule; download it  | Building it needs Docker, beyond Xcode and Python; CI's macOS runners have none                |
-| [Metal Slug X (USA), SLUS-01212](profiles/SLUS-01212/game.toml) as the first game             | The puzzle games suggested above       | User's choice; its dump stays outside the repository                                           |
+| [Metal Slug X (USA), SLUS-01212](profiles/SLUS-01212/game.toml) as the first game           | The puzzle games suggested above        | User's choice; its dump stays outside the repository                                           |
+| [ps1-tests](tests/ps1-tests/README.md) (MIT) as the homebrew test programs, as released     | Build them in CI; write our own only    | Building needs a MIPS toolchain and PSn00bSDK; the SDK's libraries in them are MPL-2.0         |
+| A disc's licence string (sector 4) stands in for the SCEx string a BIN lacks                | Every disc unlicensed, or all accepted  | Games read their region from GetID; an unlicensed disc is refused, as a console does           |
