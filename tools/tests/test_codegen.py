@@ -62,6 +62,15 @@ class Codegen(unittest.TestCase):
         self.assertEqual(codegen.runs(self.prog.functions[B]), [[0x80010000, 0x80010028]])
         self.assertIn('static const uint32_t r80010028[][2] = {{0x80010028u, 0x80010030u}};', self.c)
 
+    def test_split(self):   # files of functions with exported names, and a last one with the tables, which declares them
+        files = codegen.generate_split(self.word, self.prog, 'demo', 4)
+        self.assertEqual(len(files), 3, 'each of the two functions fills a file of its own, then the tables')
+        self.assertIn('void demo_f80010000(ps1 *m) {', files[0])
+        self.assertIn('const uint32_t demo_r80010028[][2] = {{0x80010028u, 0x80010030u}};', files[1])
+        self.assertIn('void demo_f80010028(ps1 *m); extern const uint32_t demo_r80010028[][2], demo_w80010028[];', files[2])
+        self.assertIn('    {demo_f80010000, 0x80010000u, demo_r80010000, 1, demo_w80010000},', files[2])
+        self.assertNotIn('static void', ''.join(files))
+
     def test_names_match_the_runtime(self):
         listed = re.search(r'#define CPU_OPS\(X\)(.*?)\nenum', (ROOT / 'runtime' / 'cpu_ops.h').read_text(), re.S)
         self.assertIsNotNone(listed, 'runtime/cpu_ops.h lists its instructions in CPU_OPS')

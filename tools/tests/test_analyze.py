@@ -188,6 +188,11 @@ class Analyze(unittest.TestCase):
         self.assertEqual(fns[0x38], [(0x38, 0x3c, 'stop', (), None)])
         self.assertIn('8001003c: no code here (data, or outside the image)', notes)
 
+    def test_zeros_are_not_code(self):   # a function running into zero-filled memory: the zero word is a NOP, but not 65 in a row
+        fns, notes, _ = run('start:\n    addiu v0, zero, 1\n' + '    nop\n' * 200 + '    jr ra\n    nop\n')
+        self.assertEqual(fns, {0x00: [(0x00, 0x04 + 4 * analyze.ZEROS, 'stop', (), None)]})
+        self.assertEqual(notes, [f'{B + 4:08x}: {analyze.ZEROS} zero words in a row: memory, not code'])
+
     def test_profile_and_command_line(self):
         tmp = Path(tempfile.mkdtemp())
         try:

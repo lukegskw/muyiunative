@@ -81,7 +81,7 @@ typedef struct ps1 {
     ps1_mdec mdec;
     char tty[256]; int ntty;         // the debug console line being written (0x1F802080)
     void (*tty_out)(void *ctx, const char *line); void *tty_ctx;   // where finished debug console lines go: stderr when NULL
-    void (*on_step)(struct ps1 *m, uint32_t pc, uint32_t op); void *step_ctx;   // the host's, told of each interpreted instruction after it ran (tools/capture.c)
+    void (*on_step)(struct ps1 *m, uint32_t pc, uint32_t op); void *step_ctx;   // the host's, told of each interpreted instruction after it ran (capture.c)
     uint8_t *exe; size_t exe_n;      // a PS-X EXE waiting for the BIOS to reach its shell (exe.c)
     const ps1_native_set *native[4]; int nnative;   // the native code this machine runs where memory holds the code it was made from (native.c)
     uint64_t native_runs, interp_steps;   // entries into native code from the dispatcher, and instructions interpreted: how much runs native
@@ -133,6 +133,11 @@ int native_run(ps1 *m);                         // runs native code from the CPU
 // `step` cycles on (0 or 1: every block); the CPU is compared at each stop, all memory and the devices every full_every stops (0: only at the end of each frame)
 typedef struct ps1_lockstep { uint64_t stops; unsigned step, full_every; char report[400]; } ps1_lockstep;
 int ps1_lockstep_frame(ps1 *ref, ps1 *nat, ps1_lockstep *ls);   // one frame in step: 0 while they agree, else -1 with the first difference in ls->report
+
+// The capture (capture.c): the addresses the interpreted code calls or jumps to through a register, and RAM, for tools/codegen.py --capture; the host's, not the machine's
+typedef struct ps1_capture { uint32_t *a; size_t n, cap; int failed; } ps1_capture;
+void ps1_capture_start(ps1 *m, ps1_capture *c);   // from now on (it takes on_step)
+int ps1_capture_write(const ps1 *m, ps1_capture *c, const char *out);   // <out>.txt and <out>.ram; 0, or -1 after a [RED] line
 
 // The devices, each by its register offset
 void sched_run(ps1 *m);                         // runs the events that are due (sched.c)

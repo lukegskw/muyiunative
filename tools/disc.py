@@ -111,10 +111,14 @@ def boot(track):   # the executable a data track boots: its path as SYSTEM.CNF n
     return name, read(track, *exe)
 
 
+def serial(name):   # the serial in a boot executable's name (SLUS_012.12 -> SLUS-01212), or None
+    m = re.fullmatch(r'([A-Z]{4})[_-](\d{3})\.(\d{2})', re.split(r'[\\/]', name)[-1], re.I)
+    return f'{m.group(1).upper()}-{m.group(2)}{m.group(3)}' if m else None
+
+
 def identify(path):   # what scripts/disc_info.py prints
     ts = tracks(path); data = ts[0]
     name, exe = boot(data)
-    m = re.fullmatch(r'([A-Z]{4})[_-](\d{3})\.(\d{2})', re.split(r'[\\/]', name)[-1], re.I)
-    return {'serial': f'{m.group(1).upper()}-{m.group(2)}{m.group(3)}' if m else None, 'licence': licence(data), 'boot': name,
+    return {'serial': serial(name), 'licence': licence(data), 'boot': name,
             'boot_sha256': hashlib.sha256(exe).hexdigest(),
             'tracks': [{'number': t.number, 'mode': t.mode, 'sectors': t.end - t.first, 'sha256': sha256(t)} for t in ts]}

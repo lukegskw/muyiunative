@@ -27,6 +27,14 @@ The keyboard controls a digital pad in port 1: arrows for the D-pad; Z/X/A/S for
 
 OpenBIOS runs as native code, compiled with the app from its bundled binary; a game's own code is still interpreted until phase 3 is done. `--interpret` runs everything in the interpreter, and `--headless --lockstep` runs an interpreting machine beside the native one and stops at their first difference ([Development](docs/development.md#phase-3-the-recompiler)).
 
+To turn a game with a profile in `profiles/` into native code on your Mac, and check it against the interpreter along the profile's route:
+
+```sh
+scripts/native_game.py /external/path/disc.cue
+```
+
+It writes the game's code into `shell/mac/build`, where it stays: never commit or share it.
+
 ### For developers
 
 [Plan](plan.md) · [Development](docs/development.md) · [Contributing](CONTRIBUTING.md) · [Notes for agents](AGENTS.md)
