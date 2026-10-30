@@ -5,7 +5,7 @@
 void cpu_reset(ps1 *m) {
     ps1_cpu *c = &m->cpu;
     *c = (ps1_cpu){0};
-    c->pc = 0xbfc00000; c->next_pc = c->pc + 4;
+    c->pc = 0xbfc00000; c->next_pc = c->pc + 4; c->boundary = 1;
     c->cop0[C0_SR] = 1u << 22;   // BEV: exceptions vector into the BIOS until it sets up RAM
     c->cop0[C0_PRID] = 2;        // R3000A
     irq_update(m);
@@ -21,5 +21,5 @@ void cpu_exception(ps1 *m, uint32_t code) {
     c->cop0[C0_EPC] = c->delay ? c->cur_pc - 4 : c->cur_pc;
     c->pc = sr & 1u << 22 ? 0xbfc00180 : 0x80000080;
     c->next_pc = c->pc + 4;
-    c->branch = 0;
+    c->branch = 0; c->boundary = 1;   // the handler starts a block
 }

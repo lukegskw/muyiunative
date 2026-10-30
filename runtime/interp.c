@@ -1,181 +1,33 @@
-// The R3000A interpreter (psx-spx, CPU Specifications; the MIPS I instruction set): one instruction per step. A loaded register reaches the CPU one instruction late (the
-// load delay slot: the next instruction still sees the old value, and its own write to that register wins), LWL/LWR merge with a load in flight, and the instruction after
-// a branch or jump runs before the branch takes effect (the branch delay slot). Interrupts are taken between instructions. COP2 reaches the GTE, including its register
-// side effects and busy interlocks. An instruction takes the cycles of its fetch, plus a load's wait (mem.c); MULT and DIV run on beside the CPU, 6, 9 or 13 cycles
-// by the size of rs and 36, and MFHI/MFLO wait for them (psx-spx, CPU Specifications, Multiply/divide). This interpreter is the reference the recompiled code is
-// checked against (AGENTS.md)
-#include "ps1.h"
+// The R3000A interpreter (psx-spx, CPU Specifications; the MIPS I instruction set): one instruction per step, with the definitions of cpu_ops.h, which the native code
+// the tools generate shares (plan.md, phase 3). A loaded register reaches the CPU one instruction late (the load delay slot), LWL/LWR merge with a load in flight, and
+// the instruction after a branch or jump runs before the branch takes effect (the branch delay slot). COP2 reaches the GTE. An instruction takes the cycles of its fetch,
+// plus a load's wait (mem.c); MULT and DIV run on beside the CPU, and MFHI/MFLO wait for them. This interpreter is the reference native code is checked against
+// (AGENTS.md); cpu_run is the dispatcher between the two
+#include "cpu_ops.h"
 
-#define RS (op >> 21 & 31)
-#define RT (op >> 16 & 31)
-#define RD (op >> 11 & 31)
-#define SA (op >> 6 & 31)
-#define SIMM ((uint32_t)(int32_t)(int16_t)op)
-#define ZIMM (op & 0xffff)
-
-static void cop0_write(ps1 *m, uint32_t r, uint32_t v) {
-    uint32_t *c0 = m->cpu.cop0;
-    if (r == C0_CAUSE) c0[r] = (c0[r] & ~0x300u) | (v & 0x300);   // only the two software interrupt bits are writable
-    else if (r != C0_BADVADDR && r != C0_EPC && r != C0_PRID) c0[r] = v;
-}
-
-static void addr_error(ps1 *m, uint32_t a, uint32_t code) { m->cpu.cop0[C0_BADVADDR] = a; cpu_exception(m, code); }
-static void unusable(ps1 *m, uint32_t cop) { cpu_exception(m, EXC_CPU); m->cpu.cop0[C0_CAUSE] |= cop << 28; }
-// COP1 and COP3 do not exist, and COP0 has no TLB, yet with the coprocessor enabled in SR the hardware raises no exception for their instructions, LWCn/SWCn, or the TLB
-// commands (the hardware log of ps1-tests cpu/cop); what else they do is not known, so here they do nothing
-static void no_effect(ps1 *m, uint32_t op) { RED_ONCE(m, RED_COP0, "cpu: coprocessor instruction %08x at %08x has no documented effect: nothing done", op, m->cpu.cur_pc); }
-
-static unsigned mult_cycles(uint32_t rs, int sign) {   // a negative rs counts by its complement: FFFFF800h is as fast as 7FFh
-    uint32_t v = sign && (int32_t)rs < 0 ? ~rs : rs;
-    return v < 0x800 ? 6 : v < 0x100000 ? 9 : 13;
-}
-
-void cpu_step(ps1 *m) {
+void cpu_step(ps1 *m) {   // one instruction, or the exception its fetch raises: an address error for a misaligned PC, a bus error where nothing executable is mapped
     ps1_cpu *c = &m->cpu;
-    uint32_t *c0 = c->cop0, op;
-    c->delay = c->branch; c->branch = 0; c->cur_pc = c->pc;
-    if ((c0[C0_SR] & 1) && (c0[C0_SR] & c0[C0_CAUSE] & 0xff00)) { m->cycles++; cpu_exception(m, EXC_INT); return; }
-    if (c->pc & 3) { m->cycles++; addr_error(m, c->pc, EXC_ADEL); return; }
-    if (!mem_fetch(m, c->pc, &op)) { m->cycles++; cpu_exception(m, EXC_IBE); return; }
-    unsigned fetch = mem_fetch_cycles(c->pc);
-    m->cycles += fetch;
-    c->pc = c->next_pc; c->next_pc += 4;
-    uint32_t ld_r = c->ld_r, ld_v = c->ld_v, s = c->r[RS], t = c->r[RT], a = s + SIMM;   // the previous load lands after this instruction
-    c->ld_r = 0;
-    int isolated = c0[C0_SR] & 0x10000;   // SR.IsC: stores reach the cache, not memory (the BIOS's cache flush)
-#define W(d, x) do { uint32_t d_ = (d), x_ = (x); if (d_) { c->r[d_] = x_; if (d_ == ld_r) ld_r = 0; } } while (0)
-#define LOAD(d, x) do { uint32_t d_ = (d), x_ = (x); if (d_) { c->ld_r = d_; c->ld_v = x_; } } while (0)
-#define BRANCH(cond) do { if (cond) c->next_pc = c->pc + (SIMM << 2); c->branch = 1; } while (0)
-#define WAIT(n) (m->cycles += mem_load_cycles(a, n) - 1)   // before the read, so a device sees the time its data leaves
-#define HILO() do { if (m->cycles - fetch < c->hilo_busy) m->cycles = c->hilo_busy + fetch; } while (0)
-    switch (op >> 26) {
-    case 0x00:
-        switch (op & 0x3f) {
-        case 0x00: W(RD, t << SA); break;
-        case 0x02: W(RD, t >> SA); break;
-        case 0x03: W(RD, (uint32_t)((int32_t)t >> SA)); break;
-        case 0x04: W(RD, t << (s & 31)); break;
-        case 0x06: W(RD, t >> (s & 31)); break;
-        case 0x07: W(RD, (uint32_t)((int32_t)t >> (s & 31))); break;
-        case 0x08: c->next_pc = s; c->branch = 1; break;
-        case 0x09: W(RD, c->pc + 4); c->next_pc = s; c->branch = 1; break;
-        case 0x0c: cpu_exception(m, EXC_SYS); break;
-        case 0x0d: cpu_exception(m, EXC_BP); break;
-        case 0x10: HILO(); W(RD, c->hi); break;
-        case 0x11: c->hi = s; break;
-        case 0x12: HILO(); W(RD, c->lo); break;
-        case 0x13: c->lo = s; break;
-        case 0x18: { int64_t p = (int64_t)(int32_t)s * (int32_t)t; c->lo = (uint32_t)p; c->hi = (uint32_t)((uint64_t)p >> 32); c->hilo_busy = m->cycles + mult_cycles(s, 1); break; }
-        case 0x19: { uint64_t p = (uint64_t)s * t; c->lo = (uint32_t)p; c->hi = (uint32_t)(p >> 32); c->hilo_busy = m->cycles + mult_cycles(s, 0); break; }
-        case 0x1a:   // division by zero and the one overflowing case give fixed results (psx-spx, CPU Arithmetic Opcodes)
-            if (!t) { c->hi = s; c->lo = (int32_t)s < 0 ? 1 : 0xffffffff; }
-            else if (s == 0x80000000 && t == 0xffffffff) { c->hi = 0; c->lo = 0x80000000; }
-            else { c->lo = (uint32_t)((int32_t)s / (int32_t)t); c->hi = (uint32_t)((int32_t)s % (int32_t)t); }
-            c->hilo_busy = m->cycles + 36;
-            break;
-        case 0x1b: if (!t) { c->hi = s; c->lo = 0xffffffff; } else { c->lo = s / t; c->hi = s % t; } c->hilo_busy = m->cycles + 36; break;
-        case 0x20: { int32_t r; if (__builtin_add_overflow((int32_t)s, (int32_t)t, &r)) cpu_exception(m, EXC_OV); else W(RD, (uint32_t)r); break; }
-        case 0x21: W(RD, s + t); break;
-        case 0x22: { int32_t r; if (__builtin_sub_overflow((int32_t)s, (int32_t)t, &r)) cpu_exception(m, EXC_OV); else W(RD, (uint32_t)r); break; }
-        case 0x23: W(RD, s - t); break;
-        case 0x24: W(RD, s & t); break;
-        case 0x25: W(RD, s | t); break;
-        case 0x26: W(RD, s ^ t); break;
-        case 0x27: W(RD, ~(s | t)); break;
-        case 0x2a: W(RD, (int32_t)s < (int32_t)t); break;
-        case 0x2b: W(RD, s < t); break;
-        default: cpu_exception(m, EXC_RI); break;
-        }
-        break;
-    case 0x01:   // BcondZ: bit 0 of rt picks GEZ or LTZ; rt 10h/11h (and their mirrors) link, taken or not (psx-spx, CPU Jump Opcodes)
-        if ((RT & 0x1e) == 0x10) W(31, c->pc + 4);
-        BRANCH(RT & 1 ? (int32_t)s >= 0 : (int32_t)s < 0);
-        break;
-    case 0x02: c->next_pc = (c->pc & 0xf0000000) | (op & 0x3ffffff) << 2; c->branch = 1; break;
-    case 0x03: W(31, c->pc + 4); c->next_pc = (c->pc & 0xf0000000) | (op & 0x3ffffff) << 2; c->branch = 1; break;
-    case 0x04: BRANCH(s == t); break;
-    case 0x05: BRANCH(s != t); break;
-    case 0x06: BRANCH((int32_t)s <= 0); break;
-    case 0x07: BRANCH((int32_t)s > 0); break;
-    case 0x08: { int32_t r; if (__builtin_add_overflow((int32_t)s, (int32_t)SIMM, &r)) cpu_exception(m, EXC_OV); else W(RT, (uint32_t)r); break; }
-    case 0x09: W(RT, a); break;
-    case 0x0a: W(RT, (int32_t)s < (int32_t)SIMM); break;
-    case 0x0b: W(RT, s < SIMM); break;
-    case 0x0c: W(RT, s & ZIMM); break;
-    case 0x0d: W(RT, s | ZIMM); break;
-    case 0x0e: W(RT, s ^ ZIMM); break;
-    case 0x0f: W(RT, ZIMM << 16); break;
-    case 0x10:
-        if (RS == 0) LOAD(RT, c0[RD]);
-        else if (RS == 4) cop0_write(m, RD, t);
-        else if (op >> 25 & 1 && (op & 0x3f) == 0x10) c0[C0_SR] = (c0[C0_SR] & ~0xfu) | (c0[C0_SR] >> 2 & 0xf);   // RFE
-        else if (op >> 25 & 1) no_effect(m, op);
-        else { RED_ONCE(m, RED_COP0, "cpu: COP0 instruction %08x at %08x does not exist on the R3000A", op, c->cur_pc); cpu_exception(m, EXC_RI); }
-        break;
-    case 0x12:
-        if (!(c0[C0_SR] & 1u << 30)) { unusable(m, 2); break; }
-        if (op >> 25 & 1) { gte_command(m, op); break; }
-        switch (RS) {
-        case 0: LOAD(RT, gte_read(m, RD, 0)); break;
-        case 2: LOAD(RT, gte_read(m, RD, 1)); break;
-        case 4: gte_write(m, RD, t, 0); break;
-        case 6: gte_write(m, RD, t, 1); break;
-        case 8: if (RT <= 1) { BRANCH(!(RT & 1)); } else cpu_exception(m, EXC_RI); break;   // psx-spx, GTE Opcodes: COP2 condition input is tied low
-        default: cpu_exception(m, EXC_RI); break;
-        }
-        break;
-    case 0x11: case 0x13: if (c0[C0_SR] >> (28 + (op >> 26 & 3)) & 1) no_effect(m, op); else unusable(m, op >> 26 & 3); break;
-    case 0x20: WAIT(1); LOAD(RT, (uint32_t)(int8_t)mem_read8(m, a)); break;
-    case 0x21: if (a & 1) addr_error(m, a, EXC_ADEL); else { WAIT(2); LOAD(RT, (uint32_t)(int16_t)mem_read16(m, a)); } break;
-    case 0x23: if (a & 3) addr_error(m, a, EXC_ADEL); else { WAIT(4); LOAD(RT, mem_read32(m, a)); } break;
-    case 0x24: WAIT(1); LOAD(RT, mem_read8(m, a)); break;
-    case 0x25: if (a & 1) addr_error(m, a, EXC_ADEL); else { WAIT(2); LOAD(RT, mem_read16(m, a)); } break;
-    case 0x22: case 0x26: {   // LWL / LWR: the bytes of an unaligned word on each side of a word boundary, merged into rt
-        WAIT(4);
-        uint32_t w = mem_read32(m, a & ~3u), cur = ld_r == RT ? ld_v : t, sh = (a & 3) * 8;
-        if (op >> 26 == 0x22) LOAD(RT, (cur & (0x00ffffffu >> sh)) | w << (24 - sh));
-        else LOAD(RT, (cur & ~(0xffffffffu >> sh)) | w >> sh);
-        break;
-    }
-    case 0x28: if (!isolated) mem_write8(m, a, t); break;
-    case 0x29: if (a & 1) addr_error(m, a, EXC_ADES); else if (!isolated) mem_write16(m, a, t); break;
-    case 0x2b: if (a & 3) addr_error(m, a, EXC_ADES); else if (!isolated) mem_write32(m, a, t); break;
-    case 0x2a: case 0x2e: {   // SWL / SWR
-        if (isolated) break;
-        uint32_t w = mem_read32(m, a & ~3u), sh = (a & 3) * 8;
-        if (op >> 26 == 0x2a) w = (w & ~(0xffffffffu >> (24 - sh))) | t >> (24 - sh);
-        else w = (w & ~(0xffffffffu << sh)) | t << sh;
-        mem_write32(m, a & ~3u, w);
-        break;
-    }
-    case 0x32:
-        if (!(c0[C0_SR] & 1u << 30)) unusable(m, 2);
-        else if (a & 3) addr_error(m, a, EXC_ADEL);
-        else { WAIT(4); gte_write(m, RT, mem_read32(m, a), 0); }
-        break;
-    case 0x3a:
-        if (!(c0[C0_SR] & 1u << 30)) unusable(m, 2);
-        else if (a & 3) addr_error(m, a, EXC_ADES);
-        else if (!isolated) mem_write32(m, a, gte_read(m, RT, 0));
-        break;
-    case 0x30: case 0x31: case 0x33: case 0x38: case 0x39: case 0x3b:
-        if (c0[C0_SR] >> (28 + (op >> 26 & 3)) & 1) no_effect(m, op); else unusable(m, op >> 26 & 3);
-        break;
-    default: cpu_exception(m, EXC_RI); break;
-    }
-#undef W
-#undef LOAD
-#undef BRANCH
-#undef WAIT
-#undef HILO
-    if (ld_r) c->r[ld_r] = ld_v;
+    uint32_t op;
+    if (!(c->pc & 3) && mem_fetch(m, c->pc, &op)) { m->interp_steps++; cpu_exec(m, op, mem_fetch_cycles(c->pc)); return; }
+    c->delay = c->branch; c->branch = 0; c->cur_pc = c->pc; m->cycles++;
+    if (c->pc & 3) { c->cop0[C0_BADVADDR] = c->pc; cpu_exception(m, EXC_ADEL); }
+    else cpu_exception(m, EXC_IBE);
 }
 
-void cpu_run(ps1 *m) {   // also where the debug console hears the kernel's std_out_putchar, A(3Ch) and B(3Dh) (psx-spx, BIOS Function Summary), and a side-loaded EXE starts
-    while (m->cycles < m->next_event && !m->exit_requested) {
-        uint32_t p = m->cpu.pc & 0x1fffffff;
-        if ((p == 0xa0 && m->cpu.r[9] == 0x3c) || (p == 0xb0 && m->cpu.r[9] == 0x3d)) tty_putc(m, (char)m->cpu.r[4]);
-        else if (m->exe && ps1_exe_due(m)) ps1_exe_start(m);
-        cpu_step(m);
+// The dispatcher: native code where the machine has some for the code in memory (native.c), else the interpreter. Only at the end of a block (cpu.boundary) does it stop
+// for the next device event, take an interrupt (plan.md, decision log: both sides then see each interrupt at the same point, so the lockstep comparison is exact), hear
+// the kernel's std_out_putchar, A(3Ch) and B(3Dh) (psx-spx, BIOS Function Summary), for the debug console, and start a side-loaded EXE (exe.c). A delay slot is always
+// interpreted: native code is entered at the start of a block
+void cpu_run(ps1 *m) {
+    ps1_cpu *c = &m->cpu;
+    for (;;) {
+        if (c->boundary) {
+            if (m->cycles >= m->next_event || m->exit_requested) return;
+            if (cpu_irq_due(m)) { c->delay = 0; c->cur_pc = c->pc; m->cycles++; cpu_exception(m, EXC_INT); continue; }
+            uint32_t p = c->pc & 0x1fffffff;
+            if ((p == 0xa0 && c->r[9] == 0x3c) || (p == 0xb0 && c->r[9] == 0x3d)) tty_putc(m, (char)c->r[4]);
+            else if (m->exe && ps1_exe_due(m)) ps1_exe_start(m);
+        }
+        if (c->branch || !native_run(m)) cpu_step(m);
     }
 }
