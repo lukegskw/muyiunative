@@ -51,7 +51,7 @@ static uint32_t io_read(ps1 *m, uint32_t p, unsigned n) {
         return n == 4 ? lo | (uint32_t)spu_read(m, p + 2 - 0x1f801c00) << 16 : lo >> (p & 1) * 8;
     }
     if (p >= 0x1f801800 && p < 0x1f801804) { uint32_t v = 0; for (unsigned i = 0; i < n; i++) v |= (uint32_t)cd_read(m, p - 0x1f801800) << 8 * i; return v; }
-    if (p >= 0x1f801040 && p < 0x1f801060) return sio_read(m, p - 0x1f801040);
+    if (p >= 0x1f801040 && p < 0x1f801060) return sio_read(m, p - 0x1f801040, n);
     uint32_t a = p & ~3u, v;
     if (a >= 0x1f801000 && a < 0x1f801024) v = m->memctl[(a - 0x1f801000) / 4];
     else if (a == 0x1f801060) v = m->ram_size;
@@ -61,7 +61,7 @@ static uint32_t io_read(ps1 *m, uint32_t p, unsigned n) {
     else if (a >= 0x1f801100 && a < 0x1f801130) v = tmr_read(m, a - 0x1f801100);
     else if (a == 0x1f801810) v = gpu_read(m);
     else if (a == 0x1f801814) v = gpu_stat(m);
-    else if (a == 0x1f801820 || a == 0x1f801824) { RED_ONCE(m, RED_MDEC, "mdec: the macroblock decoder is not modelled yet (phase 2)"); v = 0; }
+    else if (a == 0x1f801820 || a == 0x1f801824) { v = mdec_read(m, a - 0x1f801820); dma_resume(m); }
     else if (a >= EXP2_BASE && a < EXP2_BASE + 0x1000) v = 0xffffffff;
     else if (a == 0xfffe0130) v = m->cache_ctl;
     else { unmapped(m, "read", p, n); return 0; }
@@ -75,7 +75,7 @@ static void io_write(ps1 *m, uint32_t p, uint32_t v, unsigned n) {
         return;
     }
     if (p >= 0x1f801800 && p < 0x1f801804) { cd_write(m, p - 0x1f801800, (uint8_t)v); return; }
-    if (p >= 0x1f801040 && p < 0x1f801060) { sio_write(m, p - 0x1f801040, v); return; }
+    if (p >= 0x1f801040 && p < 0x1f801060) { sio_write(m, p - 0x1f801040, v, n); return; }
     if (p >= EXP2_BASE && p < EXP2_BASE + 0x1000) { exp2_write(m, p, v); return; }
     uint32_t a = p & ~3u;
     v <<= (p & 3) * 8;
@@ -87,7 +87,7 @@ static void io_write(ps1 *m, uint32_t p, uint32_t v, unsigned n) {
     else if (a >= 0x1f801100 && a < 0x1f801130) tmr_write(m, a - 0x1f801100, v);
     else if (a == 0x1f801810) gpu_gp0(m, v);
     else if (a == 0x1f801814) gpu_gp1(m, v);
-    else if (a == 0x1f801820 || a == 0x1f801824) RED_ONCE(m, RED_MDEC, "mdec: the macroblock decoder is not modelled yet (phase 2)");
+    else if (a == 0x1f801820 || a == 0x1f801824) { mdec_write(m, a - 0x1f801820, v); dma_resume(m); }
     else if (a == 0xfffe0130) m->cache_ctl = v;
     else unmapped(m, "write", p, n);
 }

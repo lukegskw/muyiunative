@@ -6,7 +6,7 @@ The aim is native code, not emulation: the game's MIPS code is translated to C a
 
 ## Status
 
-Phase 1 of [the plan](plan.md#4-phases-and-exit-criteria): the interpreter boots OpenBIOS, and its shell shows in a Mac window. Nothing plays yet.
+Phase 2 of [the plan](plan.md#4-phases-and-exit-criteria) has met its exit criterion: the CPU/GTE/GPU homebrew tests pass, and Metal Slug X (USA) reaches its title/menu screen on the interpreter. CD-ROM data reads, textures, GTE, SPU audio and reverb, MDEC, digital controllers and memory-card protocols have synthetic tests. Gameplay, broader compatibility and hardware timing accuracy still need validation.
 
 ## Build from the command line
 
@@ -17,7 +17,13 @@ make -C shell/mac app
 open shell/mac/build/ps1native.app
 ```
 
-The app boots OpenBIOS and shows its shell, a turning cube in the colours it uses when there is no disc (there is no CD-ROM drive yet). It runs on macOS 14 or later.
+The app boots OpenBIOS and shows its shell when no disc is mounted. It runs on macOS 14 or later. To run your external dump:
+
+```sh
+shell/mac/build/ps1native --disc /external/path/disc.cue
+```
+
+The keyboard controls a digital pad in port 1: arrows for the D-pad; Z/X/A/S for Cross/Circle/Square/Triangle; Q/W for L1/R1; 1/2 for L2/R2; Return for Start and Space for Select. Sound is played through the Mac's default output. Memory cards currently have in-memory protocol support; the host leaves the slots empty. Supported disc layouts, reproducible headless inputs and remaining gaps are in [Development](docs/development.md#phase-2-hardware-breadth).
 
 ### For developers
 

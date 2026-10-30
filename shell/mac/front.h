@@ -6,5 +6,7 @@
 void front_run(const char *title, void (*run)(void *arg), void *arg);
 // Shows w x h BGRA8 pixels (0xAARRGGBB words) in the window: copied, then presented on the main thread. Any thread
 void front_present(const uint32_t *px, int w, int h);
+uint16_t front_buttons(void);   // active-high digital pad buttons, sampled on the machine thread
+void front_audio(const int16_t *samples, int frames);   // 44.1 kHz signed stereo from the machine thread
 // Writes w x h BGRA8 pixels to a PNG file: 0, or -1 after a [RED] line
 int front_write_png(const char *path, const uint32_t *px, int w, int h);

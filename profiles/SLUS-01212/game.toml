@@ -1,0 +1,14 @@
+# User-selected first game (plan.md, phase 2). Public label ID, without disc-derived files or the user's local path:
+# https://www.jnlgame.com/products/metal-slug-x-ps1-playstation-1-pre-owned
+name = "Metal Slug X (USA)"
+serial = "SLUS-01212"
+
+# Local interpreter acceptance route; only a frame hash is retained. Frames are zero-based, and button masks are active-high (Start = 0008h)
+[validation]
+date = "2026-10-30"
+screen = "title/main menu"
+frames = 2400
+inputs = ["1800:8", "1806:0"]
+width = 320
+height = 240
+frame_hash_fnv1a64 = "a3d45a4b667b9f54"

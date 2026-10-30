@@ -10,13 +10,13 @@ ps1 *ps1_new(void) {
     return m;
 }
 
-void ps1_free(ps1 *m) { free(m); }
+void ps1_free(ps1 *m) { if (m) disc_close(m); free(m); }
 
 void ps1_reset(ps1 *m) {   // RAM, scratchpad and BIOS keep their contents, as on the console
     m->cycles = 0; m->i_stat = m->i_mask = m->ram_size = m->cache_ctl = m->post = 0;
     memset(m->memctl, 0, sizeof m->memctl);
     m->ntty = m->frame_done = m->exit_requested = m->exit_code = 0;
-    cpu_reset(m); dma_reset(m); tmr_reset(m); gpu_reset(m); cd_reset(m); spu_reset(m); sio_reset(m);
+    cpu_reset(m); dma_reset(m); tmr_reset(m); gpu_reset(m); cd_reset(m); spu_reset(m); sio_reset(m); mdec_reset(m);
     sched_update(m);
 }
 

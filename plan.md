@@ -64,6 +64,8 @@ ps1native/            (working name)
 
 ## 4. Phases and exit criteria
 
+Phases 0–2 have met their exit criteria. Phase 2 was checked on 2026-10-30 with the repository-owned CPU/GTE/GPU programs and a local title/main-menu run of the [first game](profiles/SLUS-01212/game.toml). [Development](docs/development.md#phase-2-hardware-breadth) records the checks and remaining accuracy/compatibility gaps. Phase 3 is next.
+
 | #   | Phase                                                                                                                                                                                                 | Done when                                                                                   |
 | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | 0   | **Foundations**: repository, MIT license, CI (macOS GitHub Actions), tool and runtime skeletons                                                                                                       | CI builds an empty `.app`                                                                   |
@@ -90,7 +92,7 @@ ps1native/            (working name)
 ## 6. Testing
 
 - **Instruction tests**: each MIPS instruction checked in recompiled form against the interpreter.
-- **Homebrew test programs in CI**: built with homebrew SDKs; check each license.
+- **Homebrew test programs in CI**: the repository-owned CPU/GTE/GPU programs are emitted from MIPS instruction encodings and run through the interpreter without an SDK. External homebrew suites can extend coverage; check each license.
 - **Lockstep comparison**: run recompiled code and the interpreter side by side and compare registers and memory after each call.
 - **Frame hashes**: screenshots stay local, only hashes go in the repo. An external emulator can be run separately for comparison (black box, never linked).
 
@@ -121,3 +123,4 @@ Dump it with an accurate ripping tool (e.g. redumper) to `.cue`/`.bin`.
 | Python tools: standard library, unittest, ruff (bug rules) and pyright; not a package       | pytest, a formatter, a pip package      | They run in place, with no install                                                             |
 | Apple silicon, macOS 14 or later                                                            | Intel Macs, universal binaries          | One architecture to build and test, as on GitHub's runners                                     |
 | OpenBIOS committed as a binary, built from source (its commit and hash in bios/openbios)    | Build it from a submodule; download it  | Building it needs Docker, beyond Xcode and Python; CI's macOS runners have none                |
+| [Metal Slug X (USA), SLUS-01212](profiles/SLUS-01212/game.toml) as the first game             | The puzzle games suggested above       | User's choice; its dump stays outside the repository                                           |

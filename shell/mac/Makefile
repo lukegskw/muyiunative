@@ -9,7 +9,7 @@ BIOS = ../../bios/openbios
 SRC = main.c front_mac.m $(GFX)/present.m $(sort $(wildcard $(RT)/*.c))
 HDR = front.h $(GFX)/present.h $(wildcard $(RT)/*.h)
 CFLAGS = -arch arm64 -mmacosx-version-min=$(MINOS) -O2 -g -Wall -Wextra -fobjc-arc -I$(RT) -I$(GFX)
-FRAMEWORKS = -framework AppKit -framework QuartzCore -framework Metal -framework CoreGraphics -framework ImageIO
+FRAMEWORKS = -framework AppKit -framework QuartzCore -framework Metal -framework CoreGraphics -framework ImageIO -framework AudioToolbox
 .DEFAULT_GOAL := host
 
 host: $(B)/ps1native

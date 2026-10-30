@@ -3,6 +3,7 @@
 #import <Cocoa/Cocoa.h>
 #import <ImageIO/ImageIO.h>
 #import <QuartzCore/CAMetalLayer.h>
+#import <AudioToolbox/AudioToolbox.h>
 #include <os/lock.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -12,11 +13,28 @@
 #include "present.h"
 #include "ps1.h"
 
+static atomic_uint g_buttons;
+static uint16_t key_button(NSEvent *e) {
+    NSString *s = e.charactersIgnoringModifiers.lowercaseString;
+    if (!s.length) return 0;
+    switch ([s characterAtIndex:0]) {
+    case NSUpArrowFunctionKey: return PAD_UP; case NSDownArrowFunctionKey: return PAD_DOWN;
+    case NSLeftArrowFunctionKey: return PAD_LEFT; case NSRightArrowFunctionKey: return PAD_RIGHT;
+    case 'z': return PAD_CROSS; case 'x': return PAD_CIRCLE; case 'a': return PAD_SQUARE; case 's': return PAD_TRIANGLE;
+    case 'q': return PAD_L1; case 'w': return PAD_R1; case '1': return PAD_L2; case '2': return PAD_R2;
+    case '\r': return PAD_START; case ' ': return PAD_SELECT; default: return 0;
+    }
+}
+uint16_t front_buttons(void) { return (uint16_t)atomic_load(&g_buttons); }
+
 @interface FrontView : NSView
 @end
 
 @implementation FrontView
 - (CALayer *)makeBackingLayer { return [CAMetalLayer layer]; }
+- (BOOL)acceptsFirstResponder { return YES; }
+- (void)keyDown:(NSEvent *)e { uint16_t b = key_button(e); if (b) atomic_fetch_or(&g_buttons, b); else [super keyDown:e]; }
+- (void)keyUp:(NSEvent *)e { uint16_t b = key_button(e); if (b) atomic_fetch_and(&g_buttons, ~(unsigned)b); else [super keyUp:e]; }
 @end
 
 @interface FrontApp : NSObject <NSApplicationDelegate>
@@ -24,6 +42,7 @@
 
 @implementation FrontApp
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)app { (void)app; return YES; }
+- (void)applicationDidResignActive:(NSNotification *)n { (void)n; atomic_store(&g_buttons, 0); }
 @end
 
 typedef struct frame { uint32_t *px; size_t cap; int w, h; } frame;
@@ -35,6 +54,49 @@ static os_unfair_lock g_lock = OS_UNFAIR_LOCK_INIT;   // guards g_new, g_fresh a
 static frame g_new, g_shown;                          // the newest frame (the machine's thread writes it) and the one presented (main thread)
 static bool g_fresh;
 static atomic_bool g_queued;                          // a present is queued on the main thread
+
+// Audio Queue Services owns its playback thread; only the front end's bounded ring is shared. The runtime's audio ring is drained on its machine thread
+enum { AUDIO_CAP = 8192, AUDIO_CHUNK = 512 };
+static os_unfair_lock g_audio_lock = OS_UNFAIR_LOCK_INIT;
+static int16_t g_audio[AUDIO_CAP * 2]; static unsigned g_audio_read, g_audio_count;
+static AudioQueueRef g_audio_queue;
+static atomic_bool g_audio_failed;
+void front_audio(const int16_t *samples, int frames) {
+    os_unfair_lock_lock(&g_audio_lock);
+    for (int i = 0; i < frames; i++) {
+        if (g_audio_count == AUDIO_CAP) { g_audio_read = (g_audio_read + 1) % AUDIO_CAP; g_audio_count--; }
+        unsigned at = (g_audio_read + g_audio_count++) % AUDIO_CAP;
+        g_audio[at * 2] = samples[i * 2]; g_audio[at * 2 + 1] = samples[i * 2 + 1];
+    }
+    os_unfair_lock_unlock(&g_audio_lock);
+}
+static OSStatus audio_fill(AudioQueueRef q, AudioQueueBufferRef b) {
+    int16_t *out = b->mAudioData;
+    memset(out, 0, AUDIO_CHUNK * 4);
+    os_unfair_lock_lock(&g_audio_lock);
+    for (unsigned i = 0; i < AUDIO_CHUNK && g_audio_count; i++, g_audio_count--) {
+        out[i * 2] = g_audio[g_audio_read * 2]; out[i * 2 + 1] = g_audio[g_audio_read * 2 + 1]; g_audio_read = (g_audio_read + 1) % AUDIO_CAP;
+    }
+    os_unfair_lock_unlock(&g_audio_lock);
+    b->mAudioDataByteSize = AUDIO_CHUNK * 4;
+    return AudioQueueEnqueueBuffer(q, b, 0, NULL);
+}
+static void audio_buffer(void *arg, AudioQueueRef q, AudioQueueBufferRef b) {
+    (void)arg; OSStatus err = audio_fill(q, b);
+    if (err && !atomic_exchange(&g_audio_failed, true)) RED("front end: cannot enqueue audio (%d)", (int)err);
+}
+static void audio_start(void) {
+    AudioStreamBasicDescription format = {.mSampleRate = 44100, .mFormatID = kAudioFormatLinearPCM,
+        .mFormatFlags = kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked, .mBytesPerPacket = 4, .mFramesPerPacket = 1,
+        .mBytesPerFrame = 4, .mChannelsPerFrame = 2, .mBitsPerChannel = 16};
+    OSStatus err = AudioQueueNewOutput(&format, audio_buffer, NULL, NULL, NULL, 0, &g_audio_queue);
+    for (int i = 0; !err && i < 3; i++) {
+        AudioQueueBufferRef b; err = AudioQueueAllocateBuffer(g_audio_queue, AUDIO_CHUNK * 4, &b);
+        if (!err) err = audio_fill(g_audio_queue, b);
+    }
+    if (!err) err = AudioQueueStart(g_audio_queue, NULL);
+    if (err) { RED("front end: cannot start audio (%d)", (int)err); if (g_audio_queue) AudioQueueDispose(g_audio_queue, true); g_audio_queue = NULL; }
+}
 
 static int fit(frame *f, size_t n) {
     if (n <= f->cap) return 1;
@@ -84,6 +146,7 @@ void front_run(const char *title, void (*run)(void *arg), void *arg) {
     g_win.contentView = v;
     if (!present_init((__bridge void *)v.layer)) RED("front end: no Metal device, the window stays empty");
     [g_win center]; [g_win makeKeyAndOrderFront:nil];
+    [g_win makeFirstResponder:v]; audio_start();
     job *j = malloc(sizeof *j);
     pthread_attr_t at; pthread_t t;
     pthread_attr_init(&at); pthread_attr_setstacksize(&at, 8 << 20); pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);

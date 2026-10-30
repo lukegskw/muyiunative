@@ -1,7 +1,7 @@
 // The GPU (psx-spx, Graphics Processing Unit): GP0 commands draw into the 1 MB VRAM and move rectangles in and out of it, GP1 commands set up the display, and GPUSTAT
-// reports both. Drawing is done in software as each command completes: untextured polygons (flat or gouraud), lines and polylines, rectangles, fills and copies, with
+// reports both. Drawing is done in software as each command completes: textured/untextured polygons (flat or gouraud), lines and polylines, rectangles, fills and copies, with
 // semi-transparency, dithering and the mask bit. The video timing (GPU Timings) drives the scanline events: hblank for timer 1, the vertical blank IRQ, the end of a frame.
-// Not modelled yet (phase 2): textures, and the lines skipped when drawing to the displayed field of an interlaced picture
+// Public reference: https://psx-spx.consoledev.net/graphicsprocessingunitgpu/ . Not modelled yet: exact rasterization timing and interlaced drawing
 #include "ps1.h"
 #include <stddef.h>
 #include <stdlib.h>
@@ -35,36 +35,67 @@ static uint16_t blend(uint16_t back, uint16_t front, uint32_t mode) {   // per 5
 static void plot(ps1_gpu *g, int x, int y, uint16_t c, int semi) {   // the mask bit setting, GP0(E6h), applies to every drawing command but fills
     uint16_t *p = &g->vram[(y & 511) * VRAM_W + (x & 1023)];
     if (g->mask & 2 && *p & 0x8000) return;
-    if (semi) c = blend(*p, c, g->texpage >> 5 & 3);
+    if (semi) c = (c & 0x8000) | blend(*p, c, g->texpage >> 5 & 3);
     *p = c | (uint16_t)((g->mask & 1) << 15);
 }
 
 static ps1_vtx vtx(const ps1_gpu *g, uint32_t pos, uint32_t col) {   // 11-bit signed coordinates, moved by the drawing offset
-    return (ps1_vtx){sext11(pos) + g->ox, sext11(pos >> 16) + g->oy, (int)(col & 0xff), (int)(col >> 8 & 0xff), (int)(col >> 16 & 0xff)};
+    return (ps1_vtx){sext11(pos) + g->ox, sext11(pos >> 16) + g->oy, (int)(col & 0xff), (int)(col >> 8 & 0xff), (int)(col >> 16 & 0xff), 0, 0};
+}
+
+// The textured commands observed during the disc smoke run were discarded. t_texture gives them synthetic pages and CLUTs: GPU Video Memory, Texture Bitmaps/Palettes;
+// GP0(E2h) replaces selected UV bits before addressing, and GP0(E6h) preserves the texel's bit15 even when blending. Zero means transparent only after CLUT lookup
+static uint16_t texel(ps1_gpu *g, int u, int v, uint32_t clut) {
+    uint32_t tw = g->texwin; int mx = (tw & 31) * 8, my = (tw >> 5 & 31) * 8;
+    u = ((u & 255) & ~mx) | ((int)(tw >> 10 & 31) * 8 & mx);
+    v = ((v & 255) & ~my) | ((int)(tw >> 15 & 31) * 8 & my);
+    int depth = g->texpage >> 7 & 3, shift = depth == 0 ? 2 : depth == 1 ? 1 : 0;
+    int x = ((int)(g->texpage & 15) * 64 + (u >> shift)) & 1023, y = ((int)(g->texpage >> 4 & 1) * 256 + v) & 511;
+    // GPU Texture Caching: each of 256 entries contains four VRAM words. 4/8-bit blocks have four entries per row, 15-bit blocks eight; colliding blocks replace a slot
+    unsigned slot = shift ? (unsigned)((x >> 2 & 3) | (y & 63) << 2) : (unsigned)((x >> 2 & 7) | (y & 31) << 3);
+    uint32_t tag = (uint32_t)(y * VRAM_W + (x & ~3));
+    if (g->textag[slot] != tag + 1) { memcpy(g->texcache[slot], g->vram + tag, 8); g->textag[slot] = tag + 1; }
+    uint16_t c = g->texcache[slot][x & 3];
+    if (!shift) return c;
+    unsigned index = shift == 2 ? c >> ((u & 3) * 4) & 15 : c >> ((u & 1) * 8) & 255;
+    clut &= 0x7fff;
+    if (!g->clut_valid || g->clut_id != clut) {
+        for (unsigned i = 0; i < 256; i++) g->clutcache[i] = g->vram[(clut >> 6) * VRAM_W + (((clut & 63) * 16 + i) & 1023)];
+        g->clut_id = (uint16_t)clut; g->clut_valid = 1;
+    }
+    return g->clutcache[index];
+}
+
+static void texture_plot(ps1_gpu *g, int x, int y, int u, int v, uint32_t clut, int r, int gr, int b, int raw, int semi, int dither) {
+    uint16_t c = texel(g, u, v, clut);
+    if (!c) return;
+    uint16_t mask = c & 0x8000;
+    // GPU (MISC), Modulation: 80h is neutral, FFh nearly doubles brightness. Keep 8-bit precision until dithering, then saturate to framebuffer channels
+    if (!raw) c = rgb15(x, y, clamp8((c & 31) * r >> 4), clamp8((c >> 5 & 31) * gr >> 4), clamp8((c >> 10 & 31) * b >> 4), dither) | mask;
+    plot(g, x, y, c, semi && mask);
 }
 
 static int64_t edge(const ps1_vtx *p, const ps1_vtx *q, int x, int y) { return (int64_t)(q->x - p->x) * (y - p->y) - (int64_t)(q->y - p->y) * (x - p->x); }
 static int owns(const ps1_vtx *p, const ps1_vtx *q) { return q->y < p->y || (q->y == p->y && q->x > p->x); }   // top and left edges keep the pixels on them
 
 // Polygons leave out their right and bottom edges, are not drawn when wider than 1023 or taller than 511, and are dithered only when shaded (psx-spx, Vertex; Notes)
-static void triangle(ps1_gpu *g, ps1_vtx a, ps1_vtx b, ps1_vtx c, int gouraud, int semi) {
+static void triangle(ps1_gpu *g, ps1_vtx a, ps1_vtx b, ps1_vtx c, int gouraud, int semi, int tex, int raw, uint32_t clut) {
     int x0 = MIN(MIN(a.x, b.x), c.x), x1 = MAX(MAX(a.x, b.x), c.x), y0 = MIN(MIN(a.y, b.y), c.y), y1 = MAX(MAX(a.y, b.y), c.y);
     if (x1 - x0 > 1023 || y1 - y0 > 511) return;
     int64_t area = edge(&a, &b, c.x, c.y);
     if (!area) return;
     if (area < 0) { ps1_vtx t = b; b = c; c = t; area = -area; }
     x0 = MAX(x0, g->ax1); x1 = MIN(x1, g->ax2); y0 = MAX(y0, g->ay1); y1 = MIN(y1, g->ay2);
-    int dither = gouraud && g->texpage >> 9 & 1;
+    int dither = (gouraud || (tex && !raw)) && g->texpage >> 9 & 1;
     uint16_t flat = rgb15(0, 0, a.r, a.g, a.b, 0);
     for (int y = y0; y <= y1; y++)
         for (int x = x0; x <= x1; x++) {
             int64_t wa = edge(&b, &c, x, y), wb = edge(&c, &a, x, y), wc = edge(&a, &b, x, y);
             if (wa < 0 || wb < 0 || wc < 0 || (!wa && !owns(&b, &c)) || (!wb && !owns(&c, &a)) || (!wc && !owns(&a, &b))) continue;
-            uint16_t col = flat;
-            if (gouraud)
-                col = rgb15(x, y, (int)((a.r * wa + b.r * wb + c.r * wc) / area), (int)((a.g * wa + b.g * wb + c.g * wc) / area),
-                            (int)((a.b * wa + b.b * wb + c.b * wc) / area), dither);
-            plot(g, x, y, col, semi);
+            int r = a.r, gr = a.g, bl = a.b;
+            if (gouraud) { r = (int)((a.r * wa + b.r * wb + c.r * wc) / area); gr = (int)((a.g * wa + b.g * wb + c.g * wc) / area); bl = (int)((a.b * wa + b.b * wb + c.b * wc) / area); }
+            if (tex) texture_plot(g, x, y, (int)((a.u * wa + b.u * wb + c.u * wc) / area), (int)((a.v * wa + b.v * wb + c.v * wc) / area), clut, r, gr, bl, raw, semi, dither);
+            else plot(g, x, y, gouraud ? rgb15(x, y, r, gr, bl, dither) : flat, semi);
         }
 }
 
@@ -90,28 +121,31 @@ static void polygon(ps1 *m, uint32_t c) {
     ps1_gpu *g = &m->gpu;
     const uint32_t *w = g->buf;
     int gouraud = c >> 4 & 1, n = c & 8 ? 4 : 3, tex = c >> 2 & 1, p = 1;
-    ps1_vtx v[4];
+    ps1_vtx v[4]; uint32_t clut = 0;
     for (int k = 0; k < n; k++) {
         uint32_t col = gouraud && k ? w[p++] : w[0];
         v[k] = vtx(g, w[p++], col);
+        if (tex) { v[k].u = w[p] & 255; v[k].v = w[p] >> 8 & 255; if (!k) clut = w[p] >> 16; }
         if (tex && k == 1) g->texpage = (g->texpage & ~0x9ffu) | (w[p] >> 16 & 0x9ff);   // the page attribute sets GP0(E1h) bits 0-8 and 11
         p += tex;
     }
-    if (tex) { RED_ONCE(m, RED_TEXTURE, "gpu: textured polygons are not drawn yet (phase 2)"); return; }
-    triangle(g, v[0], v[1], v[2], gouraud, c >> 1 & 1);
-    if (n == 4) triangle(g, v[1], v[2], v[3], gouraud, c >> 1 & 1);   // a quad is the triangles 1-2-3 and 2-3-4
+    triangle(g, v[0], v[1], v[2], gouraud, c >> 1 & 1, tex, c & 1, clut);
+    if (n == 4) triangle(g, v[1], v[2], v[3], gouraud, c >> 1 & 1, tex, c & 1, clut);   // a quad is the triangles 1-2-3 and 2-3-4
 }
 
 static void rectangle(ps1 *m, uint32_t c) {
     static const int side[4] = {0, 1, 8, 16};
     ps1_gpu *g = &m->gpu;
     int tex = c >> 2 & 1, w = side[c >> 3 & 3], h = w;
-    if (tex) { RED_ONCE(m, RED_TEXTURE, "gpu: textured rectangles are not drawn yet (phase 2)"); return; }
     if (!w) { w = g->buf[2 + tex] & 0x3ff; h = g->buf[2 + tex] >> 16 & 0x1ff; }
     ps1_vtx v = vtx(g, g->buf[1], g->buf[0]);
     uint16_t col = rgb15(0, 0, v.r, v.g, v.b, 0);
     for (int y = MAX(v.y, g->ay1); y <= MIN(v.y + h - 1, g->ay2); y++)
-        for (int x = MAX(v.x, g->ax1); x <= MIN(v.x + w - 1, g->ax2); x++) plot(g, x, y, col, c >> 1 & 1);
+        for (int x = MAX(v.x, g->ax1); x <= MIN(v.x + w - 1, g->ax2); x++) {
+            if (tex) texture_plot(g, x, y, (int)(g->buf[2] & 255) + (g->texpage & 0x1000 ? v.x - x : x - v.x),
+                (int)(g->buf[2] >> 8 & 255) + (g->texpage & 0x2000 ? v.y - y : y - v.y), g->buf[2] >> 16, v.r, v.g, v.b, c & 1, c >> 1 & 1, 0);
+            else plot(g, x, y, col, c >> 1 & 1);
+        }
 }
 
 static void poly_word(ps1_gpu *g, uint32_t w) {   // a polyline's words after its command, up to the terminator, checked on a vertex's first word once two have come
@@ -201,8 +235,9 @@ static void execute(ps1 *m) {
     switch (c >> 5) {
     case 0:
         if (c == 0x02) fill(g, g->buf);
+        else if (c == 0x01) { memset(g->textag, 0, sizeof g->textag); g->clut_valid = 0; }
         else if (c == 0x1f) { g->irq = 1; irq_raise(m, IRQ_GPU); }
-        break;   // 01h clears the texture cache, which is not modelled; the others do nothing
+        break;
     case 1: polygon(m, c); break;
     case 2: {
         int gouraud = c >> 4 & 1;
@@ -235,11 +270,12 @@ void gpu_gp1(ps1 *m, uint32_t w) {
     ps1_gpu *g = &m->gpu;
     switch (w >> 24 & 0x3f) {   // 40h..FFh mirror 00h..3Fh
     case 0x00:   // the values of psx-spx, GP1(00h)
+        memset(g->textag, 0, sizeof g->textag); g->clut_valid = 0;
         g->n = g->poly = g->xfer = g->irq = g->dma_dir = 0; g->display_off = 1;
         g->disp_x = g->disp_y = 0; g->hx1 = 0x200; g->hx2 = 0x200 + 256 * 10; g->vy1 = 0x10; g->vy2 = 0x10 + 240; g->dmode = 0;
         g->texpage = g->texwin = g->mask = 0; g->ax1 = g->ay1 = g->ax2 = g->ay2 = g->ox = g->oy = 0;
         break;
-    case 0x01: g->n = g->poly = g->xfer = 0; break;
+    case 0x01: g->n = g->poly = g->xfer = 0; g->clut_valid = 0; break;   // GP1(01h) also resets CLUT cache
     case 0x02: g->irq = 0; break;
     case 0x03: g->display_off = w & 1; break;
     case 0x04: g->dma_dir = w & 3; break;

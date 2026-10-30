@@ -1,5 +1,6 @@
 // DMA (dma.c; psx-spx, DMA Channels and GPU Depth Ordering): OTC builds an empty ordering table (psx-spx's example), a channel waits for its DPCR enable, the GPU
-// channel follows a linked list of packets and moves blocks to and from VRAM, and DICR raises IRQ 3 on a completion it enables, until the flag is written back
+// channel follows a linked list of packets and moves blocks to and from VRAM. DICR requires both enables to latch a completion; existing flags survive mask/master
+// changes until acknowledged, and can reassert IRQ3 when master enable rises (psx-spx, DMA Channels, 1F8010F4h)
 #include "ps1.h"
 
 static int checks, fails;
@@ -46,6 +47,24 @@ int main(void) {
     start(2, 0x012000, 1u << 16 | 2, 0x01000200);
     CHECK(mem_read32(m, 0x80012000) == 0x7fff0001 && mem_read32(m, 0x80012004) == 0x00030002 && !(gpu_stat(m) >> 27 & 1), "GPU block transfer from VRAM after GP0(C0h)");
 
+    // Public DICR semantics: channel enable gates new completions, not an already latched flag's contribution to bit31
+    mem_write32(m, DICR, 0x04000000); mem_write32(m, 0x1f801070, ~(1u << IRQ_DMA)); mem_write32(m, 0x80013000, 0);   // GP0 NOP
+    mem_write32(m, DICR, 0x00040000); start(2, 0x013000, 1u << 16 | 1, 0x01000201);
+    CHECK(mem_read32(m, DICR) == 0x00040000 && !(m->i_stat & (1u << IRQ_DMA)), "master-disabled completion does not latch a per-channel DICR flag");
+    mem_write32(m, DICR, 0x00840000); start(2, 0x013000, 1u << 16 | 1, 0x01000201);
+    CHECK(mem_read32(m, DICR) == 0x84840000 && (m->i_stat & (1u << IRQ_DMA)), "both enables latch channel completion and raise IRQ3");
+    mem_write32(m, 0x1f801070, ~(1u << IRQ_DMA)); mem_write32(m, DICR, 0x00800000);
+    CHECK(mem_read32(m, DICR) == 0x84800000 && !(m->i_stat & (1u << IRQ_DMA)), "disabling channel mask preserves its pending flag/master level without another IRQ edge");
+    mem_write32(m, DICR, 0);
+    CHECK(mem_read32(m, DICR) == 0x04000000 && !(m->i_stat & (1u << IRQ_DMA)), "master disable preserves latched completion while lowering bit31");
+    mem_write32(m, DICR, 0x00800000);
+    CHECK(mem_read32(m, DICR) == 0x84800000 && (m->i_stat & (1u << IRQ_DMA)), "master re-enable reasserts IRQ from retained completion even with channel mask disabled");
+    mem_write32(m, DICR, 0x04800000);
+    CHECK(mem_read32(m, DICR) == 0x00800000 && (m->i_stat & (1u << IRQ_DMA)), "flag acknowledgement lowers DICR master but I_STAT requires its own acknowledgement");
+    mem_write32(m, 0x1f801070, ~(1u << IRQ_DMA)); start(2, 0x013000, 1u << 16 | 1, 0x01000201);
+    CHECK(mem_read32(m, DICR) == 0x00800000 && !(m->i_stat & (1u << IRQ_DMA)), "channel-disabled completion does not latch a new flag with master enabled");
+    mem_write32(m, DICR, 0x00008000);
+    CHECK(mem_read32(m, DICR) == 0x80008000 && (m->i_stat & (1u << IRQ_DMA)), "force interrupt bypasses both enables");
     printf("dma: %d checks, %d failed\n", checks, fails);
     ps1_free(m);
     return fails != 0;

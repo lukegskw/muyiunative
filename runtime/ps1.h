@@ -1,9 +1,14 @@
 // The console the runtime models (plan.md, section 2): memory, the R3000A and COP0, the interrupt controller, DMA, the timers, the GPU with its software renderer, the
-// CD-ROM drive (empty for now), the SPU's registers and memory, and the controller port (nothing plugged in). All of a machine's state is in its ps1 struct and nothing
+// CD-ROM drive, SPU voices and memory, MDEC, and the controller/memory-card ports. All of a machine's state is in its ps1 struct and nothing
 // is global, so two machines can run side by side (the lockstep comparison, plan.md section 6). Each file cites the psx-spx sections it models
 #pragma once
 #include <stdint.h>
 #include <stdio.h>
+#include "disc.h"
+#include "gte.h"
+#include "sio.h"
+#include "spu.h"
+#include "mdec.h"
 
 _Static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "the console and the host are both little-endian: memory is read and written as host integers");
 
@@ -19,18 +24,20 @@ typedef struct ps1_cpu {
     uint32_t ld_r, ld_v;   // the load in flight: it reaches its register after the next instruction (the load delay slot)
     int branch, delay;     // the instruction just run was a branch / the one running is in its delay slot
     uint32_t cop0[32], cop2d[32], cop2c[32];
+    uint64_t gte_busy;
 } ps1_cpu;
 
-typedef struct ps1_dma { uint32_t madr, bcr, chcr; } ps1_dma;
+typedef struct ps1_dma { uint32_t madr, bcr, chcr, addr, block_left, block_size, blocks; uint64_t left; int active; } ps1_dma;
 typedef struct ps1_timer { uint32_t mode; uint16_t count, target; uint64_t last, next; uint64_t acc; int fired; } ps1_timer;   // acc: CPU cycles not yet counted, 16.16
 
-typedef struct ps1_vtx { int x, y, r, g, b; } ps1_vtx;
+typedef struct ps1_vtx { int x, y, r, g, b, u, v; } ps1_vtx;
 typedef struct ps1_gpu {
     uint16_t vram[VRAM_H * VRAM_W];
     uint32_t buf[16]; int n, need;   // the GP0 command being received
     int poly, pgour, psemi, pnv, phave; uint32_t pcol; ps1_vtx plast;   // a polyline being received (its vertices arrive until a terminator)
     int xfer; uint16_t xx, xy, xw, xh; uint32_t xi;   // a VRAM transfer: 1 = CPU to VRAM (GP0 A0h), 2 = VRAM to CPU (GP0 C0h); its rectangle and next halfword
     uint32_t read, texpage, texwin, mask;
+    uint16_t texcache[256][4], clutcache[256], clut_id; uint32_t textag[256]; int clut_valid;
     int16_t ax1, ay1, ax2, ay2, ox, oy;   // drawing area (GP0 E3h/E4h) and offset (GP0 E5h)
     int irq, display_off, dma_dir;
     uint16_t disp_x, disp_y, hx1, hx2, vy1, vy2; uint32_t dmode;   // GP1(05h..08h)
@@ -42,10 +49,10 @@ typedef struct ps1_cdrom {
     int pending; uint8_t pending_cmd;   // a command written while an interrupt was unacknowledged waits for it (psx-spx, BUSYSTS flag)
     uint8_t now_int, now_resp[16], now_n; uint64_t next;   // the response on its way, delivered at `next`
     uint8_t later_int, later_resp[16], later_n; uint32_t later_delay; int later;   // a second response, sent once the first is acknowledged
+    uint64_t sector_next; uint32_t target, lba, last_lba; int setloc, reading, have_header, complete_stat;
+    uint8_t sector[8][2352], header[8], data[2340];   // decoder slots and the independently locked host FIFO (psx-spx, CDROM Response/Data Queueing)
+    uint16_t data_n, data_pos; uint8_t head, ready, have_sector, data_pending, end_pending, filter_file, filter_channel, bfrd;
 } ps1_cdrom;
-
-typedef struct ps1_spu { uint16_t reg[0x200]; uint32_t addr; uint8_t ram[SPU_RAM_SIZE]; } ps1_spu;
-typedef struct ps1_sio { uint16_t mode, ctrl, baud; int rx_full; uint64_t done; } ps1_sio;
 
 typedef struct ps1 {
     uint8_t ram[RAM_SIZE];           // main RAM; the BIOS kernel keeps the first 64 KB
@@ -58,8 +65,10 @@ typedef struct ps1 {
     ps1_timer tmr[3];
     ps1_gpu gpu;
     ps1_cdrom cd;
+    ps1_disc disc;                  // external read-only media; reset keeps the mounted disc, destruction closes it
     ps1_spu spu;
     ps1_sio sio;
+    ps1_mdec mdec;
     char tty[256]; int ntty;         // the debug console line being written (0x1F802080)
     int frame_done, exit_requested, exit_code;
     unsigned red, unmapped;          // [RED] reports already made: features (RED_ONCE bits), and unmapped accesses (a count)
@@ -99,6 +108,7 @@ void sched_update(ps1 *m);                      // after an event moved: the nex
 void dma_reset(ps1 *m);
 uint32_t dma_read(ps1 *m, uint32_t off);
 void dma_write(ps1 *m, uint32_t off, uint32_t v);
+void dma_resume(ps1 *m);                        // re-evaluate MDEC requests after a CPU-side FIFO/control access
 void tmr_reset(ps1 *m);
 uint32_t tmr_read(ps1 *m, uint32_t off);
 void tmr_write(ps1 *m, uint32_t off, uint32_t v);
@@ -115,6 +125,7 @@ void cd_reset(ps1 *m);
 uint8_t cd_read(ps1 *m, uint32_t off);
 void cd_write(ps1 *m, uint32_t off, uint8_t v);
 void cd_event(ps1 *m);
+void cd_sector_event(ps1 *m);
 uint32_t cd_dma_read(ps1 *m);
 void spu_reset(ps1 *m);
 uint16_t spu_read(ps1 *m, uint32_t off);
@@ -122,12 +133,11 @@ void spu_write(ps1 *m, uint32_t off, uint16_t v);
 void spu_dma_write(ps1 *m, uint32_t w);
 uint32_t spu_dma_read(ps1 *m);
 void sio_reset(ps1 *m);
-uint32_t sio_read(ps1 *m, uint32_t off);
-void sio_write(ps1 *m, uint32_t off, uint32_t v);
 
 // One line on stderr; a line that marks something unimplemented or wrong starts with "[RED] " (AGENTS.md)
 #define LOG(...) do { fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } while (0)
 #define RED(...) do { fputs("[RED] ", stderr); LOG(__VA_ARGS__); } while (0)
 // A feature gap is reported once per machine, not on every use
-enum { RED_GTE = 1, RED_TEXTURE = 2, RED_MDEC = 4, RED_SPU_VOICE = 8, RED_TMR_SYNC = 16, RED_DMA = 32, RED_GPU = 64, RED_CD = 128, RED_COP0 = 256 };
+enum { RED_GTE = 1, RED_TEXTURE = 2, RED_MDEC = 4, RED_SPU_VOICE = 8, RED_TMR_SYNC = 16, RED_DMA = 32, RED_GPU = 64, RED_CD = 128, RED_COP0 = 256,
+       RED_CD_TIMING = 512, RED_CD_AUDIO = 1024, RED_CD_ID = 2048, RED_CD_OVERRUN = 4096, RED_SPU_EFFECT = 8192, RED_GTE_TIMING = 16384 };
 #define RED_ONCE(m, bit, ...) do { if (!((m)->red & (bit))) { (m)->red |= (bit); RED(__VA_ARGS__); } } while (0)

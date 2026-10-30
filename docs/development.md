@@ -6,10 +6,10 @@
 
 | Part         | Where                                    | Built with                                                | State                                                                                                                                                           |
 | ------------ | ---------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Runtime      | `runtime/` (C)                           | compiled into the host                                    | The interpreter, memory, COP0 and interrupts, timers, DMA and the software GPU; the CD-ROM drive (no disc), the SPU's registers and the controller port (empty) |
+| Runtime      | `runtime/` (C)                           | compiled into the host                                    | Interpreter, memory/COP0, interrupts/timers/DMA, textured software GPU, external CUE/BIN data reads, GTE, SPU voices/reverb, MDEC, digital pads and memory-card protocols |
 | BIOS         | `bios/openbios/`                         | built from nugget's source, then committed (its README)   | OpenBIOS with its shell, which boots in phase 1                                                                                                                 |
 | Presentation | `gfx/metal/` (Objective-C, Metal)        | compiled into the host                                    | Shows the GPU's picture, stretched to the window                                                                                                                |
-| Mac host     | `shell/mac/` (C and Objective-C, AppKit) | `make -C shell/mac` → `shell/mac/build/ps1native`         | Runs the machine on a thread of its own at the console's speed; `--headless` runs it without a window                                                           |
+| Mac host     | `shell/mac/` (C and Objective-C, AppKit) | `make -C shell/mac` → `shell/mac/build/ps1native`         | Machine thread, Metal presentation, keyboard digital pad and stereo Audio Queue output; `--headless` supports frame-based input and local PNG capture |
 | Mac app      | `tools/pack_app.py`                      | `make -C shell/mac app` → `shell/mac/build/ps1native.app` | The host, with `bios/openbios` in its Resources, ad-hoc signed with the hardened runtime                                                                        |
 
 There is no Xcode project for the Mac, and nothing to install beyond Xcode and Python: plain Makefiles drive clang (`make -C <folder>`), and Python scripts pack what clang built, as in nxnative. The iOS app (phase 7) will get its Xcode project generated (XcodeGen). Build outputs go to `build/` beside each Makefile, which git ignores.
@@ -29,6 +29,37 @@ Tests need no game files, retail BIOS or GPU: they build their inputs in code, a
 | The host without a window: 300 frames, the last one's hash and PNG | `shell/mac/build/ps1native --headless --frames 300 --png /tmp/frame.png` |
 
 A C test (`runtime/tests/t_<what>.c`) includes `ps1.h` and links the whole runtime, built once into objects; it counts its checks with `CHECK`, prints `<what>: N checks, M failed` and exits non-zero on a failure; add it to `TESTS` in `runtime/tests/Makefile`. A Python test is a `unittest` file, `tools/tests/test_<what>.py`, whose docstring says what it checks. A `[RED]` line in a test's output is the runtime reporting what it does not model yet, not a failure. A PNG of a frame stays outside the repository; a frame is compared by its hash (`ps1_frame_hash`).
+
+Older Xcode sanitizer runtimes can hang before `main` on newer macOS. This was reproduced on macOS 26.6.2 with Xcode's clang 17, even for an empty program; the installed Command Line Tools' clang 21 ran correctly. If both toolchains are installed, select the newer compiler and its SDK for a fresh test build without changing the system selection:
+
+```sh
+env PATH="/Library/Developer/CommandLineTools/usr/bin:$PATH" \
+  SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk \
+  make -C runtime/tests B=build/clt run asan
+```
+
+### Phase 2: hardware breadth
+
+The host accepts `--disc /external/path/disc.cue` (or a single raw `.bin`). It opens the external files read-only and keeps them mounted across machine resets; it never packages or copies them. `t_disc` builds synthetic files in `/tmp` to test CUE addressing, multiple files and tracks, stored pregaps, validation and independent machines. `t_cdread` checks the controller ports, 75/150 Hz sector delivery, 2048/2340-byte FIFOs, BFRD data locking, DMA3 and Pause.
+
+Supported CUE tracks use `MODE1/2352`, `MODE2/2352` or `AUDIO` in `BINARY` files, with `INDEX 00`/`01`. Other layouts, including synthesized `PREGAP`/`POSTGAP`, are rejected. Audio tracks have TOC positions but no playback yet. Raw BIN lacks the wobble-groove SCEx string, so GetID reports unlicensed media; the bundled OpenBIOS can boot the selected first disc through its data-read path.
+
+`t_texture` covers 4/8/15-bit textures, CLUT and texture caches, affine polygons, windows/flips, modulation, transparency and masks. `t_gte` covers all documented commands, transfer side effects, overflow/saturation and the integer reciprocal. `t_spu` covers ADPCM/Gaussian interpolation, voices, ADSR, sweeps, noise, pitch modulation, reverb, capture and interrupts. `t_sio` sends complete digital-pad and memory-card transactions through the timed ports. `t_mdec` covers RLE, uploaded quantization/IDCT tables, pixel formats, FIFO backpressure and reordered DMA output.
+
+`t_homebrew` builds three MIT-licensed MIPS programs entirely in code and executes them through the interpreter: CPU load/branch delays and arithmetic; GTE projection and flags through COP2 instructions; GPU upload, textured drawing and framebuffer readback through memory-mapped ports. Their expected results come from public hardware documentation. They require no SDK or external test ROM, and complement the device unit tests. All are included in the runtime test command and CI. This follows nxnative's separation of [synthetic CI tests](https://github.com/seedds/nxnative/blob/main/.github/workflows/tests.yml) from [local game bring-up evidence](https://github.com/seedds/nxnative/blob/main/docs/agents/README.md#checklist-for-a-new-title).
+
+The Phase 2 exit criterion was verified locally on 2026-10-30: these programs pass, and the interpreter reaches the selected game's title/main menu. The repeatable route is recorded in its [profile](../profiles/SLUS-01212/game.toml). Guest output is discarded during game validation; screenshots stay outside the repository and only frame hashes are recorded. Game validation is separate from CI, which needs no dump.
+
+For a local headless route, `--input <frame>:<hex-buttons>` changes the port-1 active-high button mask at a zero-based presented-frame index and holds it until the next event. Repeat the option in frame order. For example, Start (bit 3) for six frames:
+
+```sh
+shell/mac/build/ps1native --disc /external/path/disc.cue --headless \
+  --frames 2400 --input 1800:8 --input 1806:0 --png /tmp/frame.png
+```
+
+The window uses the [keyboard mapping](../README.md#build-from-the-command-line). Controller and card state belongs to each machine; the host connects one digital pad and leaves card slots empty. Tests insert synthetic 128 KB cards in memory. Host-file save persistence belongs to the product work in Phase 5. SPU samples are drained on the machine thread; the Mac front end owns a separately locked playback ring, so its audio callback never accesses machine state.
+
+Remaining compatibility work includes CD-DA/XA audio/filtering and authentication metadata; mechanical, DMA and partial-sector timing; GTE writes during execution; SPU CD/PIO mixing and sub-sample RAM/key-on/FIFO timing; exact MDEC rounding/decode timing; interlaced drawing and fractional rasterization quirks; additional controller types and serial-link hardware. `[RED]` diagnostics identify exercised gaps. The title/menu check establishes the Phase 2 exit, while gameplay, audible game output, broader hardware conformance and other games remain unverified.
 
 ## Continuous integration
 
