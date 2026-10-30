@@ -1,7 +1,8 @@
 // The GPU (psx-spx, Graphics Processing Unit): GP0 commands draw into the 1 MB VRAM and move rectangles in and out of it, GP1 commands set up the display, and GPUSTAT
 // reports both. Drawing is done in software as each command completes: textured/untextured polygons (flat or gouraud), lines and polylines, rectangles, fills and copies, with
-// semi-transparency, dithering and the mask bit. The video timing (GPU Timings) drives the scanline events: hblank for timer 1, the vertical blank IRQ, the end of a frame.
-// Public reference: https://psx-spx.consoledev.net/graphicsprocessingunitgpu/ . Not modelled yet: exact rasterization timing and interlaced drawing
+// semi-transparency, dithering and the mask bit. The video timing (GPU Timings) drives the scanline events: hblanks for timer 1, the blanks the timers synchronize to,
+// the vertical blank IRQ, the end of a frame. Public reference: https://psx-spx.consoledev.net/graphicsprocessingunitgpu/ . Not modelled: the time drawing takes, and
+// which lines 480-line interlaced mode keeps drawing from (psx-spx does not say)
 #include "ps1.h"
 #include <stddef.h>
 #include <stdlib.h>
@@ -258,8 +259,8 @@ static int gp0_len(uint32_t c) {   // the words of a GP0 command, its first incl
 static void execute(ps1 *m) {
     ps1_gpu *g = &m->gpu;
     uint32_t c = g->buf[0] >> 24;
-    if (c >> 5 >= 1 && c >> 5 <= 3 && (g->dmode & 0x24) == 0x24)   // psx-spx, GP1(08h): interlace affects drawing
-        RED_ONCE(m, RED_GPU, "gpu: drawing in 480-line interlaced mode draws every line; how interlace limits drawing is not modelled yet (phase 2)");
+    if (c >> 5 >= 1 && c >> 5 <= 3 && (g->dmode & 0x24) == 0x24)   // psx-spx, GP1(08h): "the Vertical Interlace flag DOES affect GP0 draw commands", without saying how
+        RED_ONCE(m, RED_GPU, "gpu: drawing in 480-line interlaced mode draws every line; which lines interlace keeps it from drawing is not documented");
     switch (c >> 5) {
     case 0:
         if (c == 0x02) fill(g, g->buf);
@@ -294,9 +295,49 @@ void gpu_gp0(ps1 *m, uint32_t w) {
     if (g->n == g->need) { g->n = 0; execute(m); }
 }
 
+// The blanks the timers synchronize to (psx-spx, Timers, MODE). The vertical blank is the lines outside GP1(07h)'s display range Y1..Y2, as for IRQ 0. Timer 0's hblank is
+// the part of a scanline outside GP1(06h)'s range X1..X2, which counts video cycles from HSYNC, here the scanline's first cycle: "a display configured to 0 pixels
+// width would cause an endless hblank" (psx-spx, GPU Timings, Vertical Timings). The ps1-tests timers log agrees: with the range 260h..C60h, timer 0 synchronized to
+// hblanks pauses for about 540 of the 2150 cycles of an NTSC scanline
+static int in_vblank(const ps1_gpu *g) { return g->line < g->vy1 || g->line >= g->vy2; }
+int gpu_vblank(const ps1 *m) { return in_vblank(&m->gpu); }
+
+static uint64_t hpos(const ps1_gpu *g, uint32_t x) { return (uint64_t)x * CPU_HZ / (g->dmode & 8 ? 53203425 : 53693175); }   // video cycles to CPU cycles
+static int in_hblank(const ps1_gpu *g, uint64_t pos) { return pos < hpos(g, g->hx1) || pos >= hpos(g, g->hx2); }   // pos: CPU cycles into the scanline
+
+static void hblank_plan(ps1 *m, uint64_t pos) {   // the scanline's next hblank edge after pos, while timer 0 synchronizes
+    ps1_gpu *g = &m->gpu; uint64_t x1 = hpos(g, g->hx1), x2 = hpos(g, g->hx2), len = g->next_line - g->line_start;
+    g->next_hblank = NEVER;
+    if (!(m->tmr[0].mode & 1) || x1 >= x2) return;
+    if (pos < x1 && x1 < len) g->next_hblank = g->line_start + x1;
+    else if (pos < x2 && x2 < len) g->next_hblank = g->line_start + x2;
+}
+
+int gpu_hblank_now(ps1 *m) {
+    ps1_gpu *g = &m->gpu; uint64_t pos = m->cycles - g->line_start;
+    g->hblank = in_hblank(g, pos); hblank_plan(m, pos);
+    return g->hblank;
+}
+
+void gpu_hblank(ps1 *m) {
+    ps1_gpu *g = &m->gpu; uint64_t at = g->next_hblank, pos = at - g->line_start;
+    g->hblank = in_hblank(g, pos); hblank_plan(m, pos);
+    tmr_blank(m, 0, g->hblank, at);
+}
+
+static void blank_edges(ps1 *m, int vblank, uint64_t at) {   // after the scanline or the display range changed: the edges they made
+    ps1_gpu *g = &m->gpu;
+    if (in_vblank(g) != vblank) tmr_blank(m, 1, !vblank, at);
+    if (!(m->tmr[0].mode & 1)) { g->next_hblank = NEVER; return; }
+    uint64_t pos = at - g->line_start; int h = in_hblank(g, pos);
+    hblank_plan(m, pos);
+    if (h != g->hblank) { g->hblank = h; tmr_blank(m, 0, h, at); }
+}
+
 void gpu_gp1(ps1 *m, uint32_t w) {
     ps1_gpu *g = &m->gpu;
-    switch (w >> 24 & 0x3f) {   // 40h..FFh mirror 00h..3Fh
+    int vblank = in_vblank(g); uint32_t c = w >> 24 & 0x3f;
+    switch (c) {   // 40h..FFh mirror 00h..3Fh
     case 0x00:   // the values of psx-spx, GP1(00h)
         memset(g->textag, 0, sizeof g->textag); g->clut_valid = 0;
         g->n = g->poly = g->xfer = g->irq = g->dma_dir = 0; g->display_off = 1;
@@ -325,6 +366,7 @@ void gpu_gp1(ps1 *m, uint32_t w) {
         break;
     default: break;
     }
+    if (c == 0 || (c >= 6 && c <= 8)) blank_edges(m, vblank, m->cycles);   // GP1(00h) and (06h..08h) move the blanks
 }
 
 uint32_t gpu_read(ps1 *m) {
@@ -360,23 +402,27 @@ uint64_t gpu_dot_fp(const ps1 *m) {
     return (d & 0x40 ? 7 : divider[d & 3]) * CPU_HZ * 65536 / (d & 8 ? 53203425 : 53693175);
 }
 
-// The vertical blank starts at the display range's last line, GP1(07h) Y2, with IRQ 0; a Y2 past the field's last line never starts it (psx-spx, GP1(07h))
+// The vertical blank starts at the display range's last line, GP1(07h) Y2, with IRQ 0; a Y2 past the field's last line never starts it (psx-spx, GP1(07h)). Timer 1
+// counts an hblank a scanline, none when the hblank never ends or never starts (psx-spx, GPU Timings, Vertical Timings)
 void gpu_line(ps1 *m) {
     ps1_gpu *g = &m->gpu;
-    uint64_t p = line_fp(g) + g->line_frac;
-    g->next_line += p >> 16; g->line_frac = p & 0xffff;
-    tmr_hblank(m);
+    int vblank = in_vblank(g);
+    uint64_t p = line_fp(g) + g->line_frac, x1 = hpos(g, g->hx1), x2 = hpos(g, g->hx2);
+    g->line_start = g->next_line; g->next_line += p >> 16; g->line_frac = p & 0xffff;
+    if (x1 < x2 && (x1 > 0 || x2 < g->next_line - g->line_start)) tmr_hblank(m);
     int lines = field_lines(g);
     if (++g->line >= lines) {
         g->line = 0; g->field = g->dmode & 0x20 ? !g->field : 0;
         if (g->vy2 >= lines) m->frame_done = 1;
     }
     if (g->line == g->vy2) { irq_raise(m, IRQ_VBLANK); m->frame_done = 1; }
+    blank_edges(m, vblank, g->line_start);
 }
 
 void gpu_reset(ps1 *m) {   // VRAM keeps its contents, as the other memories do
     ps1_gpu *g = &m->gpu;
     memset((char *)g + offsetof(ps1_gpu, buf), 0, sizeof *g - offsetof(ps1_gpu, buf));
+    g->line_start = m->cycles; g->next_hblank = NEVER;
     gpu_gp1(m, 0);
     uint64_t p = line_fp(g);
     g->next_line = m->cycles + (p >> 16); g->line_frac = p & 0xffff;

@@ -28,7 +28,8 @@ typedef struct ps1_cpu {
 } ps1_cpu;
 
 typedef struct ps1_dma { uint32_t madr, bcr, chcr, addr, block_left, block_size, blocks; uint64_t left; int active; } ps1_dma;
-typedef struct ps1_timer { uint32_t mode; uint16_t count, target; uint64_t last, next; uint64_t acc; int fired; } ps1_timer;   // acc: CPU cycles not yet counted, 16.16
+// acc: CPU cycles not yet counted, 16.16; gate: whether MODE.0's synchronization lets the counter count
+typedef struct ps1_timer { uint32_t mode; uint16_t count, target; uint64_t last, next; uint64_t acc; int fired, gate; } ps1_timer;
 
 typedef struct ps1_vtx { int x, y, r, g, b, u, v; } ps1_vtx;
 typedef struct ps1_gpu {
@@ -42,6 +43,7 @@ typedef struct ps1_gpu {
     int irq, display_off, dma_dir, tex_disable_ok;   // ...; GP1(09h): GP0(E1h) bit 11 may disable textures
     uint16_t disp_x, disp_y, hx1, hx2, vy1, vy2; uint32_t dmode;   // GP1(05h..08h)
     int line, field; uint64_t next_line; uint32_t line_frac;   // video timing: scanline, interlace field, next scanline's cycle and its 16.16 remainder
+    uint64_t line_start, next_hblank; int hblank;   // the scanline's first cycle; while timer 0 synchronizes: its next hblank edge, and whether in hblank
 } ps1_gpu;
 
 enum { CD_AUDIO_FRAMES = 16384 };   // 44.1 kHz frames the drive holds for the SPU: one 18.9 kHz mono XA-ADPCM sector makes 9408
@@ -124,6 +126,7 @@ void tmr_reset(ps1 *m);
 uint32_t tmr_read(ps1 *m, uint32_t off);
 void tmr_write(ps1 *m, uint32_t off, uint32_t v);
 void tmr_hblank(ps1 *m);
+void tmr_blank(ps1 *m, int n, int start, uint64_t at);   // timer n's blank (0: hblank, 1: vblank) starts or ends at cycle `at`
 void tmr_event(ps1 *m, int n);
 void gpu_reset(ps1 *m);
 void gpu_gp0(ps1 *m, uint32_t w);
@@ -131,6 +134,9 @@ void gpu_gp1(ps1 *m, uint32_t w);
 uint32_t gpu_read(ps1 *m);
 uint32_t gpu_stat(ps1 *m);
 void gpu_line(ps1 *m);
+void gpu_hblank(ps1 *m);                        // timer 0's next hblank edge is due
+int gpu_hblank_now(ps1 *m);                     // in hblank now; schedules the edges while timer 0 synchronizes
+int gpu_vblank(const ps1 *m);
 uint64_t gpu_dot_fp(const ps1 *m);              // CPU cycles per dotclock tick, 16.16
 void cd_reset(ps1 *m);
 uint8_t cd_read(ps1 *m, uint32_t off);
@@ -150,7 +156,7 @@ void sio_reset(ps1 *m);
 #define LOG(...) do { fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } while (0)
 #define RED(...) do { fputs("[RED] ", stderr); LOG(__VA_ARGS__); } while (0)
 // A feature gap is reported once per machine, not on every use
-enum { RED_GTE = 1, RED_TEXTURE = 2, RED_MDEC = 4, RED_SPU_VOICE = 8, RED_TMR_SYNC = 16, RED_DMA = 32, RED_GPU = 64, RED_CD = 128, RED_COP0 = 256,
+enum { RED_GTE = 1, RED_MDEC = 4, RED_SPU_VOICE = 8, RED_DMA = 32, RED_GPU = 64, RED_CD = 128, RED_COP0 = 256,
        RED_CD_TIMING = 512, RED_CD_AUDIO = 1024, RED_CD_ID = 2048, RED_CD_OVERRUN = 4096, RED_SPU_EFFECT = 8192, RED_GTE_TIMING = 16384, RED_TEX_DISABLE = 32768,
        RED_CD_SCAN = 1 << 16, RED_CD_SESSION = 1 << 17, RED_CD_GETQ = 1 << 18, RED_CD_SOUNDMAP = 1 << 19, RED_CD_IGNORE = 1 << 20, RED_CD_PEAK = 1 << 21,
        RED_CD_XA = 1 << 22, RED_CD_UNLOCK = 1 << 23 };

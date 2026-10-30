@@ -3,7 +3,7 @@
 #include "ps1.h"
 
 void sched_update(ps1 *m) {
-    uint64_t e = m->gpu.next_line;
+    uint64_t e = m->gpu.next_line < m->gpu.next_hblank ? m->gpu.next_line : m->gpu.next_hblank;
     for (int n = 0; n < 3; n++) if (m->tmr[n].next < e) e = m->tmr[n].next;
     if (m->cd.next < e) e = m->cd.next;
     if (m->cd.sector_next < e) e = m->cd.sector_next;
@@ -13,7 +13,12 @@ void sched_update(ps1 *m) {
 }
 
 void sched_run(ps1 *m) {
-    while (m->gpu.next_line <= m->cycles) gpu_line(m);
+    for (;;) {   // scanlines and hblank edges, in their order
+        uint64_t l = m->gpu.next_line, h = m->gpu.next_hblank;
+        if (l <= h && l <= m->cycles) gpu_line(m);
+        else if (h < l && h <= m->cycles) gpu_hblank(m);
+        else break;
+    }
     for (int n = 0; n < 3; n++) if (m->tmr[n].next <= m->cycles) tmr_event(m, n);
     if (m->cd.next <= m->cycles) cd_event(m);
     while (m->cd.sector_next <= m->cycles) cd_sector_event(m);

@@ -63,14 +63,14 @@ static void mdec_begin(ps1 *m, int ch) {
 static void to_device(ps1 *m, int ch, uint32_t w) {
     if (ch == 2) gpu_gp0(m, w);
     else if (ch == 4) spu_dma_write(m, w);
-    else RED_ONCE(m, RED_DMA, "dma: channel %d is not modelled yet (phase 2)", ch);
+    else RED_ONCE(m, RED_DMA, "dma: channel %d towards its device: nothing takes the words (PIO has nothing connected, the CD-ROM only sends)", ch);
 }
 
 static uint32_t from_device(ps1 *m, int ch) {
     if (ch == 2) return gpu_read(m);
     if (ch == 3) return cd_dma_read(m);
     if (ch == 4) return spu_dma_read(m);
-    RED_ONCE(m, RED_DMA, "dma: channel %d is not modelled yet (phase 2)", ch);
+    RED_ONCE(m, RED_DMA, "dma: channel %d from its device: nothing sends, RAM gets 0 (PIO has nothing connected)", ch);
     return 0;
 }
 

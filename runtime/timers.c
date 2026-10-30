@@ -1,16 +1,20 @@
 // The root counters (psx-spx, Timers): three 16-bit counters. Timer 0 counts the system clock or the dotclock, timer 1 the system clock or hblanks, timer 2 the system
 // clock, optionally divided by 8. With MODE.ZRET a counter counts up to and including its target and restarts at 0, otherwise it wraps after FFFFh (a count written above
 // the target also runs to FFFFh first); reaching the target or FFFFh sets a flag and, when enabled, raises IRQ 4..6 (pulse or toggle, once or repeatedly). Clock counts
-// are brought up to date when read and at the cycles their IRQs fall due; hblanks are counted per scanline (gpu_line). Not modelled yet: the synchronization modes of
-// timers 0 and 1, which count only inside or outside blanking (phase 2), and the extra cycle a counter holds 0 after a reset (Reset and Wrap)
+// are brought up to date when read and at the cycles their IRQs fall due; hblanks are counted per scanline (gpu_line).
+// MODE.0 synchronizes timer 0 to hblanks and timer 1 to vblanks (gpu_sw.c says where they lie): 0 pauses the counter inside the blank, 1 resets it to 0 where the blank
+// starts, 2 counts only inside the blank, from 0, and 3 waits for the first blank to start, then runs freely. In mode 2 the counter reads 0 outside the blank: the
+// ps1-tests timers log shows it count from 0 inside the hblank and read 0 again after it, so it is reset where the blank ends as well. Timer 2's modes 0 and 3 stop it.
+// Not modelled: the cycles a counter holds 0 after a reset (Reset and Wrap), and timer 0 counting a whole number of dots a scanline (GPU Timings, Horizontal Timings)
 #include "ps1.h"
 #include <string.h>
 
 enum { T_GATF = 1, T_ZRET = 8, T_CMP = 16, T_OVFL = 32, T_REPT = 64, T_LEVL = 128, T_EXTC = 256, T_PSCL = 512, T_INTF = 1024, T_EQUF = 2048, T_OVFF = 4096 };
 
-static uint64_t period_fp(const ps1 *m, int n) {   // CPU cycles per count, 16.16; 0 when not counting the system or dot clock (stopped, or counting hblanks)
+static uint64_t period_fp(const ps1 *m, int n) {   // CPU cycles per count, 16.16; 0 when not counting the system or dot clock (stopped, paused, or counting hblanks)
     uint32_t mode = m->tmr[n].mode;
     if (n == 2) return mode & T_GATF && (mode >> 1 & 3) % 3 == 0 ? 0 : (uint64_t)(mode & T_PSCL ? 8 : 1) << 16;   // sync modes 0 and 3 stop timer 2
+    if (mode & T_GATF && !m->tmr[n].gate) return 0;
     if (!(mode & T_EXTC)) return 1 << 16;
     return n == 0 ? gpu_dot_fp(m) : 0;
 }
@@ -53,11 +57,14 @@ static void advance(ps1 *m, int n, uint64_t k) {   // k counts: the target and F
     t->count = after(t, k);
 }
 
-static void sync(ps1 *m, int n) {
+static void sync_to(ps1 *m, int n, uint64_t at) {   // counts until cycle `at` (an edge already passed may be a little behind the last read)
     ps1_timer *t = &m->tmr[n]; uint64_t p = period_fp(m, n);
-    if (p) { t->acc += (m->cycles - t->last) << 16; uint64_t k = t->acc / p; t->acc -= k * p; advance(m, n, k); }
-    t->last = m->cycles;
+    if (at < t->last) at = t->last;
+    if (p) { t->acc += (at - t->last) << 16; uint64_t k = t->acc / p; t->acc -= k * p; advance(m, n, k); }
+    t->last = at;
 }
+
+static void sync(ps1 *m, int n) { sync_to(m, n, m->cycles); }
 
 static void plan(ps1 *m, int n) {   // after sync: the cycle of the next count that may raise an IRQ
     ps1_timer *t = &m->tmr[n]; uint64_t p = period_fp(m, n);
@@ -66,7 +73,7 @@ static void plan(ps1 *m, int n) {   // after sync: the cycle of the next count t
     uint64_t dt = t->mode & T_CMP ? ticks_to(t, t->target) : NEVER, df = t->mode & T_OVFL ? ticks_to(t, 0xffff) : NEVER, d = dt < df ? dt : df;
     if (d == NEVER) return;
     uint64_t need = d * p;
-    t->next = m->cycles + (need > t->acc ? (need - t->acc + 0xffff) >> 16 : 0);
+    t->next = t->last + (need > t->acc ? (need - t->acc + 0xffff) >> 16 : 0);
 }
 
 void tmr_reset(ps1 *m) {
@@ -76,7 +83,20 @@ void tmr_reset(ps1 *m) {
 
 void tmr_event(ps1 *m, int n) { sync(m, n); plan(m, n); }
 
-void tmr_hblank(ps1 *m) { if (m->tmr[1].mode & T_EXTC) advance(m, 1, 1); }
+void tmr_hblank(ps1 *m) { ps1_timer *t = &m->tmr[1]; if (t->mode & T_EXTC && (!(t->mode & T_GATF) || t->gate)) advance(m, 1, 1); }
+
+void tmr_blank(ps1 *m, int n, int start, uint64_t at) {
+    ps1_timer *t = &m->tmr[n];
+    if (!(t->mode & T_GATF)) return;
+    sync_to(m, n, at);
+    switch (t->mode >> 1 & 3) {
+    case 0: t->gate = !start; break;
+    case 1: if (start) t->count = 0; break;
+    case 2: t->gate = start; t->count = 0; break;
+    case 3: if (start) t->gate = 1; break;
+    }
+    plan(m, n); sched_update(m);
+}
 
 uint32_t tmr_read(ps1 *m, uint32_t off) {
     int n = off >> 4;
@@ -96,10 +116,12 @@ void tmr_write(ps1 *m, uint32_t off, uint32_t v) {
     ps1_timer *t = &m->tmr[n]; sync(m, n);
     switch (off & 0xf) {
     case 0: t->count = (uint16_t)v; break;
-    case 4:   // writing the mode resets the counter, the one-shot and INTF
+    case 4: {   // writing the mode resets the counter, the one-shot and INTF
         t->mode = (v & 0x3ff) | T_INTF; t->count = 0; t->fired = 0; t->acc = 0;
-        if (n < 2 && v & T_GATF) RED_ONCE(m, RED_TMR_SYNC, "timers: timer %d synchronization mode %u is not modelled yet (phase 2): it counts freely", n, v >> 1 & 3);
+        uint32_t sm = v >> 1 & 3; int blank = n == 0 ? gpu_hblank_now(m) : n == 1 && gpu_vblank(m);
+        t->gate = sm == 1 || (sm == 0 && !blank) || (sm == 2 && blank);   // mode 3 waits for a blank to start
         break;
+    }
     case 8: t->target = (uint16_t)v; break;
     }
     plan(m, n); sched_update(m);
