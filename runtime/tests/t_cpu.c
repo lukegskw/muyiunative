@@ -83,11 +83,15 @@ int main(void) {
     RUN(I(ADDIU, 0, 1, 0x3c), I(COP0, 4, 1, C0_SR << 11), RFE);
     CHECK((m->cpu.cop0[C0_SR] & 0x3f) == 0x3f, "RFE pops the interrupt-enable/kernel-mode stack (the old pair stays)");
 
-    RUN(NOP);
+    // An enabled IRQ waits for the end of the block, after a branch's delay slot (plan.md, decision log: interrupts at the end of a block); EPC is where the next
+    // block starts. The handler here is a loop, and cpu_run stops at the end of a block once the next event is due
+    mem_write32(m, VECTOR, I(BEQ, 0, 0, -1)); mem_write32(m, VECTOR + 4, NOP);
+    RUN_STEPS(1, NOP, I(ADDIU, 0, 1, 1), I(BEQ, 0, 0, 2), I(ADDIU, 0, 2, 2), I(ADDIU, 0, 3, 3), I(ADDIU, 0, 4, 4));
     m->cpu.cop0[C0_SR] = 0x401; m->i_mask = 1u << IRQ_VBLANK; irq_raise(m, IRQ_VBLANK);
-    uint32_t at = m->cpu.pc; cpu_step(m);
-    CHECK(m->cpu.pc == VECTOR && (m->cpu.cop0[C0_CAUSE] >> 2 & 31) == EXC_INT && m->cpu.cop0[C0_EPC] == at && (m->cpu.cop0[C0_SR] & 0x3f) == 4,
-          "an enabled IRQ is taken before the next instruction, which EPC points at; IEc moves to IEp");
+    m->next_event = m->cycles + 20; cpu_run(m);
+    CHECK((m->cpu.cop0[C0_CAUSE] >> 2 & 31) == EXC_INT && m->cpu.cop0[C0_EPC] == CODE + 20 && (m->cpu.cop0[C0_SR] & 0x3f) == 4 && (m->cpu.pc & ~4u) == VECTOR,
+          "an enabled IRQ is taken at the end of the block, which EPC points after; IEc moves to IEp");
+    CHECK(r[1] == 1 && r[2] == 2 && r[3] == 0 && r[4] == 0, "the IRQ waits for the block's branch and its delay slot");
     m->i_stat = 0; irq_update(m);
     CHECK(!(m->cpu.cop0[C0_CAUSE] & 0x400), "acknowledging the IRQ in I_STAT clears CAUSE.IP2");
 

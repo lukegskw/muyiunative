@@ -23,6 +23,7 @@ typedef struct ps1_cpu {
     uint32_t r[32], hi, lo, pc, next_pc, cur_pc;
     uint32_t ld_r, ld_v;   // the load in flight: it reaches its register after the next instruction (the load delay slot)
     int branch, delay;     // the instruction just run was a branch / the one running is in its delay slot
+    int boundary;          // the instruction just run ended a block (it was in a delay slot, or an exception came): events and interrupts are taken here (cpu_run)
     uint32_t cop0[32], cop2d[32], cop2c[32];
     uint64_t gte_busy, hilo_busy;   // the cycles at which the GTE's command and MULT/DIV's result are done (reading early waits)
 } ps1_cpu;
@@ -61,6 +62,8 @@ typedef struct ps1_cdrom {
     int16_t audio[CD_AUDIO_FRAMES * 2]; unsigned audio_read, audio_n; int audio_xa;   // stereo frames on their way to the SPU, and whether they are XA-ADPCM
 } ps1_cdrom;
 
+typedef struct ps1_native_set ps1_native_set;   // native code generated for some guest code (native.h)
+
 typedef struct ps1 {
     uint8_t ram[RAM_SIZE];           // main RAM; the BIOS kernel keeps the first 64 KB
     uint8_t scratch[SCRATCH_SIZE];   // the scratchpad: the R3000A's data cache, used as fast RAM
@@ -79,6 +82,8 @@ typedef struct ps1 {
     char tty[256]; int ntty;         // the debug console line being written (0x1F802080)
     void (*tty_out)(void *ctx, const char *line); void *tty_ctx;   // where finished debug console lines go: stderr when NULL
     uint8_t *exe; size_t exe_n;      // a PS-X EXE waiting for the BIOS to reach its shell (exe.c)
+    const ps1_native_set *native[4]; int nnative;   // the native code this machine runs where memory holds the code it was made from (native.c)
+    uint64_t native_runs, interp_steps;   // entries into native code from the dispatcher, and instructions interpreted: how much runs native
     int frame_done, exit_requested, exit_code;
     unsigned red, unmapped;          // [RED] reports already made: features (RED_ONCE bits), and unmapped accesses (a count)
 } ps1;
@@ -106,16 +111,21 @@ void mem_write8(ps1 *m, uint32_t addr, uint32_t v);    // v: the whole register 
 void mem_write16(ps1 *m, uint32_t addr, uint32_t v);
 void mem_write32(ps1 *m, uint32_t addr, uint32_t v);
 int mem_fetch(ps1 *m, uint32_t addr, uint32_t *op);   // an instruction word; 0 where nothing executable is mapped (a bus error)
+const uint8_t *mem_code(ps1 *m, uint32_t addr, uint32_t n);   // the n bytes from addr in RAM or the BIOS, which code runs from; NULL if not all in one
 unsigned mem_load_cycles(uint32_t addr, unsigned n);   // the CPU cycles a load of n bytes takes, its instruction's included
-unsigned mem_fetch_cycles(uint32_t pc);              // the CPU cycles fetching the instruction at pc takes
+// The CPU cycles fetching the instruction at pc takes: the instruction cache serves KUSEG and KSEG0 in a cycle (a hit is assumed: the cache is not modelled); KSEG1 is
+// uncached, so each instruction is a 32-bit read. Inline, so that native code, whose pc is a constant, folds it
+static inline unsigned mem_fetch_cycles(uint32_t pc) { return pc >> 29 == 5 ? mem_load_cycles(pc, 4) : 1; }
 void irq_raise(ps1 *m, int n);
 void irq_update(ps1 *m);                        // CAUSE.IP2 follows I_STAT AND I_MASK
 
-// The CPU (cpu.c, interp.c)
+// The CPU (cpu.c, interp.c) and the native code it runs (native.c)
 void cpu_reset(ps1 *m);
-void cpu_step(ps1 *m);
-void cpu_run(ps1 *m);                           // steps until the next scheduled event
+void cpu_step(ps1 *m);                          // one instruction, interpreted (cpu_ops.h); interrupts are cpu_run's
+void cpu_run(ps1 *m);                           // runs until the end of a block at or after the next scheduled event
 void cpu_exception(ps1 *m, uint32_t code);
+int ps1_native_add(ps1 *m, const ps1_native_set *set);   // 0, or -1 after a [RED] line when the machine has no room for more
+int native_run(ps1 *m);                         // runs native code from the CPU's pc, where some matches memory: 1 if it ran
 
 // The devices, each by its register offset
 void sched_run(ps1 *m);                         // runs the events that are due (sched.c)

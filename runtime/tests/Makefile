@@ -3,11 +3,12 @@
 B = build
 SAN ?=
 CFLAGS = -O1 -g -Wall -Wextra -I.. $(SAN)
-TESTS = t_mem t_cpu t_cycles t_dma t_timers t_gpu t_texture t_gte t_spu t_sio t_mdec t_cdrom t_disc t_cdread t_cdaudio t_homebrew t_boot t_ps1tests
+TESTS = t_mem t_cpu t_cycles t_native t_dma t_timers t_gpu t_texture t_gte t_spu t_sio t_mdec t_cdrom t_disc t_cdread t_cdaudio t_homebrew t_boot t_ps1tests
 RT = $(sort $(wildcard ../*.c))
 OBJ = $(patsubst ../%.c,$(B)/rt/%.o,$(RT))
 BIOS = $(abspath ../../bios/openbios/openbios.bin)
 TESTS_DIR = $(abspath ../../tests)
+TOOLS = ../../tools
 .DEFAULT_GOAL := run
 .SECONDARY: $(OBJ)
 
@@ -21,6 +22,14 @@ $(B)/rt/%.o: ../%.c $(wildcard ../*.h) Makefile
 $(B)/t_%: t_%.c $(OBJ) Makefile
 	@mkdir -p $(B)
 	clang $(CFLAGS) -DBIOS_PATH='"$(BIOS)"' -DTESTS_DIR='"$(TESTS_DIR)"' -o $@ $< $(OBJ)
+
+# t_native links the native code the tools generate for its program, into the build folder only (plan.md, decision log)
+$(B)/gen/native_cases.c: $(TOOLS)/tests/native_cases.py $(TOOLS)/tests/asm.py $(TOOLS)/codegen.py $(TOOLS)/analyze.py $(TOOLS)/mips.py
+	@mkdir -p $(@D)
+	python3 $(TOOLS)/tests/native_cases.py $@
+
+$(B)/t_native: t_native.c $(B)/gen/native_cases.c $(OBJ) Makefile
+	clang $(CFLAGS) -o $@ t_native.c $(B)/gen/native_cases.c $(OBJ)
 
 asan:
 	ASAN_OPTIONS=halt_on_error=1:detect_stack_use_after_return=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \

@@ -28,7 +28,7 @@ void ps1_exe_start(ps1 *m) {
     uint32_t dst = word(h + 0x18), size = word(h + 0x1c), bss = word(h + 0x28), bss_n = word(h + 0x2c), sp = word(h + 0x30);
     memcpy(m->ram + ps1_phys(dst), h + HDR, size);
     if (bss_n && in_ram(bss, bss_n)) memset(m->ram + ps1_phys(bss), 0, bss_n);
-    c->pc = word(h + 0x10); c->next_pc = c->pc + 4; c->ld_r = 0; c->branch = c->delay = 0;
+    c->pc = word(h + 0x10); c->next_pc = c->pc + 4; c->ld_r = 0; c->branch = c->delay = 0; c->boundary = 1;
     c->r[28] = word(h + 0x14); c->r[4] = 1; c->r[5] = 0;
     if (sp) c->r[29] = c->r[30] = sp + word(h + 0x34);
     free(m->exe); m->exe = NULL; m->exe_n = 0;

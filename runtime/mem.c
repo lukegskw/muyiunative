@@ -155,5 +155,9 @@ unsigned mem_load_cycles(uint32_t a, unsigned n) {
     return a == 0xfffe0130 && n > 1 ? 2 : 1;   // the cache control port: 0.95, 1.9 and 1.9
 }
 
-// The instruction cache serves KUSEG and KSEG0 in a cycle (a hit is assumed: the cache is not modelled); KSEG1 is uncached, so each instruction is a 32-bit read
-unsigned mem_fetch_cycles(uint32_t pc) { return pc >> 29 == 5 ? mem_load_cycles(pc, 4) : 1; }
+const uint8_t *mem_code(ps1 *m, uint32_t a, uint32_t n) {
+    uint32_t p = ps1_phys(a);
+    if (p < RAM_WINDOW) { p %= RAM_SIZE; return n <= RAM_SIZE - p ? m->ram + p : NULL; }
+    if (p - BIOS_BASE < BIOS_SIZE) return n <= BIOS_SIZE - (p - BIOS_BASE) ? m->bios + (p - BIOS_BASE) : NULL;
+    return NULL;
+}
