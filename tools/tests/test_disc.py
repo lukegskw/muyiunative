@@ -24,14 +24,14 @@ def record(name, lba, size, folder=False):   # an ISO9660 directory record
     return bytes([len(r)]) + r[1:]
 
 
-def volume(licensed=True, boot=True):   # 24 sectors of a data track: the licence in sector 4, the volume descriptor in 16, directories in 18 and 19, files from 20
+def volume(licensed=True, boot=True, exe=EXE):   # 24 sectors of a data track: the licence in sector 4, the volume descriptor in 16, directories in 18 and 19, files from 20
     s = [b''] * 24
     if licensed: s[4] = b'\x00' * 0x20 + b'Sony Computer Entertainment Amer  ica '
     s[16] = b'\x01CD001\x01' + b'\x00' * 149 + record('\x00', 18, 2048, True)
     s[17] = b'\xffCD001\x01'
     s[18] = record('\x00', 18, 2048, True) + record('\x01', 18, 2048, True) + record('GAME', 19, 2048, True) + (record('SYSTEM.CNF;1', 20, len(CNF)) if boot else b'')
-    s[19] = record('\x00', 19, 2048, True) + record('\x01', 18, 2048, True) + record('SLUS_000.01;1', 21, len(EXE))
-    s[20] = CNF; s[21] = EXE[:2048]; s[22] = EXE[2048:]
+    s[19] = record('\x00', 19, 2048, True) + record('\x01', 18, 2048, True) + record('SLUS_000.01;1', 21, len(exe))
+    s[20] = CNF; s[21] = exe[:2048]; s[22] = exe[2048:4096]
     return b''.join(raw(d) for d in s)
 
 
