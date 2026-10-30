@@ -2,6 +2,8 @@
 // channel follows a linked list of packets and moves blocks to and from VRAM. DICR requires both enables to latch a completion; existing flags survive mask/master
 // changes until acknowledged, and can reassert IRQ3 when master enable rises (psx-spx, DMA Channels, 1F8010F4h)
 #include "ps1.h"
+#include <string.h>
+#include <unistd.h>
 
 static int checks, fails;
 #define CHECK(c, msg) do { checks++; if (!(c)) { fails++; fprintf(stderr, "FAIL: %s\n", msg); } } while (0)
@@ -41,6 +43,17 @@ int main(void) {
     start(2, 0x010300, 0, 0x01000401);
     CHECK(chcr(2) & 0x01000000 && mem_read32(m, DICR) == 0x00840000 && !(m->i_stat & 1u << IRQ_DMA),
           "a GPU list that comes back on itself never completes, nor raises its IRQ (ps1-tests dma/chain-looping)");
+    mem_write32(m, 0x1f8010a8, 0);
+    const uint32_t chain[] = {0x010410, 0x010420, 0x010430, 0x010440, 0x010420};   // two packets, then a loop of three
+    for (uint32_t i = 0; i < 5; i++) mem_write32(m, 0x80010400 + 16 * i, chain[i]);
+    FILE *log = tmpfile(); int err = dup(2); char line[300] = "";
+    if (log && err >= 0) {
+        fflush(stderr); dup2(fileno(log), 2); start(2, 0x010400, 0, 0x01000401); fflush(stderr); dup2(err, 2);
+        rewind(log); if (!fgets(line, sizeof line, log)) line[0] = 0;
+    }
+    if (log) fclose(log);
+    if (err >= 0) close(err);
+    CHECK(strstr(line, "after 2 packets, a loop of 3 from 010420, closed by the packet at 010440 (header 00010420)"), "a looping list's report says where the loop closes");
     mem_write32(m, 0x1f8010a8, 0);
 
     gpu_gp0(m, 0xa0000000); gpu_gp0(m, 0x00000020); gpu_gp0(m, 0x00020002);

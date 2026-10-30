@@ -74,6 +74,20 @@ static uint32_t from_device(ps1 *m, int ch) {
     return 0;
 }
 
+// A GPU list that went 100000h packets without an end code comes back on itself: Brent's cycle detection over its next addresses says where, as evidence of what
+// built it. A console never completes such a list, nor raises its IRQ (the hardware log of ps1-tests dma/chain-looping)
+static void loop_report(ps1 *m, uint32_t start) {
+    uint32_t power = 1, len = 1, mu = 0, slow = start, fast = *ram32(m, start) & 0x1ffffc;
+    while (slow != fast) { if (power == len) { slow = fast; power *= 2; len = 0; } fast = *ram32(m, fast) & 0x1ffffc; len++; }
+    slow = fast = start;
+    for (uint32_t i = 0; i < len; i++) fast = *ram32(m, fast) & 0x1ffffc;
+    while (slow != fast) { slow = *ram32(m, slow) & 0x1ffffc; fast = *ram32(m, fast) & 0x1ffffc; mu++; }
+    uint32_t last = slow;
+    for (uint32_t i = 1; i < len; i++) last = *ram32(m, last) & 0x1ffffc;
+    RED("dma: the GPU list at %06x comes back on itself: after %u packets, a loop of %u from %06x, closed by the packet at %06x (header %08x); the channel stays busy",
+        start, mu, len, slow, last, *ram32(m, last));
+}
+
 static void run(ps1 *m, int ch) {
     ps1_dma *d = &m->dma[ch];
     uint32_t mode = d->chcr >> 9 & 3, addr = d->madr & 0x1ffffc, step = d->chcr & 2 ? (uint32_t)-4 : 4, words = 0;
@@ -87,8 +101,7 @@ static void run(ps1 *m, int ch) {
             for (uint32_t i = 1; i <= n; i++) gpu_gp0(m, *ram32(m, addr + 4 * i));
             words += n + 1;
             if (h & 0x800000) break;   // the end code (00FFFFFFh in practice)
-            // The hardware log of ps1-tests dma/chain-looping: a list that comes back on itself never completes, nor raises its IRQ
-            if (guard == 0x100000) { RED("dma: the GPU list at %06x does not end: the channel stays busy", d->madr); return; }
+            if (guard == 0x100000) { loop_report(m, d->madr & 0x1ffffc); return; }
             addr = h & 0x1ffffc;
         }
         d->madr = 0xffffff;
