@@ -27,9 +27,9 @@ int native_run(ps1 *m) {
         const ps1_native_set *s = m->native[k];
         unsigned lo = 0, hi = s->nentries;
         while (lo < hi) { unsigned mid = lo + (hi - lo) / 2; if (s->entries[mid].pc < pc) lo = mid + 1; else hi = mid; }
-        for (; lo < s->nentries && s->entries[lo].pc == pc; lo++) {
+        for (; lo < s->nentries && s->entries[lo].pc == pc; lo++) {   // run: at least one instruction runs, unless the set's table is wrong
             const ps1_native_fn *f = &s->fns[s->entries[lo].fn];
-            if (matches(m, f)) { m->native_runs++; f->run(m); return m->cycles != at; }   // it ran at least one instruction, unless the set's table is wrong
+            if (matches(m, f)) { m->native_runs++; m->native_pc = pc; m->native_fn = f->start; f->run(m); return m->cycles != at; }
         }
     }
     return 0;

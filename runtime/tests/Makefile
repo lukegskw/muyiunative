@@ -3,7 +3,7 @@
 B = build
 SAN ?=
 CFLAGS = -O1 -g -Wall -Wextra -I.. $(SAN)
-TESTS = t_mem t_cpu t_cycles t_native t_dma t_timers t_gpu t_texture t_gte t_spu t_sio t_mdec t_cdrom t_disc t_cdread t_cdaudio t_homebrew t_boot t_ps1tests
+TESTS = t_mem t_cpu t_cycles t_native t_lockstep t_dma t_timers t_gpu t_texture t_gte t_spu t_sio t_mdec t_cdrom t_disc t_cdread t_cdaudio t_homebrew t_boot t_ps1tests
 RT = $(sort $(wildcard ../*.c))
 OBJ = $(patsubst ../%.c,$(B)/rt/%.o,$(RT))
 BIOS = $(abspath ../../bios/openbios/openbios.bin)
@@ -30,6 +30,22 @@ $(B)/gen/native_cases.c: $(TOOLS)/tests/native_cases.py $(TOOLS)/tests/asm.py $(
 
 $(B)/t_native: t_native.c $(B)/gen/native_cases.c $(OBJ) Makefile
 	clang $(CFLAGS) -o $@ t_native.c $(B)/gen/native_cases.c $(OBJ)
+
+# t_lockstep runs ps1-tests programs as native code generated from them here: $(1), the set's name; $(2), the program in tests/ps1-tests
+CODEGEN = $(TOOLS)/codegen.py $(TOOLS)/analyze.py $(TOOLS)/mips.py $(TOOLS)/exe.py
+define native_exe
+$(B)/gen/$(1).c: $(TESTS_DIR)/ps1-tests/$(2) $(CODEGEN)
+	@mkdir -p $$(@D)
+	python3 $(TOOLS)/codegen.py $$< --name $(1) -o $$@
+endef
+$(eval $(call native_exe,cop,cpu/cop/cop.exe))
+$(eval $(call native_exe,test_all,gte/test-all/test-all.exe))
+$(eval $(call native_exe,otc_test,dma/otc-test/otc-test.exe))
+$(eval $(call native_exe,triangle,gpu/triangle/triangle.exe))
+LOCKSTEP_GEN = $(addprefix $(B)/gen/,cop.c test_all.c otc_test.c triangle.c)
+
+$(B)/t_lockstep: t_lockstep.c $(LOCKSTEP_GEN) $(OBJ) Makefile
+	clang $(CFLAGS) -DBIOS_PATH='"$(BIOS)"' -DTESTS_DIR='"$(TESTS_DIR)"' -o $@ t_lockstep.c $(LOCKSTEP_GEN) $(OBJ)
 
 asan:
 	ASAN_OPTIONS=halt_on_error=1:detect_stack_use_after_return=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
