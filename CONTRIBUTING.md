@@ -12,7 +12,7 @@ Never commit or attach disc images, BIOS dumps, memory cards, save states or any
 
 ## Clean room
 
-ps1native is MIT-licensed and written from public documentation of the hardware ([psx-spx](https://psx-spx.consoledev.net/)) and from observation. Do not copy, translate or closely paraphrase code from emulators or recompilers whose license is not permissive, and do not write a part after reading such code for it. Third-party code must be under a permissive license (MIT, zlib, BSD) and keeps its license file beside it ([AGENTS.md](AGENTS.md)).
+ps1native is MIT-licensed and written from public documentation of the hardware ([psx-spx](https://psx-spx.consoledev.net/)) and from observation. Do not copy, translate or closely paraphrase code from emulators or recompilers whose license is not permissive, and do not write a part after reading such code for it. Third-party code must be under a permissive license (MIT, zlib, BSD) and keeps its license file beside it ([AGENTS.md](AGENTS.md)). The one exception is the test programs of [ps1-tests](tests/ps1-tests/README.md), which carry PSn00bSDK's libraries under MPL-2.0: the runtime runs them as a console runs a disc, and nothing of them is linked into ps1native or put in its app ([decision log](plan.md#8-decision-log)).
 
 ## Before you start
 

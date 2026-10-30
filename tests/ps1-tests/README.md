@@ -40,7 +40,7 @@ A program that prints its results must print the console's log, line for line. A
 | ps1-tests: the programs, their logs and pictures | MIT     | [LICENSE](LICENSE)                     |
 | PSn00bSDK's libraries, linked into each program  | MPL-2.0 | [LICENSE.PSn00bSDK](LICENSE.PSn00bSDK) |
 
-PSn00bSDK's source is at [github.com/Lameguy64/PSn00bSDK](https://github.com/Lameguy64/PSn00bSDK). The suite's CI built this release with the Docker image `jaczekanski/psn00bsdk:latest`, pushed on 2020-11-22 and not since (digest `sha256:15057bc87f01caf8a849468f5c62c68a6995072705a01d385c3ada9ef212f5e7`): PSn00bSDK as of November 2020, in that repository's history. The programs name no version; they say "Built using GCC and PSn00bSDK libraries", and libpsxgpu "2020 PSn00bSDK Project". They are here as released, unmodified. The runtime runs the programs as a console would; it does not link them or take code from them.
+PSn00bSDK's source is at [github.com/Lameguy64/PSn00bSDK](https://github.com/Lameguy64/PSn00bSDK). The suite's CI built this release with the Docker image `jaczekanski/psn00bsdk:latest`, pushed on 2020-11-22 and not since (digest `sha256:15057bc87f01caf8a849468f5c62c68a6995072705a01d385c3ada9ef212f5e7`): PSn00bSDK as of November 2020, in that repository's history. The programs name no version; they say "Built using GCC and PSn00bSDK libraries", and libpsxgpu "2020 PSn00bSDK Project". They are here as released, unmodified, the one exception to the project's rule of permissive licenses only ([decision log](../../plan.md#8-decision-log)). The runtime runs the programs as a console would; it does not link them or take code from them.
 
 ## Updating, and finding a difference
 

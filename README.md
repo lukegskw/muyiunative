@@ -35,4 +35,4 @@ ps1native takes its build, its Mac front end and its rules for contributors and 
 
 ### License
 
-MIT ([LICENSE](LICENSE)).
+MIT ([LICENSE](LICENSE)). Third-party code keeps its own license, beside it: [OpenBIOS](bios/openbios/README.md) (MIT, with BSD parts), and the test programs of [ps1-tests](tests/ps1-tests/README.md) (MIT, with PSn00bSDK's libraries under MPL-2.0, which never reach the app).
