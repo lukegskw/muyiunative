@@ -65,7 +65,7 @@ ps1native/            (working name)
 
 ## 4. Phases and exit criteria
 
-Phases 0 and 1 have met their exit criteria. In phase 2 the homebrew tests pass in CI: the hardware test programs of [ps1-tests](tests/ps1-tests/README.md). The [first game](profiles/SLUS-01212/game.toml) reached its title menu on 2026-10-30; drawing, the CD-ROM and the timers have changed since, so it is to reach it again before phase 3 starts. [Development](docs/development.md#phase-2-hardware-breadth) records the checks and the remaining gaps.
+Phases 0–2 have met their exit criteria. Phase 2's homebrew tests are the hardware test programs of [ps1-tests](tests/ps1-tests/README.md), which pass in CI, and its [first game](profiles/SLUS-01212/game.toml) reaches its title menu, checked again on 2026-10-30 with the runtime of commit a0d26af. [Development](docs/development.md#phase-2-hardware-breadth) records the checks and the remaining gaps.
 
 | #   | Phase                                                                                                                                                                                                 | Done when                                                                                   |
 | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |

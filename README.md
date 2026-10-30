@@ -6,7 +6,7 @@ The aim is native code, not emulation: the game's MIPS code is translated to C a
 
 ## Status
 
-Phase 2 of [the plan](plan.md#4-phases-and-exit-criteria), hardware breadth: the interpreter has the CD-ROM drive with its audio, the full software GPU, the GTE, the SPU, the MDEC, digital pads and memory cards, and passes the hardware test programs of [ps1-tests](tests/ps1-tests/README.md) in CI. Metal Slug X (USA) reached its title menu on the interpreter before the latest changes to drawing, the CD-ROM and the timers, and is to reach it again before phase 3. Gameplay, broader compatibility and timing accuracy still need validation.
+Phase 2 of [the plan](plan.md#4-phases-and-exit-criteria), hardware breadth, has met its exit criterion: the interpreter has the CD-ROM drive with its audio, the full software GPU, the GTE, the SPU, the MDEC, digital pads and memory cards, passes the hardware test programs of [ps1-tests](tests/ps1-tests/README.md) in CI, and takes Metal Slug X (USA) to its title menu. Gameplay, broader compatibility and timing accuracy still need validation.
 
 ## Build from the command line
 
