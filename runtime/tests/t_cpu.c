@@ -10,7 +10,7 @@ static int checks, fails;
 #define R(fn, rs, rt, rd, sa) ((uint32_t)(rs) << 21 | (uint32_t)(rt) << 16 | (uint32_t)(rd) << 11 | (uint32_t)(sa) << 6 | (uint32_t)(fn))
 #define I(op, rs, rt, imm) ((uint32_t)(op) << 26 | (uint32_t)(rs) << 21 | (uint32_t)(rt) << 16 | ((uint32_t)(imm) & 0xffff))
 #define JAL(a) (3u << 26 | ((uint32_t)(a) >> 2 & 0x3ffffff))
-enum { REGIMM = 1, BEQ = 4, ADDIU = 9, ORI = 13, LUI = 15, COP0 = 16, COP2 = 18, LWL = 34, LW = 35, LWR = 38, SWL = 42, SW = 43, SWR = 46 };
+enum { REGIMM = 1, BEQ = 4, ADDIU = 9, ORI = 13, LUI = 15, COP0 = 16, COP1 = 17, COP2 = 18, COP3 = 19, LWL = 34, LW = 35, LWR = 38, SWL = 42, SW = 43, SWR = 46, SWC1 = 57, SWC3 = 59 };
 enum { SRA = 3, SYSCALL = 12, MULT = 24, DIV = 26, DIVU = 27, ADD = 32, ADDU = 33, SLT = 42, SLTU = 43 };
 enum { CODE = 0x80001000, DATA = 0x80002000, VECTOR = 0x80000080 };
 #define NOP 0u
@@ -74,6 +74,11 @@ int main(void) {
     CHECK(m->cpu.pc == VECTOR && (m->cpu.cop0[C0_CAUSE] >> 2 & 31) == EXC_ADEL && m->cpu.cop0[C0_BADVADDR] == DATA + 2, "an unaligned LW: address error, BADVADDR");
     RUN(I(COP2, 0, 1, 0));
     CHECK(m->cpu.pc == VECTOR && (m->cpu.cop0[C0_CAUSE] >> 2 & 31) == EXC_CPU && (m->cpu.cop0[C0_CAUSE] >> 28 & 3) == 2, "COP2 while SR.CU2 is off: coprocessor 2 unusable");
+    // The hardware log of ps1-tests cpu/cop: with its coprocessor enabled, an instruction of COP1/COP3, an LWCn/SWCn, or a COP0 TLB command raises nothing
+    RUN(I(LUI, 0, 1, 0xa000), I(COP0, 4, 1, C0_SR << 11), I(COP1, 0, 0, 0), I(COP3, 0, 0, 0), I(SWC3, 0, 1, 0), I(COP0, 0x1f, 0, 0), NOP);
+    CHECK(m->cpu.pc == CODE + 28 && !(m->cpu.cop0[C0_CAUSE] >> 2 & 31), "COP1, COP3, SWC3 and a COP0 TLB command, with SR.CU1/CU3 on: no exception");
+    RUN(I(SWC1, 0, 1, 0));
+    CHECK(m->cpu.pc == VECTOR && (m->cpu.cop0[C0_CAUSE] >> 2 & 31) == EXC_CPU && (m->cpu.cop0[C0_CAUSE] >> 28 & 3) == 1, "SWC1 while SR.CU1 is off: coprocessor 1 unusable");
 
     RUN(I(ADDIU, 0, 1, 0x3c), I(COP0, 4, 1, C0_SR << 11), RFE);
     CHECK((m->cpu.cop0[C0_SR] & 0x3f) == 0x3f, "RFE pops the interrupt-enable/kernel-mode stack (the old pair stays)");

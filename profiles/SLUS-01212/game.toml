@@ -1,0 +1,22 @@
+# The first game (plan.md, decision log). Its dump stays outside the repository; scripts/disc_info.py printed the values of [disc] from it on 2026-10-30
+name = "Metal Slug X (USA)"
+serial = "SLUS-01212"
+
+[disc]
+licence = "SCEA"
+boot = 'SLUS_012.12'
+boot_sha256 = "0c36eb1775c844e991fe136d6e1a66dad8d79eeda4be1bdd577715fc35af98e0"
+tracks = [
+  { number = 1, mode = "MODE2/2352", sectors = 44352, sha256 = "45cde149878fe945d0219fd0f61ca09856aee66bdcc9119de21c0583f1d0667d" },
+]
+
+# Local interpreter acceptance route; only a frame hash is retained. Frames are zero-based, and button masks are active-high (Start = 0008h). The runtimes of commits
+# 8680bf2 and a0d26af both reach this frame; on the way the game twice draws a GPU list that comes back on itself (docs/development.md, phase 2)
+[validation]
+date = "2026-10-30"
+screen = "title/main menu"
+frames = 2400
+inputs = ["1800:8", "1806:0"]
+width = 320
+height = 240
+frame_hash_fnv1a64 = "a3d45a4b667b9f54"

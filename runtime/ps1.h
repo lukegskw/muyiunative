@@ -1,9 +1,14 @@
 // The console the runtime models (plan.md, section 2): memory, the R3000A and COP0, the interrupt controller, DMA, the timers, the GPU with its software renderer, the
-// CD-ROM drive (empty for now), the SPU's registers and memory, and the controller port (nothing plugged in). All of a machine's state is in its ps1 struct and nothing
+// CD-ROM drive, SPU voices and memory, MDEC, and the controller/memory-card ports. All of a machine's state is in its ps1 struct and nothing
 // is global, so two machines can run side by side (the lockstep comparison, plan.md section 6). Each file cites the psx-spx sections it models
 #pragma once
 #include <stdint.h>
 #include <stdio.h>
+#include "disc.h"
+#include "gte.h"
+#include "sio.h"
+#include "spu.h"
+#include "mdec.h"
 
 _Static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "the console and the host are both little-endian: memory is read and written as host integers");
 
@@ -19,33 +24,42 @@ typedef struct ps1_cpu {
     uint32_t ld_r, ld_v;   // the load in flight: it reaches its register after the next instruction (the load delay slot)
     int branch, delay;     // the instruction just run was a branch / the one running is in its delay slot
     uint32_t cop0[32], cop2d[32], cop2c[32];
+    uint64_t gte_busy;
 } ps1_cpu;
 
-typedef struct ps1_dma { uint32_t madr, bcr, chcr; } ps1_dma;
-typedef struct ps1_timer { uint32_t mode; uint16_t count, target; uint64_t last, next; uint64_t acc; int fired; } ps1_timer;   // acc: CPU cycles not yet counted, 16.16
+typedef struct ps1_dma { uint32_t madr, bcr, chcr, addr, block_left, block_size, blocks; uint64_t left; int active; } ps1_dma;
+// acc: CPU cycles not yet counted, 16.16; gate: whether MODE.0's synchronization lets the counter count
+typedef struct ps1_timer { uint32_t mode; uint16_t count, target; uint64_t last, next; uint64_t acc; int fired, gate; } ps1_timer;
 
-typedef struct ps1_vtx { int x, y, r, g, b; } ps1_vtx;
+typedef struct ps1_vtx { int x, y, r, g, b, u, v; } ps1_vtx;
 typedef struct ps1_gpu {
     uint16_t vram[VRAM_H * VRAM_W];
     uint32_t buf[16]; int n, need;   // the GP0 command being received
     int poly, pgour, psemi, pnv, phave; uint32_t pcol; ps1_vtx plast;   // a polyline being received (its vertices arrive until a terminator)
     int xfer; uint16_t xx, xy, xw, xh; uint32_t xi;   // a VRAM transfer: 1 = CPU to VRAM (GP0 A0h), 2 = VRAM to CPU (GP0 C0h); its rectangle and next halfword
     uint32_t read, texpage, texwin, mask;
+    uint16_t texcache[256][4], clutcache[256], clut_id; uint32_t textag[256]; int clut_valid, clut_n;
     int16_t ax1, ay1, ax2, ay2, ox, oy;   // drawing area (GP0 E3h/E4h) and offset (GP0 E5h)
-    int irq, display_off, dma_dir;
+    int irq, display_off, dma_dir, tex_disable_ok;   // ...; GP1(09h): GP0(E1h) bit 11 may disable textures
     uint16_t disp_x, disp_y, hx1, hx2, vy1, vy2; uint32_t dmode;   // GP1(05h..08h)
     int line, field; uint64_t next_line; uint32_t line_frac;   // video timing: scanline, interlace field, next scanline's cycle and its 16.16 remainder
+    uint64_t line_start, next_hblank; int hblank;   // the scanline's first cycle; while timer 0 synchronizes: its next hblank edge, and whether in hblank
 } ps1_gpu;
 
+enum { CD_AUDIO_FRAMES = 16384 };   // 44.1 kHz frames the drive holds for the SPU: one 18.9 kHz mono XA-ADPCM sector makes 9408
 typedef struct ps1_cdrom {
-    uint8_t index, param[16], nparam, resp[16], nresp, rpos, hintmsk, hintsts, stat, mode, busy, irq, atv[4];
+    uint8_t index, param[16], nparam, resp[16], nresp, rpos, hintmsk, hintsts, stat, mode, busy, irq;
+    uint8_t atv[4], atv_next[4], muted, adp_mute;   // ATV0..3 applied and as written (ADPCTL.5 applies them), Mute, ADPCTL.0 (psx-spx, CDROM Controller I/O Ports)
     int pending; uint8_t pending_cmd;   // a command written while an interrupt was unacknowledged waits for it (psx-spx, BUSYSTS flag)
     uint8_t now_int, now_resp[16], now_n; uint64_t next;   // the response on its way, delivered at `next`
     uint8_t later_int, later_resp[16], later_n; uint32_t later_delay; int later;   // a second response, sent once the first is acknowledged
+    uint64_t sector_next; uint32_t target, lba, last_lba; int setloc, reading, playing, have_header, complete_stat;
+    uint8_t sector[8][2352], header[8], data[2340];   // decoder slots and the independently locked host FIFO (psx-spx, CDROM Response/Data Queueing)
+    uint16_t data_n, data_pos; uint8_t head, ready, have_sector, data_pending, end_pending, filter_file, filter_channel, bfrd;
+    uint8_t filter_drop, size_mode, region, scex, report[8], report_n;   // ...; the licence region (A/E/I, 0 = none) and SCEx counters; a Play report waiting
+    int16_t xa_old[2], xa_older[2], zz[2][32]; unsigned zz_p, zz_six;   // XA-ADPCM: the predictors' history and the zigzag resampler's 37.8 kHz ring
+    int16_t audio[CD_AUDIO_FRAMES * 2]; unsigned audio_read, audio_n; int audio_xa;   // stereo frames on their way to the SPU, and whether they are XA-ADPCM
 } ps1_cdrom;
-
-typedef struct ps1_spu { uint16_t reg[0x200]; uint32_t addr; uint8_t ram[SPU_RAM_SIZE]; } ps1_spu;
-typedef struct ps1_sio { uint16_t mode, ctrl, baud; int rx_full; uint64_t done; } ps1_sio;
 
 typedef struct ps1 {
     uint8_t ram[RAM_SIZE];           // main RAM; the BIOS kernel keeps the first 64 KB
@@ -58,9 +72,13 @@ typedef struct ps1 {
     ps1_timer tmr[3];
     ps1_gpu gpu;
     ps1_cdrom cd;
+    ps1_disc disc;                  // external read-only media; reset keeps the mounted disc, destruction closes it
     ps1_spu spu;
     ps1_sio sio;
+    ps1_mdec mdec;
     char tty[256]; int ntty;         // the debug console line being written (0x1F802080)
+    void (*tty_out)(void *ctx, const char *line); void *tty_ctx;   // where finished debug console lines go: stderr when NULL
+    uint8_t *exe; size_t exe_n;      // a PS-X EXE waiting for the BIOS to reach its shell (exe.c)
     int frame_done, exit_requested, exit_code;
     unsigned red, unmapped;          // [RED] reports already made: features (RED_ONCE bits), and unmapped accesses (a count)
 } ps1;
@@ -70,6 +88,10 @@ ps1 *ps1_new(void);   // a machine after reset, its memories zeroed; NULL when o
 void ps1_free(ps1 *m);
 void ps1_reset(ps1 *m);
 int ps1_load_bios(ps1 *m, const char *path);   // 0, or -1 after a [RED] line saying why
+int ps1_load_exe(ps1 *m, const uint8_t *exe, size_t n);   // a PS-X EXE (copied) to start in place of the BIOS shell; 0, or -1 after a [RED] line
+int ps1_exe_due(const ps1 *m);
+void ps1_exe_start(ps1 *m);
+void tty_putc(ps1 *m, char c);                   // the debug console: written through 0x1F802080 or the kernel's std_out_putchar
 void ps1_run_frame(ps1 *m);                     // runs to the next vertical blank (or to an exit request through the debug port)
 // The picture the console shows now, as BGRA8 pixels (0xAARRGGBB words) into out (cap_w x cap_h at most): its size in *w, *h (gpu_sw.c)
 void ps1_display(const ps1 *m, uint32_t *out, int cap_w, int cap_h, int *w, int *h);
@@ -80,8 +102,8 @@ uint32_t ps1_phys(uint32_t addr);
 uint8_t mem_read8(ps1 *m, uint32_t addr);
 uint16_t mem_read16(ps1 *m, uint32_t addr);
 uint32_t mem_read32(ps1 *m, uint32_t addr);
-void mem_write8(ps1 *m, uint32_t addr, uint8_t v);
-void mem_write16(ps1 *m, uint32_t addr, uint16_t v);
+void mem_write8(ps1 *m, uint32_t addr, uint32_t v);    // v: the whole register being stored (mem.c, wr)
+void mem_write16(ps1 *m, uint32_t addr, uint32_t v);
 void mem_write32(ps1 *m, uint32_t addr, uint32_t v);
 int mem_fetch(ps1 *m, uint32_t addr, uint32_t *op);   // an instruction word; 0 where nothing executable is mapped (a bus error)
 void irq_raise(ps1 *m, int n);
@@ -99,10 +121,12 @@ void sched_update(ps1 *m);                      // after an event moved: the nex
 void dma_reset(ps1 *m);
 uint32_t dma_read(ps1 *m, uint32_t off);
 void dma_write(ps1 *m, uint32_t off, uint32_t v);
+void dma_resume(ps1 *m);                        // re-evaluate MDEC requests after a CPU-side FIFO/control access
 void tmr_reset(ps1 *m);
 uint32_t tmr_read(ps1 *m, uint32_t off);
 void tmr_write(ps1 *m, uint32_t off, uint32_t v);
 void tmr_hblank(ps1 *m);
+void tmr_blank(ps1 *m, int n, int start, uint64_t at);   // timer n's blank (0: hblank, 1: vblank) starts or ends at cycle `at`
 void tmr_event(ps1 *m, int n);
 void gpu_reset(ps1 *m);
 void gpu_gp0(ps1 *m, uint32_t w);
@@ -110,24 +134,30 @@ void gpu_gp1(ps1 *m, uint32_t w);
 uint32_t gpu_read(ps1 *m);
 uint32_t gpu_stat(ps1 *m);
 void gpu_line(ps1 *m);
+void gpu_hblank(ps1 *m);                        // timer 0's next hblank edge is due
+int gpu_hblank_now(ps1 *m);                     // in hblank now; schedules the edges while timer 0 synchronizes
+int gpu_vblank(const ps1 *m);
 uint64_t gpu_dot_fp(const ps1 *m);              // CPU cycles per dotclock tick, 16.16
 void cd_reset(ps1 *m);
 uint8_t cd_read(ps1 *m, uint32_t off);
 void cd_write(ps1 *m, uint32_t off, uint8_t v);
 void cd_event(ps1 *m);
+void cd_sector_event(ps1 *m);
 uint32_t cd_dma_read(ps1 *m);
+void cd_audio(ps1 *m, int16_t out[2]);   // the drive's next 44.1 kHz stereo frame into the SPU (silence when it has none)
 void spu_reset(ps1 *m);
 uint16_t spu_read(ps1 *m, uint32_t off);
 void spu_write(ps1 *m, uint32_t off, uint16_t v);
 void spu_dma_write(ps1 *m, uint32_t w);
 uint32_t spu_dma_read(ps1 *m);
 void sio_reset(ps1 *m);
-uint32_t sio_read(ps1 *m, uint32_t off);
-void sio_write(ps1 *m, uint32_t off, uint32_t v);
 
 // One line on stderr; a line that marks something unimplemented or wrong starts with "[RED] " (AGENTS.md)
 #define LOG(...) do { fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } while (0)
 #define RED(...) do { fputs("[RED] ", stderr); LOG(__VA_ARGS__); } while (0)
 // A feature gap is reported once per machine, not on every use
-enum { RED_GTE = 1, RED_TEXTURE = 2, RED_MDEC = 4, RED_SPU_VOICE = 8, RED_TMR_SYNC = 16, RED_DMA = 32, RED_GPU = 64, RED_CD = 128, RED_COP0 = 256 };
+enum { RED_GTE = 1, RED_MDEC = 4, RED_SPU_VOICE = 8, RED_DMA = 32, RED_GPU = 64, RED_CD = 128, RED_COP0 = 256,
+       RED_CD_TIMING = 512, RED_CD_AUDIO = 1024, RED_CD_ID = 2048, RED_CD_OVERRUN = 4096, RED_SPU_EFFECT = 8192, RED_GTE_TIMING = 16384, RED_TEX_DISABLE = 32768,
+       RED_CD_SCAN = 1 << 16, RED_CD_SESSION = 1 << 17, RED_CD_GETQ = 1 << 18, RED_CD_SOUNDMAP = 1 << 19, RED_CD_IGNORE = 1 << 20, RED_CD_PEAK = 1 << 21,
+       RED_CD_XA = 1 << 22, RED_CD_UNLOCK = 1 << 23 };
 #define RED_ONCE(m, bit, ...) do { if (!((m)->red & (bit))) { (m)->red |= (bit); RED(__VA_ARGS__); } } while (0)

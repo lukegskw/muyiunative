@@ -1,7 +1,8 @@
 // The Mac host (plan.md, phase 1): makes the machine, loads OpenBIOS (bios/openbios; in the app, Contents/Resources/openbios) and runs it on the front end's machine
 // thread at the console's speed, each frame shown in the window. --headless runs a number of frames as fast as it can, without a window, prints the last frame's hash and
-// can write it as a PNG
+// can write it as a PNG. --disc mounts an external CUE/BIN read-only (phase 2); it is never copied into the app or the repository
 #include <limits.h>
+#include <errno.h>
 #include <mach-o/dyld.h>
 #include <mach/mach_time.h>
 #include <stdlib.h>
@@ -12,9 +13,16 @@
 
 enum { MAX_W = 640, MAX_H = 576 };   // the largest picture: 640 pixels by 2 x 288 lines (PAL, 480-line mode)
 
-typedef struct host { ps1 *m; uint32_t *px; int w, h; } host;
+typedef struct input { unsigned long frame; uint16_t buttons; } input;
+typedef struct host { ps1 *m; uint32_t *px; int w, h, interactive; unsigned long frame; input input[64]; int ninput, input_pos; uint16_t buttons; } host;
 
-static void frame(host *h) { ps1_run_frame(h->m); ps1_display(h->m, h->px, MAX_W, MAX_H, &h->w, &h->h); }
+static void frame(host *h) {
+    while (h->input_pos < h->ninput && h->input[h->input_pos].frame <= h->frame) h->buttons = h->input[h->input_pos++].buttons;
+    sio_set_pad(h->m, 0, 1, h->interactive ? front_buttons() : h->buttons); h->frame++;
+    ps1_run_frame(h->m); ps1_display(h->m, h->px, MAX_W, MAX_H, &h->w, &h->h);
+    int16_t samples[2048]; int n;
+    while ((n = spu_audio_read(h->m, samples, 1024))) if (h->interactive) front_audio(samples, n);
+}
 
 static void run(void *arg) {   // the machine's thread: a frame, shown, then a wait until the console would have finished it
     host *h = arg;
@@ -39,23 +47,47 @@ static const char *default_bios(char *buf, size_t cap) {   // in the app's Resou
     return access(buf, R_OK) ? NULL : buf;
 }
 
-static int usage(void) { fputs("usage: ps1native [--bios <file>] [--headless [--frames <n>] [--png <file>]]\n", stderr); return 2; }
+static int usage(void) { fputs("usage: ps1native [--bios <file>] [--disc <file.cue|file.bin>] [--exe <file.exe>] [--headless [--frames <n>] [--input <frame>:<hex-buttons>] [--png <file>]]\n", stderr); return 2; }
+
+static int load_exe(ps1 *m, const char *path) {   // the whole file, handed to the runtime to start in place of the BIOS shell
+    FILE *f = fopen(path, "rb"); uint8_t *b = NULL; long n = -1;
+    if (f && !fseek(f, 0, SEEK_END) && (n = ftell(f)) > 0 && !fseek(f, 0, SEEK_SET) && (b = malloc((size_t)n)) && fread(b, 1, (size_t)n, f) != (size_t)n) n = -1;
+    if (f) fclose(f);
+    int r = -1;
+    if (n > 0 && b) r = ps1_load_exe(m, b, (size_t)n); else RED("host: cannot read %s", path);
+    free(b);
+    return r;
+}
 
 int main(int argc, char **argv) {
-    const char *bios = NULL, *png = NULL;
+    const char *bios = NULL, *png = NULL, *disc = NULL, *exe = NULL;
+    input inputs[64]; int ninput = 0;
     int headless = 0; long frames = 300;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--bios") && i + 1 < argc) bios = argv[++i];
+        else if (!strcmp(argv[i], "--disc") && i + 1 < argc) disc = argv[++i];
+        else if (!strcmp(argv[i], "--exe") && i + 1 < argc) exe = argv[++i];
         else if (!strcmp(argv[i], "--headless")) headless = 1;
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc) { char *end; frames = strtol(argv[++i], &end, 10); if (*end || frames < 1) return usage(); }
         else if (!strcmp(argv[i], "--png") && i + 1 < argc) png = argv[++i];
+        else if (!strcmp(argv[i], "--input") && i + 1 < argc) {
+            const char *s = argv[++i]; char *end; errno = 0;
+            unsigned long frame = strtoul(s, &end, 10);
+            if (ninput == 64 || errno || end == s || *end != ':' || frame > LONG_MAX) return usage();
+            s = end + 1; errno = 0; unsigned long buttons = strtoul(s, &end, 16);
+            if (errno || end == s || *end || buttons > 0xffff || (ninput && frame < inputs[ninput - 1].frame)) return usage();
+            inputs[ninput++] = (input){frame, (uint16_t)buttons};
+        }
         else return usage();
     }
+    if (ninput && !headless) return usage();
     char path[PATH_MAX];
     if (!bios && !(bios = default_bios(path, sizeof path))) { RED("host: no BIOS in the app's Resources or the repository's bios/openbios: give one with --bios"); return 1; }
-    host h = {ps1_new(), malloc(sizeof *h.px * MAX_W * MAX_H), 0, 0};
-    if (!h.m || !h.px) { RED("host: no memory for the machine"); return 1; }
-    if (ps1_load_bios(h.m, bios)) return 1;
+    host h = {.m = ps1_new(), .px = malloc(sizeof *h.px * MAX_W * MAX_H), .interactive = !headless, .ninput = ninput};
+    memcpy(h.input, inputs, (size_t)ninput * sizeof *inputs);
+    if (!h.m || !h.px) { RED("host: no memory for the machine"); free(h.px); ps1_free(h.m); return 1; }
+    if (ps1_load_bios(h.m, bios) || (disc && disc_open(h.m, disc)) || (exe && load_exe(h.m, exe))) { free(h.px); ps1_free(h.m); return 1; }
+    if (disc) LOG("host: external disc mounted read-only");
     LOG("host: BIOS %s", bios);
     if (!headless) { front_run("ps1native", run, &h); return 0; }
     long n = 0;

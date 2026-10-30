@@ -1,7 +1,7 @@
 // The R3000A interpreter (psx-spx, CPU Specifications; the MIPS I instruction set): one instruction per step. A loaded register reaches the CPU one instruction late (the
 // load delay slot: the next instruction still sees the old value, and its own write to that register wins), LWL/LWR merge with a load in flight, and the instruction after
-// a branch or jump runs before the branch takes effect (the branch delay slot). Interrupts are taken between instructions. GTE commands come in phase 2 (COP2 moves
-// already reach its registers). This interpreter is the reference the recompiled code is checked against (AGENTS.md)
+// a branch or jump runs before the branch takes effect (the branch delay slot). Interrupts are taken between instructions. COP2 reaches the GTE, including its register
+// side effects and busy interlocks. This interpreter is the reference the recompiled code is checked against (AGENTS.md)
 #include "ps1.h"
 
 #define RS (op >> 21 & 31)
@@ -19,6 +19,9 @@ static void cop0_write(ps1 *m, uint32_t r, uint32_t v) {
 
 static void addr_error(ps1 *m, uint32_t a, uint32_t code) { m->cpu.cop0[C0_BADVADDR] = a; cpu_exception(m, code); }
 static void unusable(ps1 *m, uint32_t cop) { cpu_exception(m, EXC_CPU); m->cpu.cop0[C0_CAUSE] |= cop << 28; }
+// COP1 and COP3 do not exist, and COP0 has no TLB, yet with the coprocessor enabled in SR the hardware raises no exception for their instructions, LWCn/SWCn, or the TLB
+// commands (the hardware log of ps1-tests cpu/cop); what else they do is not known, so here they do nothing
+static void no_effect(ps1 *m, uint32_t op) { RED_ONCE(m, RED_COP0, "cpu: coprocessor instruction %08x at %08x has no documented effect: nothing done", op, m->cpu.cur_pc); }
 
 void cpu_step(ps1 *m) {
     ps1_cpu *c = &m->cpu;
@@ -95,20 +98,22 @@ void cpu_step(ps1 *m) {
         if (RS == 0) LOAD(RT, c0[RD]);
         else if (RS == 4) cop0_write(m, RD, t);
         else if (op >> 25 & 1 && (op & 0x3f) == 0x10) c0[C0_SR] = (c0[C0_SR] & ~0xfu) | (c0[C0_SR] >> 2 & 0xf);   // RFE
+        else if (op >> 25 & 1) no_effect(m, op);
         else { RED_ONCE(m, RED_COP0, "cpu: COP0 instruction %08x at %08x does not exist on the R3000A", op, c->cur_pc); cpu_exception(m, EXC_RI); }
         break;
     case 0x12:
         if (!(c0[C0_SR] & 1u << 30)) { unusable(m, 2); break; }
-        if (op >> 25 & 1) { RED_ONCE(m, RED_GTE, "gte: GTE commands are not modelled yet (phase 2); first %08x at %08x", op, c->cur_pc); break; }
+        if (op >> 25 & 1) { gte_command(m, op); break; }
         switch (RS) {
-        case 0: LOAD(RT, c->cop2d[RD]); break;
-        case 2: LOAD(RT, c->cop2c[RD]); break;
-        case 4: c->cop2d[RD] = t; break;
-        case 6: c->cop2c[RD] = t; break;
+        case 0: LOAD(RT, gte_read(m, RD, 0)); break;
+        case 2: LOAD(RT, gte_read(m, RD, 1)); break;
+        case 4: gte_write(m, RD, t, 0); break;
+        case 6: gte_write(m, RD, t, 1); break;
+        case 8: if (RT <= 1) { BRANCH(!(RT & 1)); } else cpu_exception(m, EXC_RI); break;   // psx-spx, GTE Opcodes: COP2 condition input is tied low
         default: cpu_exception(m, EXC_RI); break;
         }
         break;
-    case 0x11: case 0x13: unusable(m, op >> 26 & 3); break;
+    case 0x11: case 0x13: if (c0[C0_SR] >> (28 + (op >> 26 & 3)) & 1) no_effect(m, op); else unusable(m, op >> 26 & 3); break;
     case 0x20: LOAD(RT, (uint32_t)(int8_t)mem_read8(m, a)); break;
     case 0x21: if (a & 1) addr_error(m, a, EXC_ADEL); else LOAD(RT, (uint32_t)(int16_t)mem_read16(m, a)); break;
     case 0x23: if (a & 3) addr_error(m, a, EXC_ADEL); else LOAD(RT, mem_read32(m, a)); break;
@@ -120,8 +125,8 @@ void cpu_step(ps1 *m) {
         else LOAD(RT, (cur & ~(0xffffffffu >> sh)) | w >> sh);
         break;
     }
-    case 0x28: if (!isolated) mem_write8(m, a, (uint8_t)t); break;
-    case 0x29: if (a & 1) addr_error(m, a, EXC_ADES); else if (!isolated) mem_write16(m, a, (uint16_t)t); break;
+    case 0x28: if (!isolated) mem_write8(m, a, t); break;
+    case 0x29: if (a & 1) addr_error(m, a, EXC_ADES); else if (!isolated) mem_write16(m, a, t); break;
     case 0x2b: if (a & 3) addr_error(m, a, EXC_ADES); else if (!isolated) mem_write32(m, a, t); break;
     case 0x2a: case 0x2e: {   // SWL / SWR
         if (isolated) break;
@@ -134,14 +139,16 @@ void cpu_step(ps1 *m) {
     case 0x32:
         if (!(c0[C0_SR] & 1u << 30)) unusable(m, 2);
         else if (a & 3) addr_error(m, a, EXC_ADEL);
-        else c->cop2d[RT] = mem_read32(m, a);
+        else gte_write(m, RT, mem_read32(m, a), 0);
         break;
     case 0x3a:
         if (!(c0[C0_SR] & 1u << 30)) unusable(m, 2);
         else if (a & 3) addr_error(m, a, EXC_ADES);
-        else if (!isolated) mem_write32(m, a, c->cop2d[RT]);
+        else if (!isolated) mem_write32(m, a, gte_read(m, RT, 0));
         break;
-    case 0x30: case 0x31: case 0x33: case 0x38: case 0x39: case 0x3b: unusable(m, op >> 26 & 3); break;
+    case 0x30: case 0x31: case 0x33: case 0x38: case 0x39: case 0x3b:
+        if (c0[C0_SR] >> (28 + (op >> 26 & 3)) & 1) no_effect(m, op); else unusable(m, op >> 26 & 3);
+        break;
     default: cpu_exception(m, EXC_RI); break;
     }
 #undef W
@@ -150,4 +157,11 @@ void cpu_step(ps1 *m) {
     if (ld_r) c->r[ld_r] = ld_v;
 }
 
-void cpu_run(ps1 *m) { while (m->cycles < m->next_event && !m->exit_requested) cpu_step(m); }
+void cpu_run(ps1 *m) {   // also where the debug console hears the kernel's std_out_putchar, A(3Ch) and B(3Dh) (psx-spx, BIOS Function Summary), and a side-loaded EXE starts
+    while (m->cycles < m->next_event && !m->exit_requested) {
+        uint32_t p = m->cpu.pc & 0x1fffffff;
+        if ((p == 0xa0 && m->cpu.r[9] == 0x3c) || (p == 0xb0 && m->cpu.r[9] == 0x3d)) tty_putc(m, (char)m->cpu.r[4]);
+        else if (m->exe && ps1_exe_due(m)) ps1_exe_start(m);
+        cpu_step(m);
+    }
+}

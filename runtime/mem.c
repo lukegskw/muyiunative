@@ -29,8 +29,12 @@ void irq_update(ps1 *m) {
 }
 void irq_raise(ps1 *m, int n) { m->i_stat |= 1u << n; irq_update(m); }
 
-static void tty_putc(ps1 *m, char c) {   // one stderr line per line written to the debug console
-    if (c == '\n' || m->ntty == (int)sizeof m->tty - 1) { m->tty[m->ntty] = 0; LOG("tty: %s", m->tty); m->ntty = 0; if (c == '\n') return; }
+void tty_putc(ps1 *m, char c) {   // one line at a time, to the machine's sink or to stderr
+    if (c == '\n' || m->ntty == (int)sizeof m->tty - 1) {
+        m->tty[m->ntty] = 0; m->ntty = 0;
+        if (m->tty_out) m->tty_out(m->tty_ctx, m->tty); else LOG("tty: %s", m->tty);
+        if (c == '\n') return;
+    }
     if (c != '\r') m->tty[m->ntty++] = c;
 }
 
@@ -44,14 +48,14 @@ static void exp2_write(ps1 *m, uint32_t p, uint32_t v) {
 }
 
 // The I/O ports by physical address; n is the access size in bytes. Registers are 32-bit unless the device's are narrower (CD-ROM: 8-bit, SPU: 16-bit, controller port:
-// mixed); a narrower access sees its part of the register
+// mixed); a narrower read sees its part of the register, and a narrower store is described at wr
 static uint32_t io_read(ps1 *m, uint32_t p, unsigned n) {
     if (p >= 0x1f801c00 && p < 0x1f802000) {
         uint32_t lo = spu_read(m, (p & ~1u) - 0x1f801c00);
         return n == 4 ? lo | (uint32_t)spu_read(m, p + 2 - 0x1f801c00) << 16 : lo >> (p & 1) * 8;
     }
     if (p >= 0x1f801800 && p < 0x1f801804) { uint32_t v = 0; for (unsigned i = 0; i < n; i++) v |= (uint32_t)cd_read(m, p - 0x1f801800) << 8 * i; return v; }
-    if (p >= 0x1f801040 && p < 0x1f801060) return sio_read(m, p - 0x1f801040);
+    if (p >= 0x1f801040 && p < 0x1f801060) return sio_read(m, p - 0x1f801040, n);
     uint32_t a = p & ~3u, v;
     if (a >= 0x1f801000 && a < 0x1f801024) v = m->memctl[(a - 0x1f801000) / 4];
     else if (a == 0x1f801060) v = m->ram_size;
@@ -61,24 +65,27 @@ static uint32_t io_read(ps1 *m, uint32_t p, unsigned n) {
     else if (a >= 0x1f801100 && a < 0x1f801130) v = tmr_read(m, a - 0x1f801100);
     else if (a == 0x1f801810) v = gpu_read(m);
     else if (a == 0x1f801814) v = gpu_stat(m);
-    else if (a == 0x1f801820 || a == 0x1f801824) { RED_ONCE(m, RED_MDEC, "mdec: the macroblock decoder is not modelled yet (phase 2)"); v = 0; }
+    else if (a == 0x1f801820 || a == 0x1f801824) { v = mdec_read(m, a - 0x1f801820); dma_resume(m); }
     else if (a >= EXP2_BASE && a < EXP2_BASE + 0x1000) v = 0xffffffff;
     else if (a == 0xfffe0130) v = m->cache_ctl;
     else { unmapped(m, "read", p, n); return 0; }
     return v >> (p & 3) * 8;
 }
 
-static void io_write(ps1 *m, uint32_t p, uint32_t v, unsigned n) {
+static void io_write(ps1 *m, uint32_t p, uint32_t v, unsigned n) {   // v is the whole CPU register, whatever n is (wr)
     if (p >= 0x1f801c00 && p < 0x1f802000) {
         spu_write(m, (p & ~1u) - 0x1f801c00, (uint16_t)v);
         if (n == 4) spu_write(m, p + 2 - 0x1f801c00, (uint16_t)(v >> 16));
         return;
     }
-    if (p >= 0x1f801800 && p < 0x1f801804) { cd_write(m, p - 0x1f801800, (uint8_t)v); return; }
-    if (p >= 0x1f801040 && p < 0x1f801060) { sio_write(m, p - 0x1f801040, v); return; }
-    if (p >= EXP2_BASE && p < EXP2_BASE + 0x1000) { exp2_write(m, p, v); return; }
+    // The CD-ROM's 8-bit bus takes a wider store as its bytes, low first, all at the same address: the hardware log of ps1-tests cpu/io-access-bitwidth shows the index
+    // register at 2 after a 16-bit store of 5678h or a 32-bit store of 12345678h to 1F801800h
+    if (p >= 0x1f801800 && p < 0x1f801804) { for (unsigned i = 0; i < n; i++) cd_write(m, p - 0x1f801800, (uint8_t)(v >> 8 * i)); return; }
+    uint32_t bytes = n == 4 ? v : v & ((1u << 8 * n) - 1);   // the store's own bytes
+    if (p >= 0x1f801040 && p < 0x1f801060) { sio_write(m, p - 0x1f801040, bytes, n); return; }
+    if (p >= EXP2_BASE && p < EXP2_BASE + 0x1000) { exp2_write(m, p, bytes); return; }
     uint32_t a = p & ~3u;
-    v <<= (p & 3) * 8;
+    if (p & 3) v = bytes << (p & 3) * 8;   // into the byte lanes it names; what the hardware does here is not documented
     if (a >= 0x1f801000 && a < 0x1f801024) m->memctl[(a - 0x1f801000) / 4] = v;
     else if (a == 0x1f801060) m->ram_size = v;
     else if (a == 0x1f801070) { m->i_stat &= v; irq_update(m); }   // a 0 bit acknowledges its IRQ
@@ -87,7 +94,7 @@ static void io_write(ps1 *m, uint32_t p, uint32_t v, unsigned n) {
     else if (a >= 0x1f801100 && a < 0x1f801130) tmr_write(m, a - 0x1f801100, v);
     else if (a == 0x1f801810) gpu_gp0(m, v);
     else if (a == 0x1f801814) gpu_gp1(m, v);
-    else if (a == 0x1f801820 || a == 0x1f801824) RED_ONCE(m, RED_MDEC, "mdec: the macroblock decoder is not modelled yet (phase 2)");
+    else if (a == 0x1f801820 || a == 0x1f801824) { mdec_write(m, a - 0x1f801820, v); dma_resume(m); }
     else if (a == 0xfffe0130) m->cache_ctl = v;
     else unmapped(m, "write", p, n);
 }
@@ -101,6 +108,9 @@ static uint32_t rd(ps1 *m, uint32_t a, unsigned n) {
     return io_read(m, p, n) & mask;
 }
 
+// A store narrower than its port still drives the whole CPU register onto the bus, and a port it is aligned to takes all of it: the hardware log of ps1-tests
+// cpu/io-access-bitwidth shows an 8-bit store of 12345678h leaving 345678h in DMA0's address, 12345678h in DPCR, 5678h in a timer target and in SPUCNT. RAM and the
+// scratchpad take only the store's bytes
 static void wr(ps1 *m, uint32_t a, uint32_t v, unsigned n) {
     if (a % n) { RED("mem: %u-byte write of %08x at %08x: unaligned, dropped", n, v, a); return; }
     uint32_t p = ps1_phys(a);
@@ -112,13 +122,16 @@ static void wr(ps1 *m, uint32_t a, uint32_t v, unsigned n) {
 uint8_t mem_read8(ps1 *m, uint32_t a) { return (uint8_t)rd(m, a, 1); }
 uint16_t mem_read16(ps1 *m, uint32_t a) { return (uint16_t)rd(m, a, 2); }
 uint32_t mem_read32(ps1 *m, uint32_t a) { return rd(m, a, 4); }
-void mem_write8(ps1 *m, uint32_t a, uint8_t v) { wr(m, a, v, 1); }
-void mem_write16(ps1 *m, uint32_t a, uint16_t v) { wr(m, a, v, 2); }
+void mem_write8(ps1 *m, uint32_t a, uint32_t v) { wr(m, a, v, 1); }
+void mem_write16(ps1 *m, uint32_t a, uint32_t v) { wr(m, a, v, 2); }
 void mem_write32(ps1 *m, uint32_t a, uint32_t v) { wr(m, a, v, 4); }
 
-int mem_fetch(ps1 *m, uint32_t a, uint32_t *op) {   // RAM and BIOS only: the scratchpad is not executable either (psx-spx, Scratchpad)
+// RAM and BIOS; the scratchpad is not executable (psx-spx, Scratchpad). The hardware log of ps1-tests cpu/code-in-io shows code running from the DMA and SPU registers,
+// and a bus error from the interrupt controller and the MDEC; the other ports are not known, so they give the bus error too
+int mem_fetch(ps1 *m, uint32_t a, uint32_t *op) {
     uint32_t p = ps1_phys(a);
     if (p < RAM_WINDOW) { memcpy(op, m->ram + p % RAM_SIZE, 4); return 1; }
     if (p - BIOS_BASE < BIOS_SIZE) { memcpy(op, m->bios + (p - BIOS_BASE), 4); return 1; }
+    if (p - 0x1f801080 < 0x80 || p - 0x1f801c00 < 0x400) { *op = io_read(m, p, 4); return 1; }
     return 0;
 }

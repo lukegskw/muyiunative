@@ -1,4 +1,4 @@
-The plan uses only permissively licensed parts, builds everything on the Mac before the game ever runs, and puts the Mac first with iOS reusing the same runtime.
+The plan uses only permissively licensed parts in the app and its tools, builds everything on the Mac before the game ever runs, and puts the Mac first with iOS reusing the same runtime.
 
 ## 1. Approach
 
@@ -53,6 +53,7 @@ flowchart LR
 ```
 ps1native/            (working name)
   tools/              Python: disc, exe, analyze, codegen, capture, package
+  scripts/            Python, run by the user: disc_info (what identifies a disc in its profile)
   runtime/            C: cpu, interp, mem, gte, gpu_sw, spu, cdrom, mdec, sio, sched
   gfx/metal/          Metal presentation, later the hardware renderer
   shell/mac/  shell/ios/
@@ -63,6 +64,8 @@ ps1native/            (working name)
 ```
 
 ## 4. Phases and exit criteria
+
+Phases 0–2 have met their exit criteria. Phase 2's homebrew tests are the hardware test programs of [ps1-tests](tests/ps1-tests/README.md), which pass in CI, and its [first game](profiles/SLUS-01212/game.toml) reaches its title menu, checked again on 2026-10-30 with the runtime of commit a0d26af. [Development](docs/development.md#phase-2-hardware-breadth) records the checks and the remaining gaps.
 
 | #   | Phase                                                                                                                                                                                                 | Done when                                                                                   |
 | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
@@ -85,7 +88,7 @@ ps1native/            (working name)
 | GPU accuracy (semi-transparency, VRAM copies, texture palettes, mask bit) | Software renderer as reference; Metal renderer comes later                                     |
 | No symbol names in the game binaries                                      | Analysis heuristics plus calls observed during capture runs; hints in each profile             |
 | iOS limits (no runtime code generation, memory limits)                    | Already designed for: everything compiled ahead of time, interpreter fallback                  |
-| Legal                                                                     | Clean-room, MIT/zlib dependencies only, no disc-derived data in the repo                       |
+| Legal                                                                     | Clean-room, permissive code only in the app and tools, no disc-derived data in the repo        |
 
 ## 6. Testing
 
@@ -121,3 +124,6 @@ Dump it with an accurate ripping tool (e.g. redumper) to `.cue`/`.bin`.
 | Python tools: standard library, unittest, ruff (bug rules) and pyright; not a package       | pytest, a formatter, a pip package      | They run in place, with no install                                                             |
 | Apple silicon, macOS 14 or later                                                            | Intel Macs, universal binaries          | One architecture to build and test, as on GitHub's runners                                     |
 | OpenBIOS committed as a binary, built from source (its commit and hash in bios/openbios)    | Build it from a submodule; download it  | Building it needs Docker, beyond Xcode and Python; CI's macOS runners have none                |
+| [Metal Slug X (USA), SLUS-01212](profiles/SLUS-01212/game.toml) as the first game           | The puzzle games suggested above        | User's choice; its dump stays outside the repository                                           |
+| [ps1-tests](tests/ps1-tests/README.md) (MIT) as the homebrew test programs, as released     | Download or build them; write our own   | The console's logs fit these builds; an exception to permissive-only: PSn00bSDK is MPL-2.0     |
+| A disc's licence string (sector 4) stands in for the SCEx string a BIN lacks                | Every disc unlicensed, or all accepted  | Games read their region from GetID; an unlicensed disc is refused, as a console does           |
