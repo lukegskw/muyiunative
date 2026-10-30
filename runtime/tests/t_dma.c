@@ -53,7 +53,8 @@ int main(void) {
     }
     if (log) fclose(log);
     if (err >= 0) close(err);
-    CHECK(strstr(line, "after 2 packets, a loop of 3 from 010420, closed by the packet at 010440 (header 00010420)"), "a looping list's report says where the loop closes");
+    CHECK(strstr(line, "after 2 packets, the last at 010410 (00010420), a loop of 3: 010420 (00010430) > 010430 (00010440) > 010440 (00010420);"),
+          "a looping list's report shows the packet that leads into the loop, and the loop");
     mem_write32(m, 0x1f8010a8, 0);
 
     gpu_gp0(m, 0xa0000000); gpu_gp0(m, 0x00000020); gpu_gp0(m, 0x00020002);

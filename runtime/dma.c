@@ -76,16 +76,20 @@ static uint32_t from_device(ps1 *m, int ch) {
 
 // A GPU list that went 100000h packets without an end code comes back on itself: Brent's cycle detection over its next addresses says where, as evidence of what
 // built it. A console never completes such a list, nor raises its IRQ (the hardware log of ps1-tests dma/chain-looping)
+static uint32_t next_packet(ps1 *m, uint32_t a) { return *ram32(m, a) & 0x1ffffc; }
+
 static void loop_report(ps1 *m, uint32_t start) {
-    uint32_t power = 1, len = 1, mu = 0, slow = start, fast = *ram32(m, start) & 0x1ffffc;
-    while (slow != fast) { if (power == len) { slow = fast; power *= 2; len = 0; } fast = *ram32(m, fast) & 0x1ffffc; len++; }
+    uint32_t power = 1, len = 1, mu = 0, slow = start, fast = next_packet(m, start);
+    while (slow != fast) { if (power == len) { slow = fast; power *= 2; len = 0; } fast = next_packet(m, fast); len++; }
     slow = fast = start;
-    for (uint32_t i = 0; i < len; i++) fast = *ram32(m, fast) & 0x1ffffc;
-    while (slow != fast) { slow = *ram32(m, slow) & 0x1ffffc; fast = *ram32(m, fast) & 0x1ffffc; mu++; }
-    uint32_t last = slow;
-    for (uint32_t i = 1; i < len; i++) last = *ram32(m, last) & 0x1ffffc;
-    RED("dma: the GPU list at %06x comes back on itself: after %u packets, a loop of %u from %06x, closed by the packet at %06x (header %08x); the channel stays busy",
-        start, mu, len, slow, last, *ram32(m, last));
+    for (uint32_t i = 0; i < len; i++) fast = next_packet(m, fast);
+    while (slow != fast) { slow = next_packet(m, slow); fast = next_packet(m, fast); mu++; }
+    char before[48] = "", loop[128] = ""; uint32_t a = start; size_t n = 0;
+    if (mu) { for (uint32_t i = 1; i < mu; i++) a = next_packet(m, a); snprintf(before, sizeof before, ", the last at %06x (%08x)", a, *ram32(m, a)); }
+    a = slow;
+    for (uint32_t i = 0; i < len && i < 4; i++, a = next_packet(m, a)) n += (size_t)snprintf(loop + n, sizeof loop - n, "%s%06x (%08x)", i ? " > " : "", a, *ram32(m, a));
+    RED("dma: the GPU list at %06x comes back on itself at cycle %llu: after %u packets%s, a loop of %u: %s%s; the channel stays busy",
+        start, (unsigned long long)m->cycles, mu, before, len, loop, len > 4 ? " > ..." : "");
 }
 
 static void run(ps1 *m, int ch) {
