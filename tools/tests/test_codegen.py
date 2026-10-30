@@ -1,7 +1,8 @@
 """tools/codegen.py turns the blocks tools/analyze.py finds into C: a function per guest function entered at any of its blocks, one NATIVE_OP per instruction, the
 exits back to the dispatcher, a block whose delay slot holds a branch cut before it, and the guest code each function was made from, as merged runs. Every
-instruction name tools/mips.py gives has its function in runtime/cpu_ops.h. The command line writes the C for an executable. t_native (runtime/tests) runs what it
-generates against the interpreter. No game files."""
+instruction name tools/mips.py gives has its function in runtime/cpu_ops.h. A BIOS ROM is read from its reset vector, with a capture's RAM (tools/capture.c)
+through its mirrors and the addresses it lists. The command line writes the C for an executable. t_native and t_lockstep (runtime/tests) run what it generates
+against the interpreter. No game files."""
 import re, shutil, subprocess, sys, tempfile, unittest
 from pathlib import Path
 
@@ -68,6 +69,24 @@ class Codegen(unittest.TestCase):
         decoded = {'cop' if n in mips.COP else n for n in set(mips.SPECIAL.values()) | set(mips.PRIMARY.values()) | mips.BRANCHES |
                    {'mfc0', 'mtc0', 'rfe', 'cop0', 'cop2', 'mfc2', 'cfc2', 'mtc2', 'ctc2', 'ri'}}
         self.assertEqual(decoded, names)
+
+    def test_bios_and_capture(self):   # a ROM whose reset code jumps into RAM through a register, as OpenBIOS enters its kernel, and a capture of that RAM
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            rom = bytearray(codegen.ROM); rom[:12] = program(0xbfc00000, 'lui t0, 0x8001\njr t0\nnop')[0]
+            ram = bytearray(codegen.RAM); ram[0x10000:0x10008] = program(0x80010000, 'jr ra\nnop')[0]
+            (tmp / 'rom.bin').write_bytes(rom); (tmp / 'cap.ram').write_bytes(ram); (tmp / 'cap.txt').write_text('80010000\n90000000\n')
+            word, entries = codegen.load(tmp / 'rom.bin', bios=True, capture=tmp / 'cap')
+            self.assertEqual(entries, [0xbfc00000, 0x80010000], 'the reset vector, and the captured addresses that hold code')
+            self.assertEqual([word(a) for a in (0x80010000, 0xa0010000, 0x00010000, 0x80210000, 0x9fc00000)], [0x03e00008, 0x03e00008, 0x03e00008, 0x03e00008, word(0xbfc00000)],
+                             'RAM through KSEG0, KSEG1, KUSEG and its mirror at 2 MB; the ROM through KSEG0')
+            prog = analyze.analyze(word, entries)
+            self.assertEqual(sorted(prog.functions), [0x80010000, 0xbfc00000])
+            self.assertEqual(prog.functions[0xbfc00000].blocks[0xbfc00000].call, 0x80010000, 'the jump into RAM: a tail call to a constant')
+            (tmp / 'short.ram').write_bytes(b'\x00' * 16); (tmp / 'short.txt').write_text('')
+            with self.assertRaisesRegex(SystemExit, 'not 2 MB of RAM'): codegen.load(tmp / 'rom.bin', bios=True, capture=tmp / 'short')
+            with self.assertRaisesRegex(SystemExit, 'not a 512 KB BIOS'): codegen.load(tmp / 'cap.ram', bios=True)
+        finally: shutil.rmtree(tmp)
 
     def test_command_line(self):
         tmp = Path(tempfile.mkdtemp())

@@ -8,7 +8,12 @@
 void cpu_step(ps1 *m) {   // one instruction, or the exception its fetch raises: an address error for a misaligned PC, a bus error where nothing executable is mapped
     ps1_cpu *c = &m->cpu;
     uint32_t op;
-    if (!(c->pc & 3) && mem_fetch(m, c->pc, &op)) { m->interp_steps++; cpu_exec(m, op, mem_fetch_cycles(c->pc)); return; }
+    if (!(c->pc & 3) && mem_fetch(m, c->pc, &op)) {
+        uint32_t pc = c->pc;
+        m->interp_steps++; cpu_exec(m, op, mem_fetch_cycles(pc));
+        if (m->on_step) m->on_step(m, pc, op);
+        return;
+    }
     c->delay = c->branch; c->branch = 0; c->cur_pc = c->pc; m->cycles++;
     if (c->pc & 3) { c->cop0[C0_BADVADDR] = c->pc; cpu_exception(m, EXC_ADEL); }
     else cpu_exception(m, EXC_IBE);

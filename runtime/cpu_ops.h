@@ -24,7 +24,16 @@ enum {
 #define CPU_SA ((op) >> 6 & 31)
 #define CPU_SIMM ((uint32_t)(int32_t)(int16_t)(op))
 #define CPU_ZIMM ((op) & 0xffff)
+// Native code inlines every instruction, so that each is only what its constants leave. Under AddressSanitizer the compiler inlines as it sees fit: forced, a
+// generated file as large as OpenBIOS's takes minutes to compile instrumented, 21 seconds otherwise; what an instruction does is the same either way
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define CPU_INLINE static inline
+#endif
+#endif
+#ifndef CPU_INLINE
 #define CPU_INLINE static inline __attribute__((always_inline))
+#endif
 
 // What a word is, as tools/mips.py decodes it: SPECIAL by its function field, BcondZ by bits 0 and 4 of rt, COP0 and COP2 by rs, RFE by its function field with bit 25
 // set; every encoding not listed is a reserved instruction (ri)

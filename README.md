@@ -25,6 +25,8 @@ shell/mac/build/ps1native --disc /external/path/disc.cue
 
 The keyboard controls a digital pad in port 1: arrows for the D-pad; Z/X/A/S for Cross/Circle/Square/Triangle; Q/W for L1/R1; 1/2 for L2/R2; Return for Start and Space for Select. Sound is played through the Mac's default output. Memory cards currently have in-memory protocol support; the host leaves the slots empty. Supported disc layouts, reproducible headless inputs and remaining gaps are in [Development](docs/development.md#phase-2-hardware-breadth).
 
+OpenBIOS runs as native code, compiled with the app from its bundled binary; a game's own code is still interpreted until phase 3 is done. `--interpret` runs everything in the interpreter, and `--headless --lockstep` runs an interpreting machine beside the native one and stops at their first difference ([Development](docs/development.md#phase-3-the-recompiler)).
+
 ### For developers
 
 [Plan](plan.md) · [Development](docs/development.md) · [Contributing](CONTRIBUTING.md) · [Notes for agents](AGENTS.md)
