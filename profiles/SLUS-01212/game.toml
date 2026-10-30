@@ -1,9 +1,10 @@
-# User-selected first game (plan.md, phase 2). Public label ID, without disc-derived files or the user's local path:
-# https://www.jnlgame.com/products/metal-slug-x-ps1-playstation-1-pre-owned
+# The first game (plan.md, decision log). Its dump stays outside the repository; scripts/disc_info.py prints, from the dump, the values that identify the disc here
+# (the serial in the boot executable's name, the licence's region, the SHA-256 of that executable and of each track), and never the dump's path
 name = "Metal Slug X (USA)"
 serial = "SLUS-01212"
 
-# Local interpreter acceptance route; only a frame hash is retained. Frames are zero-based, and button masks are active-high (Start = 0008h)
+# Local interpreter acceptance route; only a frame hash is retained. Frames are zero-based, and button masks are active-high (Start = 0008h). Recorded with the runtime
+# of commit 8680bf2: drawing, the CD-ROM and the timers have changed since, so the route is to be run again and its hash recorded anew
 [validation]
 date = "2026-10-30"
 screen = "title/main menu"

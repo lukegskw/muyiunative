@@ -1,4 +1,4 @@
-# Python lint and types over the tools: ruff (lint rules for bugs, never formatting) and pyright in basic mode, configured in pyproject.toml. Every finding fails the job: fix it,
+# Python lint and types over the tools and scripts: ruff (lint rules for bugs, never formatting) and pyright in basic mode, configured in pyproject.toml. Every finding fails the job: fix it,
 # or silence it on its line (`# noqa: <rule>`, `# pyright: ignore[<rule>]`) with a reason. The tool versions are pinned in .github/requirements/lint.txt; docs/development.md
 # has the commands to run them locally.
 name: lint-python
