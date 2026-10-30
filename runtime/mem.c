@@ -135,3 +135,25 @@ int mem_fetch(ps1 *m, uint32_t a, uint32_t *op) {
     if (p - 0x1f801080 < 0x80 || p - 0x1f801c00 < 0x400) { *op = io_read(m, p, 4); return 1; }
     return 0;
 }
+
+// A load instruction halts the CPU until its data arrives; a store goes to the write queue and takes one cycle (psx-spx, CPU Specifications, Load and Store
+// instructions). The cycles a load takes, its instruction's included, are the hardware log of ps1-tests cpu/access-time rounded: a console timing 100 loads against
+// 100 nops, with the BIOS's memory control settings (psx-spx, Memory Control). Main RAM takes 5 whatever the width, the scratchpad 1, the internal ports 3 (measured
+// 2.9 to 3.8), and the 8- and 16-bit buses one access per byte or halfword. Not modelled: other memory control settings, and the write queue filling up
+unsigned mem_load_cycles(uint32_t a, unsigned n) {
+    static const uint8_t bios[3] = {8, 13, 25}, exp1[3] = {7, 14, 26}, exp2[3] = {11, 26, 56}, exp3[3] = {7, 6, 10}, cdrom[3] = {8, 14, 26}, spu[3] = {18, 18, 39};
+    uint32_t p = ps1_phys(a), w = n == 4 ? 2 : n == 2;
+    if (p < RAM_WINDOW) return 5;
+    if (p - EXP1_BASE < EXP1_SIZE) return exp1[w];
+    if (p - SCRATCH_BASE < SCRATCH_SIZE) return 1;
+    if (p - 0x1f801800 < 4) return cdrom[w];
+    if (p - 0x1f801c00 < 0x400) return spu[w];
+    if (p - 0x1f801000 < 0x1000) return 3;
+    if (p - EXP2_BASE < 0x2000) return exp2[w];
+    if (p - 0x1fa00000 < 0x200000) return exp3[w];
+    if (p - BIOS_BASE < BIOS_SIZE) return bios[w];
+    return a == 0xfffe0130 && n > 1 ? 2 : 1;   // the cache control port: 0.95, 1.9 and 1.9
+}
+
+// The instruction cache serves KUSEG and KSEG0 in a cycle (a hit is assumed: the cache is not modelled); KSEG1 is uncached, so each instruction is a 32-bit read
+unsigned mem_fetch_cycles(uint32_t pc) { return pc >> 29 == 5 ? mem_load_cycles(pc, 4) : 1; }

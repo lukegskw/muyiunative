@@ -16,7 +16,7 @@ The end result of A and B is the same. A gets there in a safer order, which matt
 flowchart LR
   D[Your disc .cue/.bin] --> R[Disc reader]
   R --> P[Profile lookup<br/>serial + SHA-256]
-  P --> A[Analyzer<br/>rabbitizer]
+  P --> A[Analyzer<br/>MIPS decoder]
   A --> G[Code generator<br/>MIPS → C]
   G --> C[clang]
   RT[C runtime<br/>CPU, GTE, GPU, SPU, CD, MDEC, pads] --> C
@@ -127,3 +127,7 @@ Dump it with an accurate ripping tool (e.g. redumper) to `.cue`/`.bin`.
 | [Metal Slug X (USA), SLUS-01212](profiles/SLUS-01212/game.toml) as the first game           | The puzzle games suggested above        | User's choice; its dump stays outside the repository                                           |
 | [ps1-tests](tests/ps1-tests/README.md) (MIT) as the homebrew test programs, as released     | Download or build them; write our own   | The console's logs fit these builds; an exception to permissive-only: PSn00bSDK is MPL-2.0     |
 | A disc's licence string (sector 4) stands in for the SCEx string a BIN lacks                | Every disc unlicensed, or all accepted  | Games read their region from GetID; an unlicensed disc is refused, as a console does           |
+| Own MIPS decoder in the Python tools, tested against the interpreter                        | rabbitizer (MIT), installed with pip    | Nothing to install beyond Xcode and Python; MIPS I is small, and the interpreter is its check  |
+| Cycles per instruction: 1 from the cache, uncached fetches and loads by region, MULT/DIV    | An average per instruction; cache model | Lockstep needs exact counts; ps1-tests measures each cost; a cache costs native code dearly    |
+| Interrupts taken at the end of a block of code, in the interpreter and in native code       | Between any two instructions            | Both sides see each interrupt at the same point, so the lockstep comparison is exact           |
+| Generated C only in build folders, never in the repository, OpenBIOS's included             | Commit OpenBIOS's generated C           | A game's code is disc data; OpenBIOS's is rebuilt from its committed binary in each build      |
