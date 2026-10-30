@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # The disc reader (plan.md, section 2, Python tools): a CUE sheet's tracks, or a raw BIN as one data track, and the ISO9660 files of the first track; enough, for now,
-# to find what identifies a disc for its profile (scripts/disc_info.py): the executable SYSTEM.CNF boots and the serial in its name, the region of the licence string,
-# and SHA-256 hashes of the executable and of each track. psx-spx, CDROM File Formats (CUE/BIN, SYSTEM.CNF), CDROM ISO Volume Descriptors and File/Directory
-# Descriptors; the licence string is read as runtime/cdrom.c reads it. CUE sheets are read as runtime/disc.c reads them: BINARY files of MODE1/2352, MODE2/2352
-# and AUDIO tracks with INDEX 00/01, no PREGAP or POSTGAP. A disc is only read; nothing is written or copied.
+# to read the executable a disc boots (tools/exe.py) and what identifies a disc for its profile (scripts/disc_info.py): that executable and the serial in its name,
+# the region of the licence string, and SHA-256 hashes of the executable and of each track. psx-spx, CDROM File Formats (CUE/BIN, SYSTEM.CNF), CDROM ISO Volume
+# Descriptors and File/Directory Descriptors; the licence string is read as runtime/cdrom.c reads it. CUE sheets are read as runtime/disc.c reads them: BINARY files
+# of MODE1/2352, MODE2/2352 and AUDIO tracks with INDEX 00/01, no PREGAP or POSTGAP. A disc is only read; nothing is written or copied.
 import hashlib, re, struct
 from dataclasses import dataclass
 from pathlib import Path
@@ -99,17 +99,22 @@ def sha256(track):   # the track's raw sectors from its first index on: a whole 
     return h.hexdigest()
 
 
+def boot(track):   # the executable a data track boots: its path as SYSTEM.CNF names it, and its bytes
+    cnf = find(track, 'SYSTEM.CNF')
+    if cnf:   # BOOT = cdrom:\NAME.EXT;1, or cdrom:NAME.EXT;1
+        m = re.search(rb'BOOT\s*=\s*cdrom:\\?([^\s;]+)', read(track, *cnf), re.I)
+        if not m: raise SystemExit('SYSTEM.CNF names no BOOT executable')
+        name = m.group(1).decode('latin-1')
+    else: name = 'PSX.EXE'   # what the BIOS boots without SYSTEM.CNF
+    exe = find(track, name)
+    if not exe: raise SystemExit(f'the boot executable {name} is not on the disc')
+    return name, read(track, *exe)
+
+
 def identify(path):   # what scripts/disc_info.py prints
     ts = tracks(path); data = ts[0]
-    cnf = find(data, 'SYSTEM.CNF')
-    if cnf:   # BOOT = cdrom:\NAME.EXT;1, or cdrom:NAME.EXT;1
-        m = re.search(rb'BOOT\s*=\s*cdrom:\\?([^\s;]+)', read(data, *cnf), re.I)
-        if not m: raise SystemExit('SYSTEM.CNF names no BOOT executable')
-        boot = m.group(1).decode('latin-1')
-    else: boot = 'PSX.EXE'   # what the BIOS boots without SYSTEM.CNF
-    exe = find(data, boot)
-    if not exe: raise SystemExit(f'the boot executable {boot} is not on the disc')
-    m = re.fullmatch(r'([A-Z]{4})[_-](\d{3})\.(\d{2})', re.split(r'[\\/]', boot)[-1], re.I)
-    return {'serial': f'{m.group(1).upper()}-{m.group(2)}{m.group(3)}' if m else None, 'licence': licence(data), 'boot': boot,
-            'boot_sha256': hashlib.sha256(read(data, *exe)).hexdigest(),
+    name, exe = boot(data)
+    m = re.fullmatch(r'([A-Z]{4})[_-](\d{3})\.(\d{2})', re.split(r'[\\/]', name)[-1], re.I)
+    return {'serial': f'{m.group(1).upper()}-{m.group(2)}{m.group(3)}' if m else None, 'licence': licence(data), 'boot': name,
+            'boot_sha256': hashlib.sha256(exe).hexdigest(),
             'tracks': [{'number': t.number, 'mode': t.mode, 'sectors': t.end - t.first, 'sha256': sha256(t)} for t in ts]}
