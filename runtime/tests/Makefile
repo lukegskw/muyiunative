@@ -42,7 +42,16 @@ $(eval $(call native_exe,cop,cpu/cop/cop.exe))
 $(eval $(call native_exe,test_all,gte/test-all/test-all.exe))
 $(eval $(call native_exe,otc_test,dma/otc-test/otc-test.exe))
 $(eval $(call native_exe,triangle,gpu/triangle/triangle.exe))
-LOCKSTEP_GEN = $(addprefix $(B)/gen/,cop.c test_all.c otc_test.c triangle.c)
+
+# OpenBIOS's native code: the capture runs it in the interpreter to its shell, for the RAM it copies its kernel and shell into and the functions it reaches there
+$(B)/capture: $(TOOLS)/capture.c $(OBJ) Makefile
+	clang $(CFLAGS) -o $@ $< $(OBJ)
+$(B)/gen/openbios.cap.txt: $(B)/capture $(BIOS)
+	@mkdir -p $(@D)
+	$(B)/capture $(BIOS) 60 $(B)/gen/openbios.cap
+$(B)/gen/openbios.c: $(B)/gen/openbios.cap.txt $(CODEGEN)
+	python3 $(TOOLS)/codegen.py $(BIOS) --bios --capture $(B)/gen/openbios.cap --name openbios -o $@
+LOCKSTEP_GEN = $(addprefix $(B)/gen/,openbios.c cop.c test_all.c otc_test.c triangle.c)
 
 $(B)/t_lockstep: t_lockstep.c $(LOCKSTEP_GEN) $(OBJ) Makefile
 	clang $(CFLAGS) -DBIOS_PATH='"$(BIOS)"' -DTESTS_DIR='"$(TESTS_DIR)"' -o $@ t_lockstep.c $(LOCKSTEP_GEN) $(OBJ)

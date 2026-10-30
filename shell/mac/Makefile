@@ -1,13 +1,18 @@
 # The Mac host and app. make -C shell/mac: the host, build/ps1native; make -C shell/mac app: build/ps1native.app, packed and signed by tools/pack_app.py with the bundled
 # OpenBIOS in its Resources (docs/development.md). Apple silicon only, macOS 14 or later. One clang command builds the host from every source; the runtime's are taken by
-# wildcard, so a new file does not touch this line
+# wildcard, so a new file does not touch this line. The host links OpenBIOS's native code, generated here from the bundled binary (plan.md, decision log): the capture
+# runs OpenBIOS in the interpreter for what it copies into RAM and runs there (tools/capture.c), and tools/codegen.py writes the C, into build/gen only
 B = build
+GEN = $(B)/gen
 MINOS = 14.0
 RT = ../../runtime
 GFX = ../../gfx/metal
 BIOS = ../../bios/openbios
-SRC = main.c front_mac.m $(GFX)/present.m $(sort $(wildcard $(RT)/*.c))
+TOOLS = ../../tools
+RTSRC = $(sort $(wildcard $(RT)/*.c))
+SRC = main.c front_mac.m $(GFX)/present.m $(RTSRC) $(GEN)/openbios.c
 HDR = front.h $(GFX)/present.h $(wildcard $(RT)/*.h)
+CODEGEN = $(TOOLS)/codegen.py $(TOOLS)/analyze.py $(TOOLS)/mips.py $(TOOLS)/exe.py
 CFLAGS = -arch arm64 -mmacosx-version-min=$(MINOS) -O2 -g -Wall -Wextra -fobjc-arc -I$(RT) -I$(GFX)
 FRAMEWORKS = -framework AppKit -framework QuartzCore -framework Metal -framework CoreGraphics -framework ImageIO -framework AudioToolbox
 .DEFAULT_GOAL := host
@@ -17,6 +22,17 @@ host: $(B)/ps1native
 $(B)/ps1native: $(SRC) $(HDR) Makefile
 	@mkdir -p $(B)
 	clang $(CFLAGS) -o $@ $(SRC) $(FRAMEWORKS)
+
+$(B)/capture: $(TOOLS)/capture.c $(RTSRC) $(wildcard $(RT)/*.h) Makefile
+	@mkdir -p $(B)
+	clang -O2 -g -Wall -Wextra -I$(RT) -o $@ $(TOOLS)/capture.c $(RTSRC)
+
+$(GEN)/openbios.cap.txt: $(B)/capture $(BIOS)/openbios.bin
+	@mkdir -p $(GEN)
+	$(B)/capture $(BIOS)/openbios.bin 60 $(GEN)/openbios.cap
+
+$(GEN)/openbios.c: $(GEN)/openbios.cap.txt $(CODEGEN)
+	python3 $(TOOLS)/codegen.py $(BIOS)/openbios.bin --bios --capture $(GEN)/openbios.cap --name openbios -o $@
 
 app: $(B)/ps1native $(wildcard $(BIOS)/*)
 	python3 ../../tools/pack_app.py $(B)/ps1native.app --exe $(B)/ps1native --resource $(BIOS)

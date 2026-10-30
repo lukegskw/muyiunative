@@ -81,6 +81,7 @@ typedef struct ps1 {
     ps1_mdec mdec;
     char tty[256]; int ntty;         // the debug console line being written (0x1F802080)
     void (*tty_out)(void *ctx, const char *line); void *tty_ctx;   // where finished debug console lines go: stderr when NULL
+    void (*on_step)(struct ps1 *m, uint32_t pc, uint32_t op); void *step_ctx;   // the host's, told of each interpreted instruction after it ran (tools/capture.c)
     uint8_t *exe; size_t exe_n;      // a PS-X EXE waiting for the BIOS to reach its shell (exe.c)
     const ps1_native_set *native[4]; int nnative;   // the native code this machine runs where memory holds the code it was made from (native.c)
     uint64_t native_runs, interp_steps;   // entries into native code from the dispatcher, and instructions interpreted: how much runs native

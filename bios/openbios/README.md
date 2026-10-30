@@ -13,6 +13,10 @@
 
 With no disc, the shell's CD check fails and the cube turns to its error colours. In 480-line interlaced mode the shell clears (0,256) 640x480 every frame (psyqo's `GPU::getNextClear`; a temporary log of the fills showed it in 295 of 300 frames), which wraps at VRAM's line 512 (psx-spx, GPU Memory Transfer Commands: Wrapping) and so never clears rows 224 to 255: the cube leaves trails there. The GPU wraps as psx-spx says; the trails are the shell's, not a runtime bug.
 
+## As native code
+
+The Mac host and the runtime's tests run OpenBIOS as native code (plan.md, phase 3), generated in each build from this binary and never committed. OpenBIOS copies its kernel and its shell into RAM and enters them through jumps a static analysis cannot follow, so the build first runs it in the interpreter for 60 frames (`tools/capture.c`): RAM as it is then, and the 251 addresses the CPU called or jumped to through a register, are what `tools/codegen.py --bios --capture` analyzes, beside the ROM from its reset vector: 313 functions. From reset into the shell, all but 0.15% of its instructions then run natively, in lockstep with the interpreter (`t_lockstep`).
+
 ## Licenses
 
 | Part                                                     | License       | File                                  |

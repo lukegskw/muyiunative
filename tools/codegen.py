@@ -61,15 +61,44 @@ def generate(word, program, name):   # the C source of a native code set named `
     return '\n'.join(out)
 
 
+RAM, ROM, ROM_BASE = 2 << 20, 512 << 10, 0x1fc00000
+
+
+def memory(ram=None, rom=None, exe=None):   # word(address) as the CPU reads code: RAM through its mirrors (the first 8 MB), the BIOS ROM, or an executable's code
+    def word(a):
+        if a & 3: return None
+        p = a & 0x1fffffff if a >> 29 in (4, 5) else a   # KSEG0 and KSEG1 drop their top bits; KUSEG is physical (runtime/mem.c, ps1_phys)
+        if ram is not None and p < 0x800000: return int.from_bytes(ram[p % RAM:p % RAM + 4], 'little')
+        if rom is not None and ROM_BASE <= p < ROM_BASE + ROM: return int.from_bytes(rom[p - ROM_BASE:p - ROM_BASE + 4], 'little')
+        return exe.word(a) if exe else None
+    return word
+
+
+def load(path, bios=False, capture=None):   # (word, entry points) of an executable, a disc that boots one, or a BIOS ROM; a capture adds RAM and where code went
+    ram = Path(f'{capture}.ram').read_bytes() if capture else None
+    if ram is not None and len(ram) != RAM: raise SystemExit(f'codegen: {capture}.ram is not 2 MB of RAM')
+    if bios:
+        rom = Path(path).read_bytes()
+        if len(rom) != ROM: raise SystemExit(f'codegen: {path} is not a 512 KB BIOS image')
+        word, entries = memory(ram, rom), [0xbfc00000]
+    else:
+        x = exe.load(path)
+        word, entries = memory(ram, None, x), [x.pc]
+    if capture: entries += [a for a in (int(s, 16) for s in Path(f'{capture}.txt').read_text().split()) if word(a) is not None]
+    return word, entries
+
+
 def main():
-    p = argparse.ArgumentParser(description='Generate native C code for a PS-X EXE, or for the executable a disc boots')
+    p = argparse.ArgumentParser(description='Generate native C code for a PS-X EXE, the executable a disc boots, or a BIOS ROM')
     p.add_argument('path'); p.add_argument('--name', required=True, help='the C name of the code set: native_<name>')
     p.add_argument('-o', '--out', required=True, help='the C file to write, in a build folder'); p.add_argument('--profile', help="a game's profile, for its [analysis] hints")
+    p.add_argument('--bios', action='store_true', help='path is a 512 KB BIOS ROM, entered at its reset vector')
+    p.add_argument('--capture', help='what tools/capture.c wrote: <capture>.ram and <capture>.txt')
     a = p.parse_args()
-    x = exe.load(a.path)
-    prog = analyze.analyze(x.word, [x.pc], analyze.hints_from_profile(a.profile) if a.profile else None)
+    word, entries = load(a.path, a.bios, a.capture)
+    prog = analyze.analyze(word, entries, analyze.hints_from_profile(a.profile) if a.profile else None)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
-    Path(a.out).write_text(generate(x.word, prog, a.name))
+    Path(a.out).write_text(generate(word, prog, a.name))
     print(f'codegen: {len(prog.functions)} functions, {sum(len(f.blocks) for f in prog.functions.values())} blocks into {a.out}; {len(prog.notes)} notes')
     return 0
 
