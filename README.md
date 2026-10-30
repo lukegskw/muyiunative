@@ -6,7 +6,7 @@ The aim is native code, not emulation: the game's MIPS code is translated to C a
 
 ## Status
 
-Phase 3 of [the plan](plan.md#4-phases-and-exit-criteria), the recompiler, has met its exit criterion: Metal Slug X (USA)'s main executable, translated to C and compiled on the Mac, runs as native code beside OpenBIOS's and agrees with the interpreter in lockstep to its title menu. Phase 2 gave the interpreter the CD-ROM drive with its audio, the full software GPU, the GTE, the SPU, the MDEC, digital pads and memory cards, and it passes the hardware test programs of [ps1-tests](tests/ps1-tests/README.md) in CI. Gameplay, broader compatibility, timing accuracy and speed still need work: the game runs no faster native than interpreted, as its time goes elsewhere than in its code.
+Phase 3 of [the plan](plan.md#4-phases-and-exit-criteria), the recompiler, has met its exit criterion: Metal Slug X (USA)'s main executable, translated to C and compiled on the Mac, runs as native code beside OpenBIOS's and agrees with the interpreter in lockstep to its title menu. Phase 2 gave the interpreter the CD-ROM drive with its audio, the full software GPU, the GTE, the SPU, the MDEC, digital pads and memory cards, and it passes the hardware test programs of [ps1-tests](tests/ps1-tests/README.md) in CI. Gameplay, broader compatibility, timing accuracy and speed still need work: the game runs hardly faster native than interpreted, and a profile finds the time in drawing a GPU list that loops, not in its code ([Development](docs/development.md#phase-3-the-recompiler)).
 
 ## Build from the command line
 
