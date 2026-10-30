@@ -36,8 +36,12 @@ static void emit(ps1 *m) {
     uint8_t bytes[192] = {0}; int n = 0, output_block = block(M);
     for (int p = 0; p < 64; p++) {
         if (mono(M)) {
-            uint8_t y = (uint8_t)clamp(signed9(M->coeff[p]), -128, 127); if (!M->sign) y ^= 0x80;
-            if (!M->depth) bytes[p / 2] |= (uint8_t)((y >> 4) << ((p & 1) * 4)); else bytes[p] = y;
+            int u = (uint8_t)clamp(signed9(M->coeff[p]), -128, 127) ^ 0x80;   // biased, 0..255
+            uint8_t y = (uint8_t)(M->sign ? u ^ 0x80 : u);
+            // 4-bit output rounds the 8-bit value, saturating: the hardware logs of ps1-tests mdec/4bit and mdec/8bit decode one block to C9h and to Dh (truncation
+            // would give Ch), FCh and FFh to Fh. Only unsigned output is logged; signed output rounds the same way here
+            int nib = clamp((u + 8) >> 4, 0, 15) ^ (M->sign ? 8 : 0);
+            if (!M->depth) bytes[p / 2] |= (uint8_t)(nib << ((p & 1) * 4)); else bytes[p] = y;
         } else {
             int bx = output_block & 1, by = output_block >> 1, x = p & 7, y = p >> 3;
             int uv = (bx * 8 + x) / 2 + (by * 8 + y) / 2 * 8, cr = M->cr[uv], cb = M->cb[uv], yy = M->coeff[p];
@@ -63,7 +67,7 @@ static void finish_block(ps1 *m) {
 static void pump(ps1 *m) {
     while (M->busy && M->in_n) {
         uint16_t h = M->input[M->in_head];
-        if (M->cmd == 1 && M->active && M->k + (h >> 10) + 1 > 63 && (mono(M) || M->stage >= 2) && 64 - M->out_n < words(M)) break;
+        if (M->cmd == 1 && M->active && M->k + (h >> 10) + 1 >= 63 && (mono(M) || M->stage >= 2) && 64 - M->out_n < words(M)) break;
         M->in_head = (M->in_head + 1) & 63; M->in_n--;
         if (M->cmd == 2) {
             int p = M->table_pos++; M->quant[p / 32][p % 32 * 2] = (uint8_t)h; M->quant[p / 32][p % 32 * 2 + 1] = (uint8_t)(h >> 8);
@@ -75,12 +79,13 @@ static void pump(ps1 *m) {
             M->coeff[0] = (int16_t)clamp(signed10(h) * (M->q ? M->quant[q][0] : 2), -1024, 1023);
         } else {
             M->k += (h >> 10) + 1;
-            if (M->k > 63) finish_block(m);
-            else {
+            if (M->k <= 63) {
                 int q = mono(M) || M->stage >= 2 ? 0 : 1;
                 int value = M->q ? (signed10(h) * M->quant[q][M->k] * M->q + 4) >> 3 : signed10(h) * 2;
                 M->coeff[M->q ? zigzag(M->k) : M->k] = (int16_t)clamp(value, -1024, 1023);
             }
+            // A block also ends once index 63 is written: the hardware log of ps1-tests mdec/4bit shows a block of 64 halfwords, with no end code after it, decoded
+            if (M->k >= 63) finish_block(m);
         }
     }
     if (M->busy && !M->remaining && !M->in_n) M->busy = 0;

@@ -46,10 +46,14 @@ int main(void) {
     CHECK((status() & 0x0f070000) == 0x0a040000 && (m->red & RED_MDEC), "8-bit output reports block/depth, output DREQ, and explicit rounding/timing gap");
     CHECK(!mdec_dma_offset(m) && drain(0x80808080, 16), "8-bit unsigned zero DCT gives an 8x8 mid-gray bitmap");
     setup(0); put(0x20000001); dc(0); CHECK(drain(0x88888888, 8), "4-bit mode packs two upper-nibble luminances per byte");
+    setup(0); put(0x28000001); dc(72); CHECK(drain(0x89898989, 16), "8-bit DC/8 luminance 89h");
+    setup(0); put(0x20000001); dc(72); CHECK(drain(0x99999999, 8), "4-bit output rounds the 8-bit value: 89h gives 9, not 8 (ps1-tests mdec/4bit)");
     setup(0); put(0x2c000001); dc(0); CHECK(drain(0, 16), "signed output omits unsigned luminance bias");
     setup(0); put(0x28000001); dc(128); CHECK(drain(0x90909090, 16), "custom flat scale table gives uniform DC/8 luminance");
     setup(0); put(0x28000001); dc(-128); CHECK(drain(0x70707070, 16), "negative signed10 DC is decoded before unsigned bias");
     setup(0); put(0x28000002); put(0x0000fe00); put(0xfe00fe00); CHECK(drain(0x80808080, 16), "FE00 padding before/after a block is skipped without producing extra blocks");
+    setup(0); put(0x28000020); for (int i = 0; i < 32; i++) put(0);
+    CHECK(drain(0x80808080, 16) && !m->mdec.active, "a block ends once index 63 is written, with no end code after it (ps1-tests mdec/4bit)");
 
     setup(1); put(0x28000002); put(0x04800000);
     CHECK(m->mdec.coeff[0] == 0 && m->mdec.coeff[2] == 256 && m->mdec.active, "q_scale=0 ignores quant table, doubles AC and uses linear run positions");

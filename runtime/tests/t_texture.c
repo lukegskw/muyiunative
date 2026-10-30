@@ -92,10 +92,11 @@ int main(void) {
     GP0(0x01000000);
     sprite(0x65000000,400,16,0,0,0,1,1);
     CHECK(PX(400,16) == 0x4321, "texture window replaces masked UV bits before sampling");
-    GP0(0xe2000000, 0xe1003100); PX(5,5) = 0x1f; PX(4,5) = 0x3e0; PX(5,4) = 0x7c00; PX(4,4) = 0x7fff;
+    GP0(0xe2000000, 0xe1003100); PX(6,5) = 0x1f; PX(5,5) = 0x3e0; PX(6,4) = 0x7c00; PX(5,4) = 0x7fff;
     GP0(0x01000000);
     sprite(0x65000000,400,20,5,5,0,2,2);
-    CHECK(PX(400,20) == 0x1f && PX(401,20) == 0x3e0 && PX(400,21) == 0x7c00 && PX(401,21) == 0x7fff, "rectangle X/Y flip decrements UV from its specified origin");
+    CHECK(PX(400,20) == 0x1f && PX(401,20) == 0x3e0 && PX(400,21) == 0x7c00 && PX(401,21) == 0x7fff,
+          "rectangle X flip runs U down from u0+1, Y flip runs V down from v0 (ps1-tests gpu/texture-flip)");
     GP0(0xe1000100, 0xe3000000 | 402 | 24 << 10, 0xe4000000 | 403 | 24 << 10); PX(2,0) = 0x1f; PX(3,0) = 0x3e0;
     GP0(0x01000000);
     sprite(0x65000000,400,24,0,0,0,4,1);

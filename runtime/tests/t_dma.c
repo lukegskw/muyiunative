@@ -37,6 +37,11 @@ int main(void) {
     CHECK(mem_read32(m, DICR) >> 24 == 0x84 && m->i_stat & 1u << IRQ_DMA, "DICR: channel 2's flag and the master flag set, IRQ 3 raised");
     mem_write32(m, DICR, 0x04840000);
     CHECK(mem_read32(m, DICR) == 0x00840000, "DICR: writing a flag's 1 acknowledges it, and the master flag falls");
+    mem_write32(m, 0x1f801070, ~(1u << IRQ_DMA)); mem_write32(m, 0x80010300, 0x010300);
+    start(2, 0x010300, 0, 0x01000401);
+    CHECK(chcr(2) & 0x01000000 && mem_read32(m, DICR) == 0x00840000 && !(m->i_stat & 1u << IRQ_DMA),
+          "a GPU list that comes back on itself never completes, nor raises its IRQ (ps1-tests dma/chain-looping)");
+    mem_write32(m, 0x1f8010a8, 0);
 
     gpu_gp0(m, 0xa0000000); gpu_gp0(m, 0x00000020); gpu_gp0(m, 0x00020002);
     mem_write32(m, 0x80011000, 0x7fff0001); mem_write32(m, 0x80011004, 0x00030002);

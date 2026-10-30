@@ -47,15 +47,26 @@ static const char *default_bios(char *buf, size_t cap) {   // in the app's Resou
     return access(buf, R_OK) ? NULL : buf;
 }
 
-static int usage(void) { fputs("usage: ps1native [--bios <file>] [--disc <file.cue|file.bin>] [--headless [--frames <n>] [--input <frame>:<hex-buttons>] [--png <file>]]\n", stderr); return 2; }
+static int usage(void) { fputs("usage: ps1native [--bios <file>] [--disc <file.cue|file.bin>] [--exe <file.exe>] [--headless [--frames <n>] [--input <frame>:<hex-buttons>] [--png <file>]]\n", stderr); return 2; }
+
+static int load_exe(ps1 *m, const char *path) {   // the whole file, handed to the runtime to start in place of the BIOS shell
+    FILE *f = fopen(path, "rb"); uint8_t *b = NULL; long n = -1;
+    if (f && !fseek(f, 0, SEEK_END) && (n = ftell(f)) > 0 && !fseek(f, 0, SEEK_SET) && (b = malloc((size_t)n)) && fread(b, 1, (size_t)n, f) != (size_t)n) n = -1;
+    if (f) fclose(f);
+    int r = -1;
+    if (n > 0 && b) r = ps1_load_exe(m, b, (size_t)n); else RED("host: cannot read %s", path);
+    free(b);
+    return r;
+}
 
 int main(int argc, char **argv) {
-    const char *bios = NULL, *png = NULL, *disc = NULL;
+    const char *bios = NULL, *png = NULL, *disc = NULL, *exe = NULL;
     input inputs[64]; int ninput = 0;
     int headless = 0; long frames = 300;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--bios") && i + 1 < argc) bios = argv[++i];
         else if (!strcmp(argv[i], "--disc") && i + 1 < argc) disc = argv[++i];
+        else if (!strcmp(argv[i], "--exe") && i + 1 < argc) exe = argv[++i];
         else if (!strcmp(argv[i], "--headless")) headless = 1;
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc) { char *end; frames = strtol(argv[++i], &end, 10); if (*end || frames < 1) return usage(); }
         else if (!strcmp(argv[i], "--png") && i + 1 < argc) png = argv[++i];
@@ -75,7 +86,7 @@ int main(int argc, char **argv) {
     host h = {.m = ps1_new(), .px = malloc(sizeof *h.px * MAX_W * MAX_H), .interactive = !headless, .ninput = ninput};
     memcpy(h.input, inputs, (size_t)ninput * sizeof *inputs);
     if (!h.m || !h.px) { RED("host: no memory for the machine"); free(h.px); ps1_free(h.m); return 1; }
-    if (ps1_load_bios(h.m, bios) || (disc && disc_open(h.m, disc))) { free(h.px); ps1_free(h.m); return 1; }
+    if (ps1_load_bios(h.m, bios) || (disc && disc_open(h.m, disc)) || (exe && load_exe(h.m, exe))) { free(h.px); ps1_free(h.m); return 1; }
     if (disc) LOG("host: external disc mounted read-only");
     LOG("host: BIOS %s", bios);
     if (!headless) { front_run("ps1native", run, &h); return 0; }

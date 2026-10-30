@@ -10,7 +10,7 @@ ps1 *ps1_new(void) {
     return m;
 }
 
-void ps1_free(ps1 *m) { if (m) disc_close(m); free(m); }
+void ps1_free(ps1 *m) { if (m) { disc_close(m); free(m->exe); } free(m); }
 
 void ps1_reset(ps1 *m) {   // RAM, scratchpad and BIOS keep their contents, as on the console
     m->cycles = 0; m->i_stat = m->i_mask = m->ram_size = m->cache_ctl = m->post = 0;

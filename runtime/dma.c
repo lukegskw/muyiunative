@@ -87,7 +87,8 @@ static void run(ps1 *m, int ch) {
             for (uint32_t i = 1; i <= n; i++) gpu_gp0(m, *ram32(m, addr + 4 * i));
             words += n + 1;
             if (h & 0x800000) break;   // the end code (00FFFFFFh in practice)
-            if (guard == 0x100000) { RED("dma: the GPU list at %06x does not end; stopped", d->madr); break; }
+            // The hardware log of ps1-tests dma/chain-looping: a list that comes back on itself never completes, nor raises its IRQ
+            if (guard == 0x100000) { RED("dma: the GPU list at %06x does not end: the channel stays busy", d->madr); return; }
             addr = h & 0x1ffffc;
         }
         d->madr = 0xffffff;

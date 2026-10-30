@@ -17,6 +17,11 @@ int main(void) {
     m = ps1_new();
     if (!m) { fputs("FAIL: no memory for the machine\n", stderr); return 1; }
     CHECK(gpu_stat(m) == 0x14802000, "GPUSTAT after reset is 14802000h");
+    GP0(0xe1003fff);
+    CHECK((gpu_stat(m) & 0x87ff) == 0x7ff, "GP0(E1h) bit 11 is ignored until GP1(09h) allows it (ps1-tests gpu/gp0-e1)");
+    gpu_gp1(m, 0x09000001); GP0(0xe1000800);
+    CHECK((gpu_stat(m) & 0x87ff) == 0x8000, "after GP1(09h), GP0(E1h) bit 11 shows in GPUSTAT.15");
+    gpu_gp1(m, 0x09000000); GP0(0xe1000000);
 
     GP0(0x02ff0000, V(0x13, 2), V(0x11, 3));
     CHECK(px(16, 2) == 0x7c00 && px(47, 4) == 0x7c00 && drawn(0, 0, 63, 8) == 32 * 3, "fill: x rounded down and width up to 16 pixels, colour to 15 bits");

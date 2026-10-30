@@ -37,9 +37,9 @@ typedef struct ps1_gpu {
     int poly, pgour, psemi, pnv, phave; uint32_t pcol; ps1_vtx plast;   // a polyline being received (its vertices arrive until a terminator)
     int xfer; uint16_t xx, xy, xw, xh; uint32_t xi;   // a VRAM transfer: 1 = CPU to VRAM (GP0 A0h), 2 = VRAM to CPU (GP0 C0h); its rectangle and next halfword
     uint32_t read, texpage, texwin, mask;
-    uint16_t texcache[256][4], clutcache[256], clut_id; uint32_t textag[256]; int clut_valid;
+    uint16_t texcache[256][4], clutcache[256], clut_id; uint32_t textag[256]; int clut_valid, clut_n;
     int16_t ax1, ay1, ax2, ay2, ox, oy;   // drawing area (GP0 E3h/E4h) and offset (GP0 E5h)
-    int irq, display_off, dma_dir;
+    int irq, display_off, dma_dir, tex_disable_ok;   // ...; GP1(09h): GP0(E1h) bit 11 may disable textures
     uint16_t disp_x, disp_y, hx1, hx2, vy1, vy2; uint32_t dmode;   // GP1(05h..08h)
     int line, field; uint64_t next_line; uint32_t line_frac;   // video timing: scanline, interlace field, next scanline's cycle and its 16.16 remainder
 } ps1_gpu;
@@ -70,6 +70,8 @@ typedef struct ps1 {
     ps1_sio sio;
     ps1_mdec mdec;
     char tty[256]; int ntty;         // the debug console line being written (0x1F802080)
+    void (*tty_out)(void *ctx, const char *line); void *tty_ctx;   // where finished debug console lines go: stderr when NULL
+    uint8_t *exe; size_t exe_n;      // a PS-X EXE waiting for the BIOS to reach its shell (exe.c)
     int frame_done, exit_requested, exit_code;
     unsigned red, unmapped;          // [RED] reports already made: features (RED_ONCE bits), and unmapped accesses (a count)
 } ps1;
@@ -79,6 +81,10 @@ ps1 *ps1_new(void);   // a machine after reset, its memories zeroed; NULL when o
 void ps1_free(ps1 *m);
 void ps1_reset(ps1 *m);
 int ps1_load_bios(ps1 *m, const char *path);   // 0, or -1 after a [RED] line saying why
+int ps1_load_exe(ps1 *m, const uint8_t *exe, size_t n);   // a PS-X EXE (copied) to start in place of the BIOS shell; 0, or -1 after a [RED] line
+int ps1_exe_due(const ps1 *m);
+void ps1_exe_start(ps1 *m);
+void tty_putc(ps1 *m, char c);                   // the debug console: written through 0x1F802080 or the kernel's std_out_putchar
 void ps1_run_frame(ps1 *m);                     // runs to the next vertical blank (or to an exit request through the debug port)
 // The picture the console shows now, as BGRA8 pixels (0xAARRGGBB words) into out (cap_w x cap_h at most): its size in *w, *h (gpu_sw.c)
 void ps1_display(const ps1 *m, uint32_t *out, int cap_w, int cap_h, int *w, int *h);
@@ -89,8 +95,8 @@ uint32_t ps1_phys(uint32_t addr);
 uint8_t mem_read8(ps1 *m, uint32_t addr);
 uint16_t mem_read16(ps1 *m, uint32_t addr);
 uint32_t mem_read32(ps1 *m, uint32_t addr);
-void mem_write8(ps1 *m, uint32_t addr, uint8_t v);
-void mem_write16(ps1 *m, uint32_t addr, uint16_t v);
+void mem_write8(ps1 *m, uint32_t addr, uint32_t v);    // v: the whole register being stored (mem.c, wr)
+void mem_write16(ps1 *m, uint32_t addr, uint32_t v);
 void mem_write32(ps1 *m, uint32_t addr, uint32_t v);
 int mem_fetch(ps1 *m, uint32_t addr, uint32_t *op);   // an instruction word; 0 where nothing executable is mapped (a bus error)
 void irq_raise(ps1 *m, int n);
@@ -139,5 +145,5 @@ void sio_reset(ps1 *m);
 #define RED(...) do { fputs("[RED] ", stderr); LOG(__VA_ARGS__); } while (0)
 // A feature gap is reported once per machine, not on every use
 enum { RED_GTE = 1, RED_TEXTURE = 2, RED_MDEC = 4, RED_SPU_VOICE = 8, RED_TMR_SYNC = 16, RED_DMA = 32, RED_GPU = 64, RED_CD = 128, RED_COP0 = 256,
-       RED_CD_TIMING = 512, RED_CD_AUDIO = 1024, RED_CD_ID = 2048, RED_CD_OVERRUN = 4096, RED_SPU_EFFECT = 8192, RED_GTE_TIMING = 16384 };
+       RED_CD_TIMING = 512, RED_CD_AUDIO = 1024, RED_CD_ID = 2048, RED_CD_OVERRUN = 4096, RED_SPU_EFFECT = 8192, RED_GTE_TIMING = 16384, RED_TEX_DISABLE = 32768 };
 #define RED_ONCE(m, bit, ...) do { if (!((m)->red & (bit))) { (m)->red |= (bit); RED(__VA_ARGS__); } } while (0)

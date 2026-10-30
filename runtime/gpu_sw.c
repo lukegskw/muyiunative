@@ -59,9 +59,12 @@ static uint16_t texel(ps1_gpu *g, int u, int v, uint32_t clut) {
     if (!shift) return c;
     unsigned index = shift == 2 ? c >> ((u & 3) * 4) & 15 : c >> ((u & 1) * 8) & 255;
     clut &= 0x7fff;
-    if (!g->clut_valid || g->clut_id != clut) {
-        for (unsigned i = 0; i < 256; i++) g->clutcache[i] = g->vram[(clut >> 6) * VRAM_W + (((clut & 63) * 16 + i) & 1023)];
-        g->clut_id = (uint16_t)clut; g->clut_valid = 1;
+    // The CLUT cache takes the entries the depth uses, 16 or 256: the hardware VRAM of ps1-tests gpu/clut-cache shows an 8-bit texture reloading a CLUT that a 4-bit
+    // one cached, and a 4-bit texture keeping one that an 8-bit one cached
+    int need = shift == 2 ? 16 : 256;
+    if (!g->clut_valid || g->clut_id != clut || g->clut_n < need) {
+        for (int i = 0; i < need; i++) g->clutcache[i] = g->vram[(clut >> 6) * VRAM_W + (((clut & 63) * 16 + i) & 1023)];
+        g->clut_id = (uint16_t)clut; g->clut_valid = 1; g->clut_n = need;
     }
     return g->clutcache[index];
 }
@@ -75,10 +78,14 @@ static void texture_plot(ps1_gpu *g, int x, int y, int u, int v, uint32_t clut, 
     plot(g, x, y, c, semi && mask);
 }
 
+enum { FRAC = 12 };   // the fraction bits of an interpolation gradient (triangle)
 static int64_t edge(const ps1_vtx *p, const ps1_vtx *q, int x, int y) { return (int64_t)(q->x - p->x) * (y - p->y) - (int64_t)(q->y - p->y) * (x - p->x); }
 static int owns(const ps1_vtx *p, const ps1_vtx *q) { return q->y < p->y || (q->y == p->y && q->x > p->x); }   // top and left edges keep the pixels on them
 
-// Polygons leave out their right and bottom edges, are not drawn when wider than 1023 or taller than 511, and are dithered only when shaded (psx-spx, Vertex; Notes)
+// Polygons leave out their right and bottom edges, are not drawn when wider than 1023 or taller than 511, and are dithered only when shaded (psx-spx, Vertex; Notes).
+// Colours and texture coordinates step from the first vertex by gradients with 12 fraction bits, truncated, and round to the nearest value: psx-spx gives no precision,
+// and this is the one that reproduces the hardware VRAM of ps1-tests gpu/triangle, gpu/quad and gpu/uv-interpolation exactly (8, 10, 14, 16 and 20 bits, or
+// gradients rounded down, leave hundreds to thousands of pixels different)
 static void triangle(ps1_gpu *g, ps1_vtx a, ps1_vtx b, ps1_vtx c, int gouraud, int semi, int tex, int raw, uint32_t clut) {
     int x0 = MIN(MIN(a.x, b.x), c.x), x1 = MAX(MAX(a.x, b.x), c.x), y0 = MIN(MIN(a.y, b.y), c.y), y1 = MAX(MAX(a.y, b.y), c.y);
     if (x1 - x0 > 1023 || y1 - y0 > 511) return;
@@ -88,14 +95,22 @@ static void triangle(ps1_gpu *g, ps1_vtx a, ps1_vtx b, ps1_vtx c, int gouraud, i
     x0 = MAX(x0, g->ax1); x1 = MIN(x1, g->ax2); y0 = MAX(y0, g->ay1); y1 = MIN(y1, g->ay2);
     int dither = (gouraud || (tex && !raw)) && g->texpage >> 9 & 1;
     uint16_t flat = rgb15(0, 0, a.r, a.g, a.b, 0);
+    int64_t bx = b.x - a.x, by = b.y - a.y, cx = c.x - a.x, cy = c.y - a.y, dx[5], dy[5];
+    const int fa[5] = {a.r, a.g, a.b, a.u, a.v}, fb[5] = {b.r, b.g, b.b, b.u, b.v}, fc[5] = {c.r, c.g, c.b, c.u, c.v};
+    for (int i = 0; i < 5; i++) {
+        int64_t nb = fb[i] - fa[i], nc = fc[i] - fa[i];
+        dx[i] = (nb * cy - nc * by) * (1 << FRAC) / area; dy[i] = (nc * bx - nb * cx) * (1 << FRAC) / area;
+    }
     for (int y = y0; y <= y1; y++)
         for (int x = x0; x <= x1; x++) {
             int64_t wa = edge(&b, &c, x, y), wb = edge(&c, &a, x, y), wc = edge(&a, &b, x, y);
             if (wa < 0 || wb < 0 || wc < 0 || (!wa && !owns(&b, &c)) || (!wb && !owns(&c, &a)) || (!wc && !owns(&a, &b))) continue;
+#define LERP(i) (int)(((int64_t)fa[i] * (1 << FRAC) + dx[i] * (x - a.x) + dy[i] * (y - a.y) + (1 << (FRAC - 1))) >> FRAC)
             int r = a.r, gr = a.g, bl = a.b;
-            if (gouraud) { r = (int)((a.r * wa + b.r * wb + c.r * wc) / area); gr = (int)((a.g * wa + b.g * wb + c.g * wc) / area); bl = (int)((a.b * wa + b.b * wb + c.b * wc) / area); }
-            if (tex) texture_plot(g, x, y, (int)((a.u * wa + b.u * wb + c.u * wc) / area), (int)((a.v * wa + b.v * wb + c.v * wc) / area), clut, r, gr, bl, raw, semi, dither);
+            if (gouraud) { r = LERP(0); gr = LERP(1); bl = LERP(2); }
+            if (tex) texture_plot(g, x, y, LERP(3), LERP(4), clut, r, gr, bl, raw, semi, dither);
             else plot(g, x, y, gouraud ? rgb15(x, y, r, gr, bl, dither) : flat, semi);
+#undef LERP
         }
 }
 
@@ -103,17 +118,24 @@ static void dot(ps1_gpu *g, int x, int y, int r, int gr, int b, int semi, int di
     if (x >= g->ax1 && x <= g->ax2 && y >= g->ay1 && y <= g->ay2) plot(g, x, y, rgb15(x, y, r, gr, b, dither), semi);
 }
 
-// Lines include both ends and are always dithered when dithering is on; ends at one place draw a 1x1 rectangle in the first colour (psx-spx, GPU Render Line Commands)
+// Lines include both ends and are always dithered when dithering is on, even when both ends are one pixel (psx-spx, GPU Render Line Commands). The hardware VRAM of
+// ps1-tests gpu/lines fixes the steps: along the longer axis one pixel at a time, the other axis rounded to the nearest pixel, a tie stepping a mostly horizontal line
+// (and holding a mostly vertical one) at the halfway point; gouraud colours step like a polygon's (triangle). Only lines drawn rightwards and downwards show ties there,
+// so the other directions follow the same rule by symmetry
 static void line(ps1_gpu *g, const ps1_vtx *a, const ps1_vtx *b, int gouraud, int semi) {
     int dx = b->x - a->x, dy = b->y - a->y, n = MAX(abs(dx), abs(dy));
     if (abs(dx) > 1023 || abs(dy) > 511) return;
-    if (!n) { dot(g, a->x, a->y, a->r, a->g, a->b, semi, 0); return; }
     int dither = g->texpage >> 9 & 1;
-    int64_t x = (int64_t)a->x * 65536 + 0x8000, y = (int64_t)a->y * 65536 + 0x8000, sx = (int64_t)dx * 65536 / n, sy = (int64_t)dy * 65536 / n;
-    for (int i = 0; i <= n; i++, x += sx, y += sy) {
+    if (!n) { dot(g, a->x, a->y, a->r, a->g, a->b, semi, dither); return; }
+    int xmajor = abs(dx) >= abs(dy), d = xmajor ? dy : dx, sx = dx < 0 ? -1 : 1, sy = dy < 0 ? -1 : 1;
+    for (int i = 0; i <= n; i++) {
         int r = a->r, gr = a->g, bl = a->b;
-        if (gouraud) { r += (b->r - a->r) * i / n; gr += (b->g - a->g) * i / n; bl += (b->b - a->b) * i / n; }
-        dot(g, (int)(x >> 16), (int)(y >> 16), r, gr, bl, semi, dither);
+#define LERP(f) (int)(((int64_t)a->f * (1 << FRAC) + i * ((int64_t)(b->f - a->f) * (1 << FRAC) / n) + (1 << (FRAC - 1))) >> FRAC)
+        if (gouraud) { r = LERP(r); gr = LERP(g); bl = LERP(b); }
+#undef LERP
+        int off = (int)((2 * (int64_t)i * abs(d) + n - !xmajor) / (2 * n));
+        int x = xmajor ? a->x + sx * i : a->x + sx * off, y = xmajor ? a->y + sy * off : a->y + sy * i;
+        dot(g, x, y, r, gr, bl, semi, dither);
     }
 }
 
@@ -126,7 +148,7 @@ static void polygon(ps1 *m, uint32_t c) {
         uint32_t col = gouraud && k ? w[p++] : w[0];
         v[k] = vtx(g, w[p++], col);
         if (tex) { v[k].u = w[p] & 255; v[k].v = w[p] >> 8 & 255; if (!k) clut = w[p] >> 16; }
-        if (tex && k == 1) g->texpage = (g->texpage & ~0x9ffu) | (w[p] >> 16 & 0x9ff);   // the page attribute sets GP0(E1h) bits 0-8 and 11
+        if (tex && k == 1) g->texpage = (g->texpage & ~0x9ffu) | (w[p] >> 16 & (g->tex_disable_ok ? 0x9ff : 0x1ff));   // the page attribute sets GP0(E1h) bits 0-8 and 11
         p += tex;
     }
     triangle(g, v[0], v[1], v[2], gouraud, c >> 1 & 1, tex, c & 1, clut);
@@ -140,9 +162,11 @@ static void rectangle(ps1 *m, uint32_t c) {
     if (!w) { w = g->buf[2 + tex] & 0x3ff; h = g->buf[2 + tex] >> 16 & 0x1ff; }
     ps1_vtx v = vtx(g, g->buf[1], g->buf[0]);
     uint16_t col = rgb15(0, 0, v.r, v.g, v.b, 0);
+    // GP0(E1h) bits 12/13 flip rectangles' textures. The hardware VRAM of ps1-tests gpu/texture-flip shows U running u0+1, u0, u0-1... across an X-flipped rectangle
+    // and V running v0, v0-1... down a Y-flipped one; polygons ignore both bits
     for (int y = MAX(v.y, g->ay1); y <= MIN(v.y + h - 1, g->ay2); y++)
         for (int x = MAX(v.x, g->ax1); x <= MIN(v.x + w - 1, g->ax2); x++) {
-            if (tex) texture_plot(g, x, y, (int)(g->buf[2] & 255) + (g->texpage & 0x1000 ? v.x - x : x - v.x),
+            if (tex) texture_plot(g, x, y, (int)(g->buf[2] & 255) + (g->texpage & 0x1000 ? v.x - x + 1 : x - v.x),
                 (int)(g->buf[2] >> 8 & 255) + (g->texpage & 0x2000 ? v.y - y : y - v.y), g->buf[2] >> 16, v.r, v.g, v.b, c & 1, c >> 1 & 1, 0);
             else plot(g, x, y, col, c >> 1 & 1);
         }
@@ -203,9 +227,13 @@ static void fill(ps1_gpu *g, const uint32_t *w) {   // in 16-pixel steps, ignori
         for (int x = 0; x < fw; x++) g->vram[((y0 + y) & 511) * VRAM_W + ((x0 + x) & 1023)] = c;
 }
 
-static void env(ps1_gpu *g, uint32_t w) {
+static void env(ps1 *m, uint32_t w) {
+    ps1_gpu *g = &m->gpu;
     switch (w >> 24) {
-    case 0xe1: g->texpage = w & 0x3fff; break;
+    case 0xe1:   // bit 11 only after GP1(09h) allows it: the hardware log of ps1-tests gpu/gp0-e1 keeps GPUSTAT.15 clear otherwise
+        g->texpage = w & (g->tex_disable_ok ? 0x3fff : 0x37ff);
+        if (g->texpage & 0x800) RED_ONCE(m, RED_TEX_DISABLE, "gpu: textures disabled through GP0(E1h) bit 11: textured primitives still draw their texture");
+        break;
     case 0xe2: g->texwin = w & 0xfffff; break;
     case 0xe3: g->ax1 = w & 0x3ff; g->ay1 = w >> 10 & 0x3ff; break;
     case 0xe4: g->ax2 = w & 0x3ff; g->ay2 = w >> 10 & 0x3ff; break;
@@ -249,7 +277,7 @@ static void execute(ps1 *m) {
     case 4: copy(g, g->buf); break;
     case 5: xfer_start(g, g->buf[1], g->buf[2], 1); break;
     case 6: xfer_start(g, g->buf[1], g->buf[2], 2); break;
-    default: env(g, g->buf[0]); break;
+    default: env(m, g->buf[0]); break;
     }
 }
 
@@ -283,6 +311,7 @@ void gpu_gp1(ps1 *m, uint32_t w) {
     case 0x06: g->hx1 = w & 0xfff; g->hx2 = w >> 12 & 0xfff; break;
     case 0x07: g->vy1 = w & 0x3ff; g->vy2 = w >> 10 & 0x3ff; break;
     case 0x08: g->dmode = w & 0xff; break;
+    case 0x09: g->tex_disable_ok = w & 1; break;
     case 0x10 ... 0x1f:   // latch a register for GPUREAD, as a v2 GPU does; the other indices leave the latch alone
         switch (w & 0xf) {
         case 2: g->read = g->texwin; break;
