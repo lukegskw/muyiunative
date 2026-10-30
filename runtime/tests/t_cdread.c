@@ -30,11 +30,13 @@ static void advance(ps1 *m, uint64_t cycles) {
     m->cycles = end;
 }
 static void request(ps1 *m) { mem_write8(m, HSTS, 0); mem_write8(m, HINT, 0x80); }
+static const char licence[] = "Sony Computer Entertainment Amer  ica ";   // sector 4's second line (psx-spx, CDROM ISO Volume Descriptors: System Area)
 static void sector(uint8_t *s, int n) {
     for (int i = 0; i < 2352; i++) s[i] = (uint8_t)(i * 7 + n * 31);
     s[0] = s[11] = 0; memset(s + 1, 0xff, 10);
     s[12] = 0; s[13] = 2; s[14] = (uint8_t)(n / 10 * 16 + n % 10); s[15] = 2;
     s[16] = 3; s[17] = 4; s[18] = 8; s[19] = 0; memcpy(s + 20, s + 16, 4);
+    if (n == 4) memcpy(s + 24 + 0x20, licence, sizeof licence - 1);
 }
 static int payload(ps1 *m, int n) { uint8_t s[2352]; sector(s, n); int same = 1; for (int i = 0; i < 2048; i++) if (mem_read8(m, DATA) != s[24 + i]) same = 0; return same; }
 static void mode(ps1 *m, uint8_t v) { send(m, 0x0e, &v, 1); CHECK(wait_int(m) == 3, "Setmode acknowledged"); ack(m); }
@@ -132,13 +134,34 @@ int main(void) {
     send(m, 0x08, NULL, 0); CHECK(wait_int(m) == 3, "Stop acknowledges before motor stops"); ack(m);
     CHECK(wait_int(m) == 2 && response(m, r) == 1 && r[0] == 0, "Stop completes with motor-off status"); ack(m);
     send(m, 0x1a, NULL, 0); CHECK(wait_int(m) == 3 && response(m, r) == 1 && r[0] == 0, "GetID acknowledges with current motor-off status"); ack(m);
-    CHECK(wait_int(m) == 5 && response(m, r) == 8 && !memcmp(r, (const uint8_t[]){8, 0x80, 0x20, 0, 0, 0, 0, 0}, 8), "GetID reports unlicensed Mode2 without inventing motor-on status or SCEx metadata"); ack(m);
+    CHECK(wait_int(m) == 2 && response(m, r) == 8 && !memcmp(r, (const uint8_t[]){0, 0, 0x20, 0, 'S', 'C', 'E', 'A'}, 8), "GetID: a licensed Mode2 disc, SCEA from its licence"); ack(m);
+    send(m, 0x19, (const uint8_t[]){0x22}, 1);
+    CHECK(wait_int(m) == 3 && response(m, r) == 7 && !memcmp(r, "for U/C", 7), "Test 22h: the console of the licence's region"); ack(m);
+    send(m, 0x19, (const uint8_t[]){0x05}, 1);
+    CHECK(wait_int(m) == 3 && response(m, r) == 2 && r[0] == 1 && r[1] == 1, "Test 05h: one SCEx string read, and it matched"); ack(m);
+
+    char bare[] = "/tmp/ps1native-unlicensed-XXXXXX.bin"; fd = mkstemps(bare, 4); f = fd < 0 ? NULL : fdopen(fd, "wb");
+    int ready = f != NULL;
+    for (int n = 0; ready && n < SECTORS; n++) { sector(s, n); if (n == 4) memset(s + 24, 0, 2048); ready = fwrite(s, 1, sizeof s, f) == sizeof s; }
+    if (f && fclose(f)) ready = 0; else if (!f && fd >= 0) close(fd);
+    if (!ready || disc_open(other, bare)) { fputs("FAIL: cannot mount synthetic unlicensed disc\n", stderr); unlink(bare); ps1_free(m); ps1_free(other); return 1; }
+    unlink(bare); mode(other, 0); locate(other, 0); send(other, 0x06, NULL, 0);
+    CHECK(wait_int(other) == 5 && response(other, r) == 2 && r[0] == 3 && r[1] == 0x40, "ReadN on an unlicensed disc: INT5 03h 40h, without INT3"); ack(other);
+    send(other, 0x1a, NULL, 0); CHECK(wait_int(other) == 3, "GetID on an unlicensed disc: INT3 first"); ack(other);
+    CHECK(wait_int(other) == 5 && response(other, r) == 8 && !memcmp(r, (const uint8_t[]){0x0a, 0x80, 0x20, 0, 0, 0, 0, 0}, 8), "GetID: unlicensed Mode2, no SCEx"); ack(other);
+    mode(other, 1); locate(other, 0); read_start(other, 0x06); request(other);
+    CHECK(payload(other, 0), "with CDDA mode on, the unlicensed disc reads"); ack(other);
 
     char mode1[] = "/tmp/ps1native-mode1-XXXXXX.bin"; fd = mkstemps(mode1, 4); f = fd < 0 ? NULL : fdopen(fd, "wb");
-    sector(s, 0); s[15] = 1;
-    int ready = f && fwrite(s, 1, sizeof s, f) == sizeof s; if (f && fclose(f)) ready = 0; else if (!f && fd >= 0) close(fd);
+    ready = f != NULL;
+    for (int n = 0; ready && n < 5; n++) {
+        sector(s, n); s[15] = 1;
+        if (n == 4) { memset(s + 16, 0, 2048); memcpy(s + 16 + 0x20, licence, sizeof licence - 1); }
+        ready = fwrite(s, 1, sizeof s, f) == sizeof s;
+    }
+    if (f && fclose(f)) ready = 0; else if (!f && fd >= 0) close(fd);
     if (!ready || disc_open(m, mode1)) { fputs("FAIL: cannot mount synthetic Mode1 disc\n", stderr); unlink(mode1); ps1_free(m); ps1_free(other); return 1; }
-    unlink(mode1); ps1_reset(m); mode(m, 0); locate(m, 0); read_start(m, 0x06); request(m);
+    unlink(mode1); ps1_reset(m); mode(m, 0); locate(m, 0); read_start(m, 0x06); request(m); sector(s, 0);
     same = 1; for (int i = 0; i < 2048; i++) if (mem_read8(m, DATA) != s[16 + i]) same = 0;
     CHECK(same && !(mem_read8(m, HSTS) & 0x40), "Mode1 2048-byte payload begins after its 16-byte sync/header");
     disc_close(other);

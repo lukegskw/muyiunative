@@ -1,8 +1,8 @@
 // The 24-voice SPU mixer (plan.md, phase 2), written from public documentation: https://psx-spx.consoledev.net/soundprocessingunitspu/ (ADPCM Samples, ADPCM Pitch,
 // Volume and ADSR Generator, Voice Flags, Noise Generator, Memory Access, Interrupt). Predictor constants: https://psx-spx.consoledev.net/cdromformat/#cdrom-xa-audio-adpcm-compression.
 // Evidence: t_spu keys a synthetic block on; the former register-only SPU always returned zero ENVX and produced no samples. Its synthetic reflection also showed that
-// EON/ATTR previously left reverb RAM unchanged. Voices now advance at 44100 Hz, reverb at 22050 Hz. External CD/PIO mixing and sub-sample RAM/FIFO timing remain
-// explicitly reported gaps. No emulator source was consulted
+// EON/ATTR previously left reverb RAM unchanged. Voices now advance at 44100 Hz, reverb at 22050 Hz, with the CD-ROM's audio as input (cd_audio). Sub-sample
+// RAM/FIFO timing remains an explicitly reported gap. No emulator source was consulted
 #include "ps1.h"
 #include <stddef.h>
 #include <string.h>
@@ -261,17 +261,20 @@ void spu_event(ps1 *m) {
         adsr(m, n);
     }
     S->key_on = S->key_off = 0;
-    // Overview / Memory layout: voice1/3 capture their post-ADSR mono samples even when inaudible; CD inputs are silent until external mixing is implemented
+    // The CD's frame goes to its capture buffers before the SPU's volume, and into the mix and reverb with AVOLL/AVOLR when ATTR.0/2 allow; SPU enable and mute do
+    // not apply to it (Control and Status Register, ATTR; Memory layout). Nothing is connected to the PIO input
+    int16_t cd[2]; cd_audio(m, cd);
     if (REG(0x1ac) & 12) {
-        ram_put(m, S->capture, 0); ram_put(m, 0x400 + S->capture, 0);
+        ram_put(m, S->capture, (uint16_t)cd[0]); ram_put(m, 0x400 + S->capture, (uint16_t)cd[1]);
         ram_put(m, 0x800 + S->capture, (uint16_t)captured[0]); ram_put(m, 0xc00 + S->capture, (uint16_t)captured[1]);
     }
     S->capture = (S->capture + 2) & 0x3ff;
+    int32_t cdin[2];
+    for (int ch = 0; ch < 2; ch++) { cdin[ch] = cnt & 1 ? q15(cd[ch], (int16_t)REG(0x1b0 + ch * 2)) : 0; if (cnt & 4) echo[ch] += q15(cd[ch], (int16_t)REG(0x1b0 + ch * 2)); }
     int32_t wet[2]; reverb(m, echo, wet);
     for (int ch = 0; ch < 2; ch++) {
         volume(&S->main[ch], REG(0x180 + ch * 2));
-        mixed[ch] = (clamp(mixed[ch] + wet[ch], -32768, 32767) * S->main[ch].level) >> 15;
-        if (!(cnt & 0x4000)) mixed[ch] = 0;
+        mixed[ch] = (clamp((cnt & 0x4000 ? mixed[ch] + wet[ch] : 0) + cdin[ch], -32768, 32767) * S->main[ch].level) >> 15;
     }
     if (S->audio_count == SPU_AUDIO_FRAMES) { S->audio_read = (S->audio_read + 1) % SPU_AUDIO_FRAMES; S->audio_count--; }
     unsigned at = (S->audio_read + S->audio_count) % SPU_AUDIO_FRAMES;
@@ -309,7 +312,6 @@ void spu_write(ps1 *m, uint32_t off, uint16_t v) {
     else if (off < 0x180 && (off & 15) == 12) S->voice[off / 16].env = (int16_t)v;
     else if (off == R_CNT) {
         if (!(v & 0x40)) S->irq = 0;
-        if (v & 15) RED_ONCE(m, RED_SPU_EFFECT, "spu: CD/PIO input mixing is not modelled yet");
     } else if (off == 0x1ac && v != 4) RED_ONCE(m, RED_SPU_EFFECT, "spu: non-512KB RAM configuration is not modelled yet");
 }
 void spu_dma_write(ps1 *m, uint32_t w) { put(m, (uint16_t)w); put(m, (uint16_t)(w >> 16)); }

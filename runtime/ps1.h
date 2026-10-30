@@ -44,14 +44,19 @@ typedef struct ps1_gpu {
     int line, field; uint64_t next_line; uint32_t line_frac;   // video timing: scanline, interlace field, next scanline's cycle and its 16.16 remainder
 } ps1_gpu;
 
+enum { CD_AUDIO_FRAMES = 16384 };   // 44.1 kHz frames the drive holds for the SPU: one 18.9 kHz mono XA-ADPCM sector makes 9408
 typedef struct ps1_cdrom {
-    uint8_t index, param[16], nparam, resp[16], nresp, rpos, hintmsk, hintsts, stat, mode, busy, irq, atv[4];
+    uint8_t index, param[16], nparam, resp[16], nresp, rpos, hintmsk, hintsts, stat, mode, busy, irq;
+    uint8_t atv[4], atv_next[4], muted, adp_mute;   // ATV0..3 applied and as written (ADPCTL.5 applies them), Mute, ADPCTL.0 (psx-spx, CDROM Controller I/O Ports)
     int pending; uint8_t pending_cmd;   // a command written while an interrupt was unacknowledged waits for it (psx-spx, BUSYSTS flag)
     uint8_t now_int, now_resp[16], now_n; uint64_t next;   // the response on its way, delivered at `next`
     uint8_t later_int, later_resp[16], later_n; uint32_t later_delay; int later;   // a second response, sent once the first is acknowledged
-    uint64_t sector_next; uint32_t target, lba, last_lba; int setloc, reading, have_header, complete_stat;
+    uint64_t sector_next; uint32_t target, lba, last_lba; int setloc, reading, playing, have_header, complete_stat;
     uint8_t sector[8][2352], header[8], data[2340];   // decoder slots and the independently locked host FIFO (psx-spx, CDROM Response/Data Queueing)
     uint16_t data_n, data_pos; uint8_t head, ready, have_sector, data_pending, end_pending, filter_file, filter_channel, bfrd;
+    uint8_t filter_drop, size_mode, region, scex, report[8], report_n;   // ...; the licence region (A/E/I, 0 = none) and SCEx counters; a Play report waiting
+    int16_t xa_old[2], xa_older[2], zz[2][32]; unsigned zz_p, zz_six;   // XA-ADPCM: the predictors' history and the zigzag resampler's 37.8 kHz ring
+    int16_t audio[CD_AUDIO_FRAMES * 2]; unsigned audio_read, audio_n; int audio_xa;   // stereo frames on their way to the SPU, and whether they are XA-ADPCM
 } ps1_cdrom;
 
 typedef struct ps1 {
@@ -133,6 +138,7 @@ void cd_write(ps1 *m, uint32_t off, uint8_t v);
 void cd_event(ps1 *m);
 void cd_sector_event(ps1 *m);
 uint32_t cd_dma_read(ps1 *m);
+void cd_audio(ps1 *m, int16_t out[2]);   // the drive's next 44.1 kHz stereo frame into the SPU (silence when it has none)
 void spu_reset(ps1 *m);
 uint16_t spu_read(ps1 *m, uint32_t off);
 void spu_write(ps1 *m, uint32_t off, uint16_t v);
@@ -145,5 +151,7 @@ void sio_reset(ps1 *m);
 #define RED(...) do { fputs("[RED] ", stderr); LOG(__VA_ARGS__); } while (0)
 // A feature gap is reported once per machine, not on every use
 enum { RED_GTE = 1, RED_TEXTURE = 2, RED_MDEC = 4, RED_SPU_VOICE = 8, RED_TMR_SYNC = 16, RED_DMA = 32, RED_GPU = 64, RED_CD = 128, RED_COP0 = 256,
-       RED_CD_TIMING = 512, RED_CD_AUDIO = 1024, RED_CD_ID = 2048, RED_CD_OVERRUN = 4096, RED_SPU_EFFECT = 8192, RED_GTE_TIMING = 16384, RED_TEX_DISABLE = 32768 };
+       RED_CD_TIMING = 512, RED_CD_AUDIO = 1024, RED_CD_ID = 2048, RED_CD_OVERRUN = 4096, RED_SPU_EFFECT = 8192, RED_GTE_TIMING = 16384, RED_TEX_DISABLE = 32768,
+       RED_CD_SCAN = 1 << 16, RED_CD_SESSION = 1 << 17, RED_CD_GETQ = 1 << 18, RED_CD_SOUNDMAP = 1 << 19, RED_CD_IGNORE = 1 << 20, RED_CD_PEAK = 1 << 21,
+       RED_CD_XA = 1 << 22, RED_CD_UNLOCK = 1 << 23 };
 #define RED_ONCE(m, bit, ...) do { if (!((m)->red & (bit))) { (m)->red |= (bit); RED(__VA_ARGS__); } } while (0)
