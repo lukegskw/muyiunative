@@ -11,8 +11,8 @@ BIOS = ../../bios/openbios
 TOOLS = ../../tools
 RTSRC = $(sort $(wildcard $(RT)/*.c))
 SRC = main.c front_mac.m $(GFX)/present.m $(RTSRC) $(GEN)/openbios.c
-HDR = front.h $(GFX)/present.h $(wildcard $(RT)/*.h)
-CODEGEN = $(TOOLS)/codegen.py $(TOOLS)/analyze.py $(TOOLS)/mips.py $(TOOLS)/exe.py
+HDR = front.h input.h keys.h $(GFX)/present.h $(wildcard $(RT)/*.h)
+CODEGEN = $(TOOLS)/codegen.py $(TOOLS)/analyze.py $(TOOLS)/mips.py $(TOOLS)/exe.py $(TOOLS)/overlays.py
 CFLAGS = -arch arm64 -mmacosx-version-min=$(MINOS) -O2 -g -Wall -Wextra -fobjc-arc -I$(RT) -I$(GFX)
 FRAMEWORKS = -framework AppKit -framework QuartzCore -framework Metal -framework CoreGraphics -framework ImageIO -framework AudioToolbox
 .DEFAULT_GOAL := host

@@ -6,7 +6,7 @@ The aim is native code, not emulation: the game's MIPS code is translated to C a
 
 ## Status
 
-Phase 3 of [the plan](plan.md#4-phases-and-exit-criteria), the recompiler, has met its exit criterion: Metal Slug X (USA)'s main executable, translated to C and compiled on the Mac, runs as native code beside OpenBIOS's and agrees with the interpreter in lockstep to its title menu. Phase 2 gave the interpreter the CD-ROM drive with its audio, the full software GPU, the GTE, the SPU, the MDEC, digital pads and memory cards, and it passes the hardware test programs of [ps1-tests](tests/ps1-tests/README.md) in CI. Gameplay, broader compatibility, timing accuracy and speed still need work: the game runs hardly faster native than interpreted, and a profile finds the time in drawing a GPU list that loops, not in its code ([Development](docs/development.md#phase-3-the-recompiler)).
+Phase 4 of [the plan](plan.md#4-phases-and-exit-criteria), overlays and profiles, has met its exit criterion: Metal Slug X (USA) clears Mission 1 entirely as native code and agrees with the interpreter in lockstep through its results screen. Captures preserve overwritten code versions by content hash, and the runtime checks their bytes before use; scheduled GPU DMA packets remove the looping-list performance stall found after phase 3. The hardware test programs of [ps1-tests](tests/ps1-tests/README.md) still pass. Broader compatibility, audible game output and hardware-timing accuracy remain open ([Development](docs/development.md#phase-4-overlays-and-profiles)). Phase 5, the Mac product, is next.
 
 ## Build from the command line
 
@@ -23,7 +23,7 @@ The app boots OpenBIOS and shows its shell when no disc is mounted. It runs on m
 shell/mac/build/ps1native --disc /external/path/disc.cue
 ```
 
-The keyboard controls a digital pad in port 1: arrows for the D-pad; Z/X/A/S for Cross/Circle/Square/Triangle; Q/W for L1/R1; 1/2 for L2/R2; Return for Start and Space for Select. Sound is played through the Mac's default output. Memory cards currently have in-memory protocol support; the host leaves the slots empty. Supported disc layouts, reproducible headless inputs and remaining gaps are in [Development](docs/development.md#phase-2-hardware-breadth).
+The keyboard controls a digital pad in port 1; its [mapping is listed below](#keyboard-controls). Sound is played through the Mac's default output. Memory cards currently have in-memory protocol support; the host leaves the slots empty. Supported disc layouts, reproducible headless inputs and remaining gaps are in [Development](docs/development.md#phase-2-hardware-breadth).
 
 OpenBIOS runs as native code, compiled with the app from its bundled binary; a game's code is interpreted until you make it native, as below. `--interpret` runs everything in the interpreter, and `--headless --lockstep` runs an interpreting machine beside the native one and stops at their first difference ([Development](docs/development.md#phase-3-the-recompiler)).
 
@@ -33,7 +33,27 @@ To turn a game with a profile in `profiles/` into native code on your Mac, and c
 scripts/native_game.py /external/path/disc.cue
 ```
 
+Use `--route first_level` to reproduce the first game's full first-level acceptance route. For an unknown game, `scripts/survey_game.py /external/path/disc.cue --frames 2400` captures the supplied route and writes a draft profile and a local picture to inspect ([Development](docs/development.md#phase-4-overlays-and-profiles)).
+
 It writes the game's code into `shell/mac/build`, where it stays: never commit or share it. It also builds a host with that code, which runs the game in a window: `shell/mac/build/game/ps1native --disc /external/path/disc.cue`.
+
+### Keyboard controls
+
+Use the left hand for movement and the right hand for the face buttons:
+
+| Keyboard key  | PlayStation button       |
+| ------------- | ------------------------ |
+| W / A / S / D | Up / Left / Down / Right |
+| I             | Triangle (△)             |
+| J             | Square (□)               |
+| K             | Cross (✕)                |
+| L             | Circle (○)               |
+| Q / E         | L1 / R1                  |
+| 1 / 3         | L2 / R2                  |
+| Enter/Return  | Start                    |
+| Backspace     | Select                   |
+
+On a Mac keyboard, Backspace is the key labelled Delete (⌫). With Metal Slug X's default controls, J fires, K jumps and L throws a grenade. Keyboard remapping is planned for phase 5; the current layout is fixed.
 
 ### For developers
 

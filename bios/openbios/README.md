@@ -15,7 +15,7 @@ With no disc, the shell's CD check fails and the cube turns to its error colours
 
 ## As native code
 
-The Mac host and the runtime's tests run OpenBIOS as native code (plan.md, phase 3), generated in each build from this binary and never committed. OpenBIOS copies its kernel and its shell into RAM and enters them through jumps a static analysis cannot follow, so the build first runs it in the interpreter for 60 frames (`tools/capture.c`): RAM as it is then, and the 251 addresses the CPU called or jumped to through a register, are what `tools/codegen.py --bios --capture` analyzes, beside the ROM from its reset vector: 313 functions. From reset into the shell, all but 0.15% of its instructions then run natively, in lockstep with the interpreter (`t_lockstep`).
+The Mac host and the runtime's tests run OpenBIOS as native code (plan.md, phase 3), generated in each build from this binary and never committed. OpenBIOS copies its kernel and its shell into RAM and enters them through jumps a static analysis cannot follow, so the build first runs it in the interpreter for 60 frames (`tools/capture.c`): RAM as it is then and the 251 addresses the CPU called or jumped to through a register are what `tools/codegen.py --bios --capture` analyzes beside the ROM from its reset vector: 313 functions. Phase 4 also keeps 1,211 immutable blocks as they execute, including code overwritten before capture ends, and adds their native versions by content hash: 1,524 functions/blocks in all. From reset through 50 frames of the shell, all 4,287,029 instructions run natively and agree in lockstep with the interpreter (`t_lockstep`); a 300-frame run interprets 24 instructions on paths the capture did not reach.
 
 ## Licenses
 

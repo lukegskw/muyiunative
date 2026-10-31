@@ -12,18 +12,12 @@
 #include "front.h"
 #include "present.h"
 #include "ps1.h"
+#include "keys.h"
 
 static atomic_uint g_buttons;
 static uint16_t key_button(NSEvent *e) {
-    NSString *s = e.charactersIgnoringModifiers.lowercaseString;
-    if (!s.length) return 0;
-    switch ([s characterAtIndex:0]) {
-    case NSUpArrowFunctionKey: return PAD_UP; case NSDownArrowFunctionKey: return PAD_DOWN;
-    case NSLeftArrowFunctionKey: return PAD_LEFT; case NSRightArrowFunctionKey: return PAD_RIGHT;
-    case 'z': return PAD_CROSS; case 'x': return PAD_CIRCLE; case 'a': return PAD_SQUARE; case 's': return PAD_TRIANGLE;
-    case 'q': return PAD_L1; case 'w': return PAD_R1; case '1': return PAD_L2; case '2': return PAD_R2;
-    case '\r': return PAD_START; case ' ': return PAD_SELECT; default: return 0;
-    }
+    NSString *s = e.charactersIgnoringModifiers;
+    return s.length ? front_key_button([s characterAtIndex:0]) : 0;
 }
 uint16_t front_buttons(void) { return (uint16_t)atomic_load(&g_buttons); }
 

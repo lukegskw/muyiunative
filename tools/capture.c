@@ -1,6 +1,6 @@
 // The capture at build time (plan.md, section 3: tools/ capture; runtime/capture.c): OpenBIOS, or a program it starts, run in the interpreter for some frames, for
-// what tools/codegen.py --capture analyzes. The Mac host's --capture does the same for a game, along its route.
-// Usage: capture <bios.bin> <frames> <out> [program.exe]: writes <out>.ram (main RAM, 2 MB) and <out>.txt (the addresses, in hex, one a line)
+// what tools/codegen.py --capture analyzes, including immutable block versions for overlays (phase 4). The Mac host's --capture does the same for a game, along its route.
+// Usage: capture <bios.bin> <frames> <out> [program.exe]: writes <out>.ram (main RAM, 2 MB), .txt (call targets, hex) and .blocks (the code versions that ran)
 #include "ps1.h"
 #include <stdlib.h>
 

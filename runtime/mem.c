@@ -116,7 +116,7 @@ static void wr(ps1 *m, uint32_t a, uint32_t v, unsigned n) {
     uint32_t p = ps1_phys(a);
     if (p - BIOS_BASE < BIOS_SIZE || p - EXP1_BASE < EXP1_SIZE) return;   // ROM, and the empty expansion port
     uint8_t *d = at(m, a);
-    if (d) memcpy(d, &v, n); else io_write(m, p, v, n);
+    if (d) { memcpy(d, &v, n); if (m->native_active) native_written(m, a, n); } else io_write(m, p, v, n);
 }
 
 uint8_t mem_read8(ps1 *m, uint32_t a) { return (uint8_t)rd(m, a, 1); }
