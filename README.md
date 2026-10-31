@@ -6,36 +6,37 @@ The aim is native code, not emulation: the game's MIPS code is translated to C a
 
 ## Status
 
-Phase 4 of [the plan](plan.md#4-phases-and-exit-criteria), overlays and profiles, has met its exit criterion: Metal Slug X (USA) clears Mission 1 entirely as native code and agrees with the interpreter in lockstep through its results screen. Captures preserve overwritten code versions by content hash, and the runtime checks their bytes before use; scheduled GPU DMA packets remove the looping-list performance stall found after phase 3. The hardware test programs of [ps1-tests](tests/ps1-tests/README.md) still pass. Broader compatibility, audible game output and hardware-timing accuracy remain open ([Development](docs/development.md#phase-4-overlays-and-profiles)). Phase 5, the Mac product, is next.
+Phase 5 of [the plan](plan.md#4-phases-and-exit-criteria) has met its exit criterion: native Mac game apps, a launcher, persistent memory cards and keyboard remapping. Metal Slug X (USA) clears Mission 1 entirely as native code and agrees with the interpreter in lockstep through its results screen. Scheduled GPU DMA packets remove the performance stall found after phase 3. The hardware tests still pass; broader compatibility, audible game output and hardware-timing accuracy remain open ([Development](docs/development.md#phase-4-overlays-and-profiles)).
 
 ## Build from the command line
 
 You need a Mac with Apple silicon, [Xcode](https://apps.apple.com/app/xcode/id497799835) 27.1 and Python 3.12 or newer. In a clone of this repository:
 
+```sh
+scripts/ps1native build /external/path/disc.cue --platform mac-app
 ```
+
+The command captures the game's code, compiles it, checks the route against the interpreter and creates `shell/mac/build/apps/<game>.app`. Double-click that app to play on macOS 14 or later. Its signed bundle includes OpenBIOS, the native game code and a local copy of the disc's tracks; it works after moving the app or the original dump. Keep game apps and generated code on your Mac.
+
+Add `--output /path/Game.app` to choose another location. A known profile supplies the title and capture route: `first_level` when available, otherwise `validation`. Use `--route <table>`, `--frames <n>` and repeatable `--input <frame>:<hex-buttons>` to choose a route. Unknown games default to a 2,400-frame capture; code not seen during capture runs in the interpreter. Supported disc layouts are in [Development](docs/development.md#phase-2-hardware-breadth).
+
+For the shorter command in the plan, add this checkout's scripts to your terminal's path:
+
+```sh
+export PATH="$PWD/scripts:$PATH"
+ps1native build /external/path/disc.cue --platform mac-app
+```
+
+The optional launcher opens game apps and remembers recent ones:
+
+```sh
 make -C shell/mac app
 open shell/mac/build/ps1native.app
 ```
 
-The app boots OpenBIOS and shows its shell when no disc is mounted. It runs on macOS 14 or later. To run your external dump:
+### Memory cards
 
-```sh
-shell/mac/build/ps1native --disc /external/path/disc.cue
-```
-
-The keyboard controls a digital pad in port 1; its [mapping is listed below](#keyboard-controls). Sound is played through the Mac's default output. Memory cards currently have in-memory protocol support; the host leaves the slots empty. Supported disc layouts, reproducible headless inputs and remaining gaps are in [Development](docs/development.md#phase-2-hardware-breadth).
-
-OpenBIOS runs as native code, compiled with the app from its bundled binary; a game's code is interpreted until you make it native, as below. `--interpret` runs everything in the interpreter, and `--headless --lockstep` runs an interpreting machine beside the native one and stops at their first difference ([Development](docs/development.md#phase-3-the-recompiler)).
-
-To turn a game with a profile in `profiles/` into native code on your Mac, and check it against the interpreter along the profile's route:
-
-```sh
-scripts/native_game.py /external/path/disc.cue
-```
-
-Use `--route first_level` to reproduce the first game's full first-level acceptance route. For an unknown game, `scripts/survey_game.py /external/path/disc.cue --frames 2400` captures the supplied route and writes a draft profile and a local picture to inspect ([Development](docs/development.md#phase-4-overlays-and-profiles)).
-
-It writes the game's code into `shell/mac/build`, where it stays: never commit or share it. It also builds a host with that code, which runs the game in a window: `shell/mac/build/game/ps1native --disc /external/path/disc.cue`.
+Game apps connect two memory cards and save them in `~/Library/Application Support/ps1native/Saves/<serial>-<boot-sha256>/card1.mcr` and `card2.mcr`. They are raw 128 KB images, created only when missing, saved once per emulated second when dirty and again before quitting. Moving or rebuilding the same game app preserves its saves. Close the game before backing up or replacing its cards; a second copy cannot use the same save folder simultaneously. Invalid cards are reported and kept intact.
 
 ### Keyboard controls
 
@@ -53,9 +54,13 @@ Use the left hand for movement and the right hand for the face buttons:
 | Enter/Return  | Start                    |
 | Backspace     | Select                   |
 
-On a Mac keyboard, Backspace is the key labelled Delete (⌫). With Metal Slug X's default controls, J fires, K jumps and L throws a grenade. Keyboard remapping is planned for phase 5; the current layout is fixed.
+On a Mac keyboard, Backspace is the key labelled Delete (⌫). With Metal Slug X's default controls, J fires, K jumps and L throws a grenade. Choose **Keyboard Controls…** in the game app's menu (⌘,) to change a binding: click its button, then press a key. Assigning an occupied key moves it to the new button; Unassign clears a binding, and Restore Defaults restores this table. Changes apply to all game apps.
 
 ### For developers
+
+`make -C shell/mac` builds the developer host. Run `shell/mac/build/ps1native --disc /external/path/disc.cue` to interpret an external disc, or add `--bios bios/openbios/openbios.bin` without a disc to open the BIOS shell. `--headless --lockstep` checks native execution against the interpreter. Headless runs leave card slots empty unless `--save-dir <directory>` is given, so existing validation routes remain reproducible.
+
+`scripts/native_game.py /external/path/disc.cue --route first_level` reproduces phase 4's acceptance checks and timings. `scripts/survey_game.py /external/path/disc.cue --frames 2400` captures an unknown game and writes a draft profile and local picture to inspect. Captures, game apps and generated C stay in ignored build folders ([Development](docs/development.md#phase-5-the-mac-product)).
 
 [Plan](plan.md) · [Development](docs/development.md) · [Contributing](CONTRIBUTING.md) · [Notes for agents](AGENTS.md)
 

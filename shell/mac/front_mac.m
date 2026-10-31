@@ -12,13 +12,18 @@
 #include "front.h"
 #include "present.h"
 #include "ps1.h"
-#include "keys.h"
+#include "keyboard.h"
+#include "product.h"
 
 static atomic_uint g_buttons;
-static uint16_t key_button(NSEvent *e) {
+static atomic_bool g_stop, g_running;
+static BOOL g_quitting;
+int front_stopping(void) { return atomic_load(&g_stop); }
+static uint16_t key_event(NSEvent *e, int down) {
     NSString *s = e.charactersIgnoringModifiers;
-    return s.length ? front_key_button([s characterAtIndex:0]) : 0;
+    return front_keyboard_event(e.keyCode, s.length ? [s characterAtIndex:0] : 0, down);
 }
+static void release_keys(void) { front_keyboard_reset(); atomic_store(&g_buttons, 0); }
 uint16_t front_buttons(void) { return (uint16_t)atomic_load(&g_buttons); }
 
 @interface FrontView : NSView
@@ -27,17 +32,32 @@ uint16_t front_buttons(void) { return (uint16_t)atomic_load(&g_buttons); }
 @implementation FrontView
 - (CALayer *)makeBackingLayer { return [CAMetalLayer layer]; }
 - (BOOL)acceptsFirstResponder { return YES; }
-- (void)keyDown:(NSEvent *)e { uint16_t b = key_button(e); if (b) atomic_fetch_or(&g_buttons, b); else [super keyDown:e]; }
-- (void)keyUp:(NSEvent *)e { uint16_t b = key_button(e); if (b) atomic_fetch_and(&g_buttons, ~(unsigned)b); else [super keyUp:e]; }
+- (void)keyDown:(NSEvent *)e { if (e.modifierFlags & NSEventModifierFlagCommand) [super keyDown:e]; else atomic_store(&g_buttons, key_event(e, 1)); }
+- (void)keyUp:(NSEvent *)e { atomic_store(&g_buttons, key_event(e, 0)); }
 @end
 
-@interface FrontApp : NSObject <NSApplicationDelegate>
+@interface FrontApp : NSObject <NSApplicationDelegate, NSWindowDelegate>
 @end
 
 @implementation FrontApp
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)app { (void)app; return YES; }
-- (void)applicationDidResignActive:(NSNotification *)n { (void)n; atomic_store(&g_buttons, 0); }
+- (void)applicationDidResignActive:(NSNotification *)n { (void)n; release_keys(); }
+- (void)windowDidResignKey:(NSNotification *)n { (void)n; release_keys(); }
+- (BOOL)windowShouldClose:(NSWindow *)window { (void)window; [NSApp terminate:nil]; return NO; }
+- (void)keyboard:(id)sender { (void)sender; release_keys(); front_keyboard_settings(); }
+// AppKit's applicationShouldTerminate: contract: NSTerminateLater keeps its event loop alive while the machine thread finishes a save, then replies on the main queue.
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)app {
+    (void)app; if (!atomic_load(&g_running)) return NSTerminateNow;
+    g_quitting = YES; atomic_store(&g_stop, true); return NSTerminateLater;
+}
 @end
+
+void front_cancel_stop(const char *message) {
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        front_error(message); atomic_store(&g_stop, false);
+        if (g_quitting) { g_quitting = NO; [NSApp replyToApplicationShouldTerminate:NO]; }
+    });
+}
 
 typedef struct frame { uint32_t *px; size_t cap; int w, h; } frame;
 typedef struct job { void (*run)(void *); void *arg; } job;
@@ -118,22 +138,26 @@ void front_present(const uint32_t *px, int w, int h) {
 static void *machine_thread(void *p) {
     job j = *(job *)p; free(p);
     j.run(j.arg);
-    dispatch_async(dispatch_get_main_queue(), ^{ [NSApp terminate:nil]; });
+    atomic_store(&g_running, false);
+    dispatch_async(dispatch_get_main_queue(), ^{ if (g_quitting) [NSApp replyToApplicationShouldTerminate:YES]; else [NSApp terminate:nil]; });
     return NULL;
 }
 
 void front_run(const char *title, void (*run)(void *arg), void *arg) {
     NSApplication *app = NSApplication.sharedApplication;
+    front_keyboard_load(); atomic_store(&g_stop, false);
     g_app = [FrontApp new]; app.delegate = g_app;
     app.activationPolicy = NSApplicationActivationPolicyRegular;   // a Dock icon and a menu bar, also when started from a terminal
     NSString *name = @(title);
     NSMenu *bar = [NSMenu new], *menu = [NSMenu new]; NSMenuItem *item = [NSMenuItem new];
+    [menu addItemWithTitle:@"Keyboard Controls…" action:@selector(keyboard:) keyEquivalent:@","].target = g_app;
     [menu addItemWithTitle:[@"Quit " stringByAppendingString:name] action:@selector(terminate:) keyEquivalent:@"q"];
     item.submenu = menu; [bar addItem:item]; app.mainMenu = bar;
     g_win = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 640, 480)
                                         styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable
                                           backing:NSBackingStoreBuffered defer:NO];
     g_win.title = name; g_win.releasedWhenClosed = NO; g_win.contentAspectRatio = NSMakeSize(4, 3);
+    g_win.delegate = g_app;
     FrontView *v = [[FrontView alloc] initWithFrame:NSMakeRect(0, 0, 640, 480)];
     v.wantsLayer = YES; v.layerContentsRedrawPolicy = NSViewLayerContentsRedrawNever;
     v.layer.backgroundColor = CGColorGetConstantColor(kCGColorBlack);
@@ -144,7 +168,8 @@ void front_run(const char *title, void (*run)(void *arg), void *arg) {
     job *j = malloc(sizeof *j);
     pthread_attr_t at; pthread_t t;
     pthread_attr_init(&at); pthread_attr_setstacksize(&at, 8 << 20); pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
-    if (!j || (*j = (job){run, arg}, pthread_create(&t, &at, machine_thread, j))) { free(j); RED("front end: cannot start the machine's thread"); }
+    atomic_store(&g_running, true);
+    if (!j || (*j = (job){run, arg}, pthread_create(&t, &at, machine_thread, j))) { atomic_store(&g_running, false); free(j); RED("front end: cannot start the machine's thread"); }
     pthread_attr_destroy(&at);
     [app activate];
     [app run];

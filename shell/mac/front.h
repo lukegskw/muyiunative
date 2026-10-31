@@ -4,6 +4,8 @@
 #include <stdint.h>
 // Opens a window titled title, runs run(arg) on a thread of its own and gives the main thread to AppKit. The app quits when run returns, on ⌘Q, or when the window closes
 void front_run(const char *title, void (*run)(void *arg), void *arg);
+int front_stopping(void);   // machine thread: quit requests wait for the machine to flush its memory cards and return
+void front_cancel_stop(const char *message);   // a failed save keeps the machine alive and cancels the pending quit
 // Shows w x h BGRA8 pixels (0xAARRGGBB words) in the window: copied, then presented on the main thread. Any thread
 void front_present(const uint32_t *px, int w, int h);
 uint16_t front_buttons(void);   // active-high digital pad buttons, sampled on the machine thread
