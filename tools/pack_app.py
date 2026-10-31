@@ -3,10 +3,10 @@
 # (LC_BUILD_VERSION), PkgInfo, and the signature: codesign --force --options runtime --sign <identity> ('-' = ad-hoc). The hardened runtime is on, as nothing is generated or
 # mapped executable at run time (plan.md, core rule). Phase 1's app is the host and its resources (the bundled OpenBIOS, with its licenses); the game's code and data join
 # it from phase 5 on. A resource, file or folder, is copied into Contents/Resources under its own name.
-# The app is written to <out.app>.partial, then moved into place, so a failed pack leaves the previous app as it was. An existing <out.app> is replaced only when it carries
+# The app is written to a unique temporary directory beside <out.app>, then moved into place, so a failed pack leaves the previous app as it was. An existing <out.app> is replaced only when it carries
 # the same bundle ID: the script never deletes an app it did not pack.
 # Usage: pack_app.py <out.app> --exe <host> [--resource <path>]... [--name ps1native] [--bundle-id org.ps1native.<name>] [--version 0.0] [--sign -]
-import argparse, plistlib, re, shutil, subprocess, sys
+import argparse, plistlib, re, shutil, subprocess, sys, tempfile
 from pathlib import Path
 from xml.parsers.expat import ExpatError
 
@@ -46,19 +46,23 @@ def pack(a):
     for r in res:
         if not r.exists(): raise SystemExit(f'no resource at {r}')
     if len({r.name for r in res}) < len(res): raise SystemExit('two resources with one name: ' + ', '.join(str(r) for r in res))
+    if any(out.is_relative_to(r) or r.is_relative_to(out) for r in res): raise SystemExit('the output app and its resources must not contain each other')
     if out.exists() and packed_id(out) != bundle_id(a): raise SystemExit(f'{out} exists and is not an app with bundle ID {bundle_id(a)}: remove it, or pack elsewhere')
     minos = min_os(exe)
-    tmp = out.with_name(out.name + '.partial'); shutil.rmtree(tmp, ignore_errors=True)
-    c = tmp / 'Contents'; (c / 'MacOS').mkdir(parents=True); (c / 'Resources').mkdir()
-    shutil.copyfile(exe, c / 'MacOS' / a.name); (c / 'MacOS' / a.name).chmod(0o755)
-    for r in res:
-        if r.is_dir(): shutil.copytree(r, c / 'Resources' / r.name)
-        else: shutil.copyfile(r, c / 'Resources' / r.name)
-    (c / 'Info.plist').write_bytes(plistlib.dumps(info_plist(a, minos)))
-    (c / 'PkgInfo').write_text('APPL????')
-    run(['codesign', '--force', '--options', 'runtime', '--sign', a.sign, tmp])
-    if out.exists(): shutil.rmtree(out)
-    tmp.rename(out)
+    # The former fixed .partial path erased any preexisting folder at that name and let concurrent builds erase each other's staging directories.
+    out.parent.mkdir(parents=True, exist_ok=True); tmp = Path(tempfile.mkdtemp(prefix=out.name + '.partial-', dir=out.parent))
+    try:
+        c = tmp / 'Contents'; (c / 'MacOS').mkdir(parents=True); (c / 'Resources').mkdir()
+        shutil.copyfile(exe, c / 'MacOS' / a.name); (c / 'MacOS' / a.name).chmod(0o755)
+        for r in res:
+            if r.is_dir(): shutil.copytree(r, c / 'Resources' / r.name)
+            else: shutil.copyfile(r, c / 'Resources' / r.name)
+        (c / 'Info.plist').write_bytes(plistlib.dumps(info_plist(a, minos)))
+        (c / 'PkgInfo').write_text('APPL????')
+        run(['codesign', '--force', '--options', 'runtime', '--sign', a.sign, tmp])
+        if out.exists(): shutil.rmtree(out)
+        tmp.rename(out)
+    finally: shutil.rmtree(tmp, ignore_errors=True)
     print(f'app: {out}', flush=True)
 
 

@@ -62,6 +62,20 @@ class PackApp(unittest.TestCase):
         self.assertNotEqual(r.returncode, 0); self.assertIn('bundle ID', r.stderr)
         self.assertEqual(plistlib.loads((other / 'Contents/Info.plist').read_bytes()), {'CFBundleIdentifier': 'com.example.other'})
 
+    def test_preserves_an_existing_partial_folder(self):
+        app = self.tmp / 'Staging.app'; partial = app.with_name(app.name + '.partial'); partial.mkdir(); sentinel = partial / 'keep.txt'; sentinel.write_text('untouched')
+        r = self.pack(app, '--name', 'Staging'); self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(sentinel.read_text(), 'untouched'); self.assertFalse(list(self.tmp.glob(app.name + '.partial-*')))
+
+    def test_refuses_resources_that_overlap_the_output(self):
+        resource = self.tmp / 'parent'; resource.mkdir(); note = resource / 'keep.txt'; note.write_text('untouched')
+        r = self.pack(resource / 'Nested.app', '--resource', resource)
+        self.assertNotEqual(r.returncode, 0); self.assertIn('must not contain each other', r.stderr); self.assertEqual(note.read_text(), 'untouched')
+        app = self.tmp / 'Existing.app'; r = self.pack(app, '--name', 'Existing'); self.assertEqual(r.returncode, 0, r.stderr)
+        r = self.pack(app, '--name', 'Existing', '--resource', app / 'Contents/Resources')
+        self.assertNotEqual(r.returncode, 0); self.assertIn('must not contain each other', r.stderr)
+        self.assertTrue((app / 'Contents/MacOS/Existing').is_file())
+
 
 if __name__ == '__main__':
     unittest.main()

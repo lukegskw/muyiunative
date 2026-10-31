@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+# Phase 5's Mac product build, called by scripts/ps1native: capture a route, compile its observed code, check it in lockstep, then pack a local game app. Disc files
+# and generated code stay in ignored build folders or the user's output app. Every build has its own workspace, so two discs cannot reuse each other's native code.
+import argparse, hashlib, plistlib, re, shutil, subprocess, sys, tempfile, tomllib
+from pathlib import Path
+
+import disc, replay
+from pack_app import packed_id
+
+ROOT = Path(__file__).resolve().parents[1]
+MAC = ROOT / 'shell/mac'
+
+
+def build_plan(source, profile=None, route=None, frames=None, inputs=None) -> dict:
+    name, image = disc.boot(disc.tracks(source)[0]); serial = disc.serial(name); digest = hashlib.sha256(image).hexdigest()
+    candidate = ROOT / 'profiles' / str(serial) / 'game.toml'
+    profile = Path(profile).resolve() if profile is not None else candidate if candidate.is_file() else None
+    game = tomllib.loads(profile.read_text()) if profile else {}
+    if profile and (not isinstance(game.get('disc'), dict) or game['disc'].get('boot_sha256') != digest): raise SystemExit(f'build: the disc\'s boot executable is not the one {profile.name} describes')
+    selected = route or ('first_level' if 'first_level' in game else 'validation')
+    if route and route not in game: raise SystemExit(f'build: no [{route}] route in the profile')
+    v = game.get(selected, {})
+    if not isinstance(v, dict): raise SystemExit(f'build: [{selected}] must be a route table')
+    count = frames if frames is not None else v.get('frames', 2400)
+    if type(count) is not int or count < 1: raise SystemExit('build: --frames must be positive')
+    try: events = replay.events(inputs if inputs is not None else v.get('inputs', []), v.get('pulses', []) if inputs is None else (), count)
+    except (ValueError, KeyError, TypeError, AttributeError) as e: raise SystemExit(f'build: invalid route: {e}') from e
+    title = game.get('name') or serial or Path(source).stem
+    if not isinstance(title, str): raise SystemExit('build: the profile name must be a string')
+    title = re.sub(r'[/\x00-\x1f:]', '-', title).strip() or 'PS1 Game'
+    if len(title.encode()) >= 256: raise SystemExit('build: the game name must be shorter than 256 UTF-8 bytes')
+    return dict(serial=serial, boot_sha256=digest, title=title, profile=profile, route=selected, frames=count, inputs=events,
+                save_id=f'{serial or "homebrew"}-{digest}')
+
+
+def bundle_disc(source, dest):
+    ts = disc.tracks(source); dest = Path(dest); dest.mkdir(parents=True, exist_ok=False)
+    files, lines, previous = {}, [], None
+    for t in ts:
+        src = t.file.resolve()
+        if src not in files:
+            files[src] = f'file{len(files) + 1:02d}.bin'; shutil.copyfile(src, dest / files[src])
+        if not lines or src != previous: lines.append(f'FILE "{files[src]}" BINARY')
+        mode = t.mode
+        if Path(source).suffix.lower() != '.cue':
+            with src.open('rb') as f: header = f.read(16)
+            if len(header) == 16 and header[15] == 1: mode = 'MODE1/2352'
+        lines.append(f'  TRACK {t.number:02d} {mode}')
+        for index, at in ([(0, t.first)] if t.first < t.start else []) + [(1, t.start)]:
+            lines.append(f'    INDEX {index:02d} {at // 4500:02d}:{at // 75 % 60:02d}:{at % 75:02d}')
+        previous = src
+    cue = dest / 'disc.cue'; cue.write_text('\n'.join(lines) + '\n'); return cue
+
+
+def run(label, command):
+    print(f'build: {label}', flush=True)
+    r = subprocess.run([str(x) for x in command], cwd=MAC, capture_output=True, text=True)
+    for line in (r.stdout + r.stderr).splitlines():
+        if line.startswith(('host:', 'codegen:', '[RED]')) or 'warning:' in line: print(f'  {line}', flush=True)
+    if r.returncode: raise SystemExit(f'build: {label} failed ({r.returncode}): {(r.stderr or r.stdout)[-2000:]}')
+    return r.stdout
+
+
+def frame_hash(output):
+    m = re.search(r'frame hash ([0-9a-f]{16})', output)
+    if not m: raise SystemExit('build: the host did not report a frame hash')
+    return m[1]
+
+
+def build(a):
+    source = a.disc.resolve()
+    if not source.is_file(): raise SystemExit(f'build: {source}: no such file')
+    p = build_plan(source, a.profile, a.route, a.frames, a.input)
+    out = (a.output or MAC / 'build/apps' / f'{p["title"]}.app').resolve()
+    if out.suffix != '.app': raise SystemExit('build: --output must end in .app')
+    bundle_id = f'org.ps1native.game.{p["save_id"].lower()}'
+    if out.exists() and packed_id(out) != bundle_id: raise SystemExit('build: the output exists and is not this game app; choose another --output')
+    if out.is_relative_to(ROOT) and not out.is_relative_to(MAC / 'build'): raise SystemExit('build: game apps inside this repository must stay in shell/mac/build')
+    # An app can be built outside the checkout, but may not replace its input disc or contain it while pack_app replaces an old bundle.
+    if any(t.file.resolve().is_relative_to(out) for t in disc.tracks(source)) or source.is_relative_to(out): raise SystemExit('build: the output app contains the source disc')
+    products = MAC / 'build/products'; products.mkdir(parents=True, exist_ok=True)
+    work = Path(tempfile.mkdtemp(prefix=f'{p["serial"] or "homebrew"}-', dir=products)); b = work.relative_to(MAC); gen = work / 'gen'; gen.mkdir()
+    print(f'build: {p["title"]}; capture route {p["route"]}, {p["frames"]} frames', flush=True)
+    print(f'build: local build files in {work}', flush=True)
+    run('building the capture host', ['make', f'B={b}', '-j3', 'host'])
+    (gen / 'route.inputs').write_text('\n'.join(p['inputs']) + ('\n' if p['inputs'] else ''))
+    route = ['--bios', ROOT / 'bios/openbios/openbios.bin', '--disc', source, '--headless', '--frames', p['frames'], '--input-file', gen / 'route.inputs']
+    captured = run('capturing interpreted game code', [work / 'ps1native', *route, '--capture', gen / 'game.cap'])
+    command = [sys.executable, ROOT / 'tools/codegen.py', source, '--capture', gen / 'game.cap', '--name', 'game', '-o', gen / 'game.c', '--max-ops', '20000']
+    if p['profile']: command += ['--profile', p['profile']]
+    run('generating native code', command)
+    parts = ' '.join(str(f.relative_to(MAC)) for f in sorted(gen.glob('game*.c')))
+    run('compiling native game code', ['make', f'B={b}', '-j3', 'game', f'GAME_C={parts}'])
+    native = run('checking the route against the interpreter', [work / 'game/ps1native', *route, '--lockstep'])
+    if 'the machines agree' not in native or frame_hash(native) != frame_hash(captured): raise SystemExit('build: native code differs from the interpreter; no app was packed')
+    resources = work / 'resources'; resources.mkdir(); bundle_disc(source, resources / 'disc')
+    manifest = {'Version': 1, 'Title': p['title'], 'Serial': p['serial'] or '', 'BootSHA256': p['boot_sha256'], 'SaveID': p['save_id'], 'Disc': 'disc/disc.cue'}
+    (resources / 'game.plist').write_bytes(plistlib.dumps(manifest))
+    run('packing and signing the game app', [sys.executable, ROOT / 'tools/pack_app.py', out, '--exe', work / 'game/ps1native', '--name', p['title'],
+        '--bundle-id', bundle_id, '--resource', ROOT / 'bios/openbios', '--resource', resources / 'disc', '--resource', resources / 'game.plist'])
+    print(f'build: app ready: {out}\nbuild: open it in Finder to play; keep this app and its game data on your Mac', flush=True)
+    return 0
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog='ps1native', description='Build a native Mac app from your own PS1 disc')
+    sub = ap.add_subparsers(dest='command', required=True); p = sub.add_parser('build', help='capture, compile, check and pack a game')
+    p.add_argument('disc', type=Path); p.add_argument('--platform', choices=['mac-app'], default='mac-app')
+    p.add_argument('--output', type=Path, help='output .app (default: shell/mac/build/apps/<game>.app)')
+    p.add_argument('--profile', type=Path); p.add_argument('--route', help='profile route (default: first_level, then validation)')
+    p.add_argument('--frames', type=int, help='capture frames (unknown games default to 2400)'); p.add_argument('--input', action='append', help='frame:hex-buttons (repeatable)')
+    a = ap.parse_args(argv)
+    try: return build(a)
+    except (OSError, ValueError, tomllib.TOMLDecodeError) as e: raise SystemExit(f'build: {e}') from e
