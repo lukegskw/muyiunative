@@ -1,6 +1,6 @@
-"""Mac product inputs (plan.md, phase 5): a portable copy of shared and separate raw tracks keeps its indexes and bytes, including stored pregaps and colliding source
+"""Mac product inputs (plan.md, phases 5–6): a portable copy of shared and separate raw tracks keeps its indexes and bytes, including stored pregaps and colliding source
 names. Build plans validate profiles and expand their routes before compilation. Inputs are synthetic PS-X EXEs and ISO9660 volumes; no game data or GPU is needed.
-The packaged program is assembled here, without an SDK or third-party executable; create_iso needs no disc-authoring dependency."""
+The packaged program is assembled here, without an SDK or third-party executable; Metal preferences and offline shaders do not make headless defaults require a GPU."""
 import hashlib, plistlib, re, shutil, struct, subprocess, sys, tempfile, unittest
 from contextlib import chdir
 from pathlib import Path
@@ -119,6 +119,12 @@ class MacBuild(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0); self.assertIn('not this game app', result.stderr)
         self.assertNotIn('building the capture host', result.stdout); self.assertEqual((out / 'keep').read_text(), 'untouched')
 
+    def test_build_refuses_scaled_software_before_compilation(self):
+        out = self.tmp / 'Scaled.app'
+        result = subprocess.run([sys.executable, ROOT / 'scripts/ps1native', 'build', self.data, '--scale', '2', '--output', out], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0); self.assertIn('--scale 2 or 4 needs --renderer metal', result.stderr)
+        self.assertNotIn('building the capture host', result.stdout); self.assertFalse(out.exists())
+
     def test_unknown_game_plan_and_stable_save_identity(self):
         plan = mac_build.build_plan(self.data)
         self.assertEqual((plan['serial'], plan['boot_sha256'], plan['frames'], plan['inputs']), ('SLUS-00001', hashlib.sha256(self.exe).hexdigest(), 2400, []))
@@ -171,17 +177,25 @@ class MacProduct(unittest.TestCase):
                 result = subprocess.run([str(s) for s in command], cwd=tmp, capture_output=True, text=True, timeout=timeout)
                 self.assertEqual(result.returncode, 0, (result.stdout + result.stderr)[-5000:]); return result
 
-            run([sys.executable, ROOT / 'scripts/ps1native', 'build', source.name, '--platform', 'mac-app', '--profile', profile.name, '--output', app])
+            run([sys.executable, ROOT / 'scripts/ps1native', 'build', source.name, '--platform', 'mac-app', '--profile', profile.name, '--output', app,
+                 '--renderer', 'metal', '--scale', 2])
             run(['codesign', '--verify', '--strict', app])
             signature = run(['codesign', '--display', '--verbose=2', app]).stderr
             self.assertRegex(signature, r'flags=0x[0-9a-f]+\([^)]*runtime')
             manifest = plistlib.loads((app / 'Contents/Resources/game.plist').read_bytes()); info = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
             self.assertEqual((manifest['Version'], manifest['Title'], manifest['Disc'], manifest['BootSHA256']), (1, 'Synthetic Triangle', 'disc/disc.cue', digest))
+            self.assertEqual((manifest['Renderer'], manifest['RenderScale']), ('metal', 2))
+            shaders = app / 'Contents/Resources/ps1gpu.metallib'; self.assertTrue(shaders.is_file()); self.assertGreater(shaders.stat().st_size, 0)
             self.assertIn(digest, manifest['SaveID']); exe = app / 'Contents/MacOS' / info['CFBundleExecutable']
             source.rename(tmp / 'original moved away.bin')
             default_cards = Path.home() / 'Library/Application Support/ps1native/Saves' / manifest['SaveID']; existed = default_cards.exists()
             playback = run([exe, '--headless', '--frames', 900, '--lockstep'])
             self.assertIn('frame hash a2fa0b6d358e04a3', playback.stdout); self.assertIn('the machines agree', playback.stdout)
+            self.assertIn('900 frames, 320x240,', playback.stdout); self.assertNotIn('Metal renderer', playback.stdout)
+            self.assertNotRegex(playback.stdout + playback.stderr, r'(?m)^metal:')
+            software = run([exe, '--headless', '--frames', 1, '--renderer', 'software'])
+            self.assertIn('host: 1 frames,', software.stdout); self.assertNotIn('Metal renderer', software.stdout)
+            self.assertNotRegex(software.stdout + software.stderr, r'(?m)^metal:')
             counts = re.search(r'host: (\d+) instructions native, (\d+) interpreted', playback.stdout); self.assertIsNotNone(counts)
             assert counts is not None
             native, interpreted = map(int, counts.groups()); self.assertGreater(native / (native + interpreted), .99)

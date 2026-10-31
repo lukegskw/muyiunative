@@ -9,9 +9,10 @@ RT = ../../runtime
 GFX = ../../gfx/metal
 BIOS = ../../bios/openbios
 TOOLS = ../../tools
+LIB = $(GEN)/ps1gpu.metallib
 RTSRC = $(sort $(wildcard $(RT)/*.c))
-SRC = main.c front_mac.m keyboard.m product.m saves.c $(GFX)/present.m $(RTSRC) $(GEN)/openbios.c
-HDR = front.h input.h keys.h keyboard.h product.h saves.h $(GFX)/present.h $(wildcard $(RT)/*.h)
+SRC = main.c front_mac.m keyboard.m product.m saves.c $(GFX)/present.m $(GFX)/renderer.m $(RTSRC) $(GEN)/openbios.c
+HDR = front.h input.h keys.h keyboard.h product.h saves.h $(GFX)/present.h $(GFX)/renderer.h $(wildcard $(RT)/*.h)
 CODEGEN = $(TOOLS)/codegen.py $(TOOLS)/analyze.py $(TOOLS)/mips.py $(TOOLS)/exe.py $(TOOLS)/overlays.py
 CFLAGS = -arch arm64 -mmacosx-version-min=$(MINOS) -O2 -g -Wall -Wextra -fobjc-arc -I$(RT) -I$(GFX)
 FRAMEWORKS = -framework AppKit -framework QuartzCore -framework Metal -framework CoreGraphics -framework ImageIO -framework AudioToolbox -framework UniformTypeIdentifiers
@@ -19,7 +20,7 @@ FRAMEWORKS = -framework AppKit -framework QuartzCore -framework Metal -framework
 
 host: $(B)/ps1native
 
-$(B)/ps1native: $(SRC) $(HDR) Makefile
+$(B)/ps1native: $(SRC) $(HDR) Makefile | $(LIB)
 	@mkdir -p $(B)
 	clang $(CFLAGS) -o $@ $(SRC) $(FRAMEWORKS)
 
@@ -34,6 +35,13 @@ $(GEN)/openbios.cap.txt: $(B)/capture $(BIOS)/openbios.bin
 $(GEN)/openbios.c: $(GEN)/openbios.cap.txt $(CODEGEN)
 	python3 $(TOOLS)/codegen.py $(BIOS)/openbios.bin --bios --capture $(GEN)/openbios.cap --name openbios -o $@
 
+$(GEN)/%.air: $(GFX)/%.metal $(RT)/render.h Makefile
+	@mkdir -p $(@D)
+	xcrun -sdk macosx metal -std=metal3.0 -mmacosx-version-min=$(MINOS) -c $< -o $@
+
+$(LIB): $(GEN)/renderer.air $(GEN)/display.air
+	xcrun -sdk macosx metallib $^ -o $@
+
 # A game's host (scripts/native_game.py): GAME_C is the native code tools/codegen.py wrote for it, set native_game, in build/gen: one file, or the tables and the files of
 # functions it was split into, each compiled on its own (make -j). It goes to build/game, apart from the host above, and like the C it is built from it holds the game's
 # code: it stays on the Mac that built it
@@ -45,12 +53,12 @@ $(B)/game/%.o: $(GEN)/%.c $(HDR) Makefile
 	@mkdir -p $(@D)
 	clang $(CFLAGS) -c -o $@ $<
 
-$(B)/game/ps1native: $(SRC) $(HDR) $(GAME_O) Makefile
+$(B)/game/ps1native: $(SRC) $(HDR) $(GAME_O) Makefile | $(LIB)
 	@test -n "$(GAME_C)" || { echo "make game needs GAME_C=<the game's generated C, in build/gen>" >&2; exit 1; }
 	clang $(CFLAGS) -DNATIVE_GAME -o $@ $(SRC) $(GAME_O) $(FRAMEWORKS)
 
 app: $(B)/ps1native $(wildcard $(BIOS)/*)
-	python3 ../../tools/pack_app.py $(B)/ps1native.app --exe $(B)/ps1native --resource $(BIOS)
+	python3 ../../tools/pack_app.py $(B)/ps1native.app --exe $(B)/ps1native --resource $(BIOS) --resource $(LIB)
 
 clean:
 	rm -rf $(B)

@@ -129,3 +129,12 @@ pulses = [
   { start = 22481, stop = 22649, period = 24, on = 6, buttons = 0x2000 },
   { start = 22649, stop = 22985, period = 24, on = 6, buttons = 0x2000 },
 ]
+
+# Phase 6: native Metal VRAM and texture/CLUT caches agree with software at every frame of the same first-level route. The scaled picture stays local.
+[first_level.metal_2x]
+date = "2026-10-31"
+scale = 2
+width = 640
+height = 480
+frame_hash_fnv1a64 = "3a397f1616c14095"
+native_vram_cache_match_every_frame = true

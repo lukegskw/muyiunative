@@ -22,6 +22,10 @@ int front_product_load(front_product *p) {
         !copy_string(p->title, sizeof p->title, d[@"Title"]) || !copy_string(p->disc, sizeof p->disc, disc.path) || ![NSFileManager.defaultManager isReadableFileAtPath:disc.path]) {
         RED("host: invalid or incomplete bundled game metadata"); return -1;
     }
+    id renderer = d[@"Renderer"], scale = d[@"RenderScale"];
+    if ((renderer && ![renderer isEqual:@"software"] && ![renderer isEqual:@"metal"]) ||
+        (scale && ![scale isEqual:@1] && ![scale isEqual:@2] && ![scale isEqual:@4])) { RED("host: invalid bundled renderer settings"); return -1; }
+    p->render_scale = [renderer isEqual:@"metal"] ? (scale ? [scale intValue] : 1) : 0;
     return 1;
 }
 int front_save_directory(char *out, size_t cap, const char *id) {

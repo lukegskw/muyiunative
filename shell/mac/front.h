@@ -6,6 +6,8 @@
 void front_run(const char *title, void (*run)(void *arg), void *arg);
 int front_stopping(void);   // machine thread: quit requests wait for the machine to flush its memory cards and return
 void front_cancel_stop(const char *message);   // a failed save keeps the machine alive and cancels the pending quit
+int front_renderer(void);   // frame-boundary request: 0 software, 1/2/4 Metal scale; the machine thread owns renderer recreation
+void front_renderer_set(int scale);   // any thread; ignores other values and updates the Graphics menu on the main thread
 // Shows w x h BGRA8 pixels (0xAARRGGBB words) in the window: copied, then presented on the main thread. Any thread
 void front_present(const uint32_t *px, int w, int h);
 uint16_t front_buttons(void);   // active-high digital pad buttons, sampled on the machine thread

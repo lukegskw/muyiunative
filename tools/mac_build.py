@@ -70,6 +70,7 @@ def frame_hash(output):
 def build(a):
     source = a.disc.resolve()
     if not source.is_file(): raise SystemExit(f'build: {source}: no such file')
+    if a.renderer == 'software' and a.scale != 1: raise SystemExit('build: --scale 2 or 4 needs --renderer metal')
     p = build_plan(source, a.profile, a.route, a.frames, a.input)
     out = (a.output or MAC / 'build/apps' / f'{p["title"]}.app').resolve()
     if out.suffix != '.app': raise SystemExit('build: --output must end in .app')
@@ -94,10 +95,11 @@ def build(a):
     native = run('checking the route against the interpreter', [work / 'game/ps1native', *route, '--lockstep'])
     if 'the machines agree' not in native or frame_hash(native) != frame_hash(captured): raise SystemExit('build: native code differs from the interpreter; no app was packed')
     resources = work / 'resources'; resources.mkdir(); bundle_disc(source, resources / 'disc')
-    manifest = {'Version': 1, 'Title': p['title'], 'Serial': p['serial'] or '', 'BootSHA256': p['boot_sha256'], 'SaveID': p['save_id'], 'Disc': 'disc/disc.cue'}
+    manifest = {'Version': 1, 'Title': p['title'], 'Serial': p['serial'] or '', 'BootSHA256': p['boot_sha256'], 'SaveID': p['save_id'], 'Disc': 'disc/disc.cue',
+                'Renderer': a.renderer, 'RenderScale': a.scale}
     (resources / 'game.plist').write_bytes(plistlib.dumps(manifest))
     run('packing and signing the game app', [sys.executable, ROOT / 'tools/pack_app.py', out, '--exe', work / 'game/ps1native', '--name', p['title'],
-        '--bundle-id', bundle_id, '--resource', ROOT / 'bios/openbios', '--resource', resources / 'disc', '--resource', resources / 'game.plist'])
+        '--bundle-id', bundle_id, '--resource', ROOT / 'bios/openbios', '--resource', resources / 'disc', '--resource', resources / 'game.plist', '--resource', gen / 'ps1gpu.metallib'])
     print(f'build: app ready: {out}\nbuild: open it in Finder to play; keep this app and its game data on your Mac', flush=True)
     return 0
 
@@ -108,6 +110,8 @@ def main(argv=None):
     p.add_argument('disc', type=Path); p.add_argument('--platform', choices=['mac-app'], default='mac-app')
     p.add_argument('--output', type=Path, help='output .app (default: shell/mac/build/apps/<game>.app)')
     p.add_argument('--profile', type=Path); p.add_argument('--route', help='profile route (default: first_level, then validation)')
+    p.add_argument('--renderer', choices=['software', 'metal'], default='software', help='renderer when opening the game app (default: software)')
+    p.add_argument('--scale', type=int, choices=[1, 2, 4], default=1, help='Metal internal resolution multiplier (default: 1)')
     p.add_argument('--frames', type=int, help='capture frames (unknown games default to 2400)'); p.add_argument('--input', action='append', help='frame:hex-buttons (repeatable)')
     a = ap.parse_args(argv)
     try: return build(a)
