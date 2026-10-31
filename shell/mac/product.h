@@ -2,7 +2,7 @@
 #pragma once
 #include <limits.h>
 #include <stddef.h>
-typedef struct front_product { char title[256], disc[PATH_MAX], save_id[128]; } front_product;
+typedef struct front_product { char title[256], disc[PATH_MAX], save_id[128]; int render_scale; } front_product;
 int front_product_load(front_product *p);   // 1: bundled game, 0: developer host or launcher, -1: invalid game metadata
 int front_save_directory(char *out, size_t cap, const char *id);
 void front_launcher(void);

@@ -6,11 +6,11 @@ The aim is native code, not emulation: the game's MIPS code is translated to C a
 
 ## Status
 
-Phase 5 of [the plan](plan.md#4-phases-and-exit-criteria) has met its exit criterion: native Mac game apps, a launcher, persistent memory cards and keyboard remapping. Metal Slug X (USA) clears Mission 1 entirely as native code and agrees with the interpreter in lockstep through its results screen. Scheduled GPU DMA packets remove the performance stall found after phase 3. The hardware tests still pass; broader compatibility, audible game output and hardware-timing accuracy remain open ([Development](docs/development.md#phase-4-overlays-and-profiles)).
+Phase 6 of [the plan](plan.md#4-phases-and-exit-criteria) adds independent Metal rendering at 1×, 2× and 4×. Native Metal VRAM and texture caches match the software renderer throughout Metal Slug X (USA)'s first mission. The software renderer remains the default and the console reference; higher-resolution Metal output retains that CPU work ([Development](docs/development.md#phase-6-the-metal-renderer)). Game apps include a launcher, persistent memory cards and keyboard remapping. Broader compatibility, audible game output and hardware-timing accuracy remain open.
 
 ## Build from the command line
 
-You need a Mac with Apple silicon, [Xcode](https://apps.apple.com/app/xcode/id497799835) 27.1 and Python 3.12 or newer. In a clone of this repository:
+You need a Mac with Apple silicon, [Xcode](https://apps.apple.com/app/xcode/id497799835) 27.1 with its Metal Toolchain component, and Python 3.12 or newer. Install the component in Xcode Settings → Components, or run `xcodebuild -downloadComponent MetalToolchain` ([Apple's instructions](https://developer.apple.com/documentation/xcode/downloading-and-installing-additional-xcode-components)). In a clone of this repository:
 
 ```sh
 scripts/ps1native build /external/path/disc.cue --platform mac-app
@@ -37,6 +37,18 @@ open shell/mac/build/ps1native.app
 ### Memory cards
 
 Game apps connect two memory cards and save them in `~/Library/Application Support/ps1native/Saves/<serial>-<boot-sha256>/card1.mcr` and `card2.mcr`. They are raw 128 KB images, created only when missing, saved once per emulated second when dirty and again before quitting. Moving or rebuilding the same game app preserves its saves. Close the game before backing up or replacing its cards; a second copy cannot use the same save folder simultaneously. Invalid cards are reported and kept intact.
+
+### Graphics
+
+Choose Software or Metal at 1×, 2× or 4× in the game app's Graphics menu. Switching keeps the game running. Software remains the default. Metal draws the PS1 commands independently on the GPU; 2× and 4× add geometry samples, while textures retain their source resolution. Native-width lines, 24-bit video and texture-feedback regions retain native pixel detail. The software GPU still maintains the console's reference VRAM, so this version prioritizes higher-resolution output and exact native rendering over a CPU speed-up.
+
+To make an app open with Metal at 2×:
+
+```sh
+scripts/ps1native build /external/path/disc.cue --platform mac-app --renderer metal --scale 2
+```
+
+The shader library is built and bundled with the app; playing needs no compiler. Headless runs default to software for reproducible validation. Developers can use `--renderer metal --scale 1 --verify-renderer` to compare native Metal VRAM and caches against software every frame ([Development](docs/development.md#phase-6-the-metal-renderer)).
 
 ### Keyboard controls
 

@@ -14,6 +14,15 @@
 static int sext11(uint32_t v) { return (int32_t)(v << 21) >> 21; }
 static int clamp8(int v) { return v < 0 ? 0 : v > 255 ? 255 : v; }
 
+// Phase 6 consumes decoded operations before the reference draws them. Snapshot the drawing registers: later GP0 words must not change queued commands.
+static void render(ps1 *m, ps1_render_op *op) {
+    if (!m->on_render) return;
+    const ps1_gpu *g = &m->gpu;
+    op->texpage = g->texpage; op->texwin = g->texwin; op->mask = g->mask;
+    op->ax1 = g->ax1; op->ay1 = g->ay1; op->ax2 = g->ax2; op->ay2 = g->ay2;
+    m->on_render(m->render_ctx, op);
+}
+
 // 24-bit colour to the 15-bit framebuffer format, dithered by a 4x4 pattern of offsets when asked (psx-spx, 24bit RGB to 15bit RGB Dithering)
 static uint16_t rgb15(int x, int y, int r, int gr, int b, int dither) {
     if (dither) {
@@ -87,7 +96,8 @@ static int owns(const ps1_vtx *p, const ps1_vtx *q) { return q->y < p->y || (q->
 // Colours and texture coordinates step from the first vertex by gradients with 12 fraction bits, truncated, and round to the nearest value: psx-spx gives no precision,
 // and this is the one that reproduces the hardware VRAM of ps1-tests gpu/triangle, gpu/quad and gpu/uv-interpolation exactly (8, 10, 14, 16 and 20 bits, or
 // gradients rounded down, leave hundreds to thousands of pixels different)
-static void triangle(ps1_gpu *g, ps1_vtx a, ps1_vtx b, ps1_vtx c, int gouraud, int semi, int tex, int raw, uint32_t clut) {
+static void triangle(ps1 *m, ps1_vtx a, ps1_vtx b, ps1_vtx c, int gouraud, int semi, int tex, int raw, uint32_t clut) {
+    ps1_gpu *g = &m->gpu;
     int x0 = MIN(MIN(a.x, b.x), c.x), x1 = MAX(MAX(a.x, b.x), c.x), y0 = MIN(MIN(a.y, b.y), c.y), y1 = MAX(MAX(a.y, b.y), c.y);
     if (x1 - x0 > 1023 || y1 - y0 > 511) return;
     int64_t area = edge(&a, &b, c.x, c.y);
@@ -95,6 +105,11 @@ static void triangle(ps1_gpu *g, ps1_vtx a, ps1_vtx b, ps1_vtx c, int gouraud, i
     if (area < 0) { ps1_vtx t = b; b = c; c = t; area = -area; }
     x0 = MAX(x0, g->ax1); x1 = MIN(x1, g->ax2); y0 = MAX(y0, g->ay1); y1 = MIN(y1, g->ay2);
     int dither = (gouraud || (tex && !raw)) && g->texpage >> 9 & 1;
+    if (m->on_render && x0 <= x1 && y0 <= y1) {
+        ps1_render_op op = {0}; op.type = RENDER_TRIANGLE; op.a = a; op.b = b; op.c = c; op.clut = clut;
+        op.flags = (tex ? RENDER_TEXTURE : 0) | (gouraud ? RENDER_GOURAUD : 0) | (semi ? RENDER_SEMI : 0) | (raw ? RENDER_RAW : 0) | (dither ? RENDER_DITHER : 0);
+        render(m, &op);
+    }
     uint16_t flat = rgb15(0, 0, a.r, a.g, a.b, 0);
     int64_t bx = b.x - a.x, by = b.y - a.y, cx = c.x - a.x, cy = c.y - a.y, dx[5], dy[5];
     const int fa[5] = {a.r, a.g, a.b, a.u, a.v}, fb[5] = {b.r, b.g, b.b, b.u, b.v}, fc[5] = {c.r, c.g, c.b, c.u, c.v};
@@ -123,10 +138,15 @@ static void dot(ps1_gpu *g, int x, int y, int r, int gr, int b, int semi, int di
 // ps1-tests gpu/lines fixes the steps: along the longer axis one pixel at a time, the other axis rounded to the nearest pixel, a tie stepping a mostly horizontal line
 // (and holding a mostly vertical one) at the halfway point; gouraud colours step like a polygon's (triangle). Only lines drawn rightwards and downwards show ties there,
 // so the other directions follow the same rule by symmetry
-static void line(ps1_gpu *g, const ps1_vtx *a, const ps1_vtx *b, int gouraud, int semi) {
+static void line(ps1 *m, const ps1_vtx *a, const ps1_vtx *b, int gouraud, int semi) {
+    ps1_gpu *g = &m->gpu;
     int dx = b->x - a->x, dy = b->y - a->y, n = MAX(abs(dx), abs(dy));
     if (abs(dx) > 1023 || abs(dy) > 511) return;
     int dither = g->texpage >> 9 & 1;
+    if (m->on_render) {
+        ps1_render_op op = {0}; op.type = RENDER_LINE; op.a = *a; op.b = *b;
+        op.flags = (gouraud ? RENDER_GOURAUD : 0) | (semi ? RENDER_SEMI : 0) | (dither ? RENDER_DITHER : 0); render(m, &op);
+    }
     if (!n) { dot(g, a->x, a->y, a->r, a->g, a->b, semi, dither); return; }
     int xmajor = abs(dx) >= abs(dy), d = xmajor ? dy : dx, sx = dx < 0 ? -1 : 1, sy = dy < 0 ? -1 : 1;
     for (int i = 0; i <= n; i++) {
@@ -152,8 +172,8 @@ static void polygon(ps1 *m, uint32_t c) {
         if (tex && k == 1) g->texpage = (g->texpage & ~0x9ffu) | (w[p] >> 16 & (g->tex_disable_ok ? 0x9ff : 0x1ff));   // the page attribute sets GP0(E1h) bits 0-8 and 11
         p += tex;
     }
-    triangle(g, v[0], v[1], v[2], gouraud, c >> 1 & 1, tex, c & 1, clut);
-    if (n == 4) triangle(g, v[1], v[2], v[3], gouraud, c >> 1 & 1, tex, c & 1, clut);   // a quad is the triangles 1-2-3 and 2-3-4
+    triangle(m, v[0], v[1], v[2], gouraud, c >> 1 & 1, tex, c & 1, clut);
+    if (n == 4) triangle(m, v[1], v[2], v[3], gouraud, c >> 1 & 1, tex, c & 1, clut);   // a quad is the triangles 1-2-3 and 2-3-4
 }
 
 static void rectangle(ps1 *m, uint32_t c) {
@@ -162,6 +182,11 @@ static void rectangle(ps1 *m, uint32_t c) {
     int tex = c >> 2 & 1, w = side[c >> 3 & 3], h = w;
     if (!w) { w = g->buf[2 + tex] & 0x3ff; h = g->buf[2 + tex] >> 16 & 0x1ff; }
     ps1_vtx v = vtx(g, g->buf[1], g->buf[0]);
+    if (m->on_render && MAX(v.x, g->ax1) <= MIN(v.x + w - 1, g->ax2) && MAX(v.y, g->ay1) <= MIN(v.y + h - 1, g->ay2)) {
+        ps1_render_op op = {0}; op.type = RENDER_RECT; op.a = v; op.p[0] = (uint32_t)w; op.p[1] = (uint32_t)h;
+        op.flags = (tex ? RENDER_TEXTURE : 0) | (c & 2 ? RENDER_SEMI : 0) | (c & 1 ? RENDER_RAW : 0);
+        if (tex) { op.a.u = g->buf[2] & 255; op.a.v = g->buf[2] >> 8 & 255; op.clut = g->buf[2] >> 16; } render(m, &op);
+    }
     uint16_t col = rgb15(0, 0, v.r, v.g, v.b, 0);
     // GP0(E1h) bits 12/13 flip rectangles' textures. The hardware VRAM of ps1-tests gpu/texture-flip shows U running u0+1, u0, u0-1... across an X-flipped rectangle
     // and V running v0, v0-1... down a Y-flipped one; polygons ignore both bits
@@ -173,13 +198,14 @@ static void rectangle(ps1 *m, uint32_t c) {
         }
 }
 
-static void poly_word(ps1_gpu *g, uint32_t w) {   // a polyline's words after its command, up to the terminator, checked on a vertex's first word once two have come
+static void poly_word(ps1 *m, uint32_t w) {   // a polyline's words after its command, up to the terminator, checked on a vertex's first word once two have come
+    ps1_gpu *g = &m->gpu;
     int first = !g->pgour || !g->phave;
     if (first && g->pnv >= 2 && (w & 0xf000f000) == 0x50005000) { g->poly = 0; return; }
-    if (!first) { ps1_vtx v = vtx(g, w, g->pcol); if (g->pnv) line(g, &g->plast, &v, 1, g->psemi); g->plast = v; g->phave = 0; g->pnv += g->pnv < 2; return; }
+    if (!first) { ps1_vtx v = vtx(g, w, g->pcol); if (g->pnv) line(m, &g->plast, &v, 1, g->psemi); g->plast = v; g->phave = 0; g->pnv += g->pnv < 2; return; }
     if (g->pgour) { g->pcol = w; g->phave = 1; return; }
     ps1_vtx v = vtx(g, w, g->pcol);
-    if (g->pnv) line(g, &g->plast, &v, 0, g->psemi);
+    if (g->pnv) line(m, &g->plast, &v, 0, g->psemi);
     g->plast = v; g->pnv += g->pnv < 2;
 }
 
@@ -193,8 +219,10 @@ static void xfer_start(ps1_gpu *g, uint32_t pos, uint32_t size, int dir) {
 
 static uint16_t *xfer_at(ps1_gpu *g) { return &g->vram[((g->xy + g->xi / g->xw) & 511) * VRAM_W + ((g->xx + g->xi % g->xw) & 1023)]; }
 
-static void pixel_in(ps1_gpu *g, uint16_t v) {
+static void pixel_in(ps1 *m, uint16_t v) {
+    ps1_gpu *g = &m->gpu;
     uint16_t *p = xfer_at(g);
+    if (m->on_render) { ps1_render_op op = {0}; op.type = RENDER_UPLOAD; op.p[0] = (uint32_t)(p - g->vram); op.p[1] = v; op.p[2] = g->xi; render(m, &op); }
     if (!(g->mask & 2 && *p & 0x8000)) *p = v | (uint16_t)((g->mask & 1) << 15);
     if (++g->xi == (uint32_t)g->xw * g->xh) g->xfer = 0;
 }
@@ -206,7 +234,9 @@ static uint16_t pixel_out(ps1_gpu *g) {   // after the last pixel, the rest of t
     return v;
 }
 
-static void copy(ps1_gpu *g, const uint32_t *w) {
+static void copy(ps1 *m, const uint32_t *w) {
+    ps1_gpu *g = &m->gpu;
+    if (m->on_render) { ps1_render_op op = {0}; op.type = RENDER_COPY; op.p[0] = w[1]; op.p[1] = w[2]; op.p[2] = w[3]; render(m, &op); }
     int sx = w[1] & 0x3ff, sy = w[1] >> 16 & 0x1ff, dx = w[2] & 0x3ff, dy = w[2] >> 16 & 0x1ff;
     int cw = (int)((((w[3] & 0xffff) - 1) & 0x3ff) + 1), ch = (int)((((w[3] >> 16) - 1) & 0x1ff) + 1);
     uint16_t row[VRAM_W];
@@ -221,7 +251,9 @@ static void copy(ps1_gpu *g, const uint32_t *w) {
     }
 }
 
-static void fill(ps1_gpu *g, const uint32_t *w) {   // in 16-pixel steps, ignoring the mask setting and the drawing area (psx-spx, Quick Rectangle Fill)
+static void fill(ps1 *m, const uint32_t *w) {   // in 16-pixel steps, ignoring the mask setting and the drawing area (psx-spx, Quick Rectangle Fill)
+    ps1_gpu *g = &m->gpu;
+    if (m->on_render) { ps1_render_op op = {0}; op.type = RENDER_FILL; op.p[0] = w[0] & 0xffffff; op.p[1] = w[1]; op.p[2] = w[2]; render(m, &op); }
     int x0 = w[1] & 0x3f0, y0 = w[1] >> 16 & 0x1ff, fw = ((w[2] & 0x3ff) + 0xf) & ~0xfu, fh = w[2] >> 16 & 0x1ff;
     uint16_t c = rgb15(0, 0, w[0] & 0xff, w[0] >> 8 & 0xff, w[0] >> 16 & 0xff, 0);
     for (int y = 0; y < fh; y++)
@@ -263,19 +295,19 @@ static void execute(ps1 *m) {
         RED_ONCE(m, RED_GPU, "gpu: drawing in 480-line interlaced mode draws every line; which lines interlace keeps it from drawing is not documented");
     switch (c >> 5) {
     case 0:
-        if (c == 0x02) fill(g, g->buf);
-        else if (c == 0x01) { memset(g->textag, 0, sizeof g->textag); g->clut_valid = 0; }
+        if (c == 0x02) fill(m, g->buf);
+        else if (c == 0x01) { ps1_render_op op = {0}; op.type = RENDER_CLEAR; render(m, &op); memset(g->textag, 0, sizeof g->textag); g->clut_valid = 0; }
         else if (c == 0x1f) { g->irq = 1; irq_raise(m, IRQ_GPU); }
         break;
     case 1: polygon(m, c); break;
     case 2: {
         int gouraud = c >> 4 & 1;
         ps1_vtx a = vtx(g, g->buf[1], g->buf[0]), b = vtx(g, g->buf[2 + gouraud], g->buf[gouraud ? 2 : 0]);
-        line(g, &a, &b, gouraud, c >> 1 & 1);
+        line(m, &a, &b, gouraud, c >> 1 & 1);
         break;
     }
     case 3: rectangle(m, c); break;
-    case 4: copy(g, g->buf); break;
+    case 4: copy(m, g->buf); break;
     case 5: xfer_start(g, g->buf[1], g->buf[2], 1); break;
     case 6: xfer_start(g, g->buf[1], g->buf[2], 2); break;
     default: env(m, g->buf[0]); break;
@@ -284,8 +316,8 @@ static void execute(ps1 *m) {
 
 void gpu_gp0(ps1 *m, uint32_t w) {
     ps1_gpu *g = &m->gpu;
-    if (g->xfer == 1) { pixel_in(g, (uint16_t)w); if (g->xfer == 1) pixel_in(g, (uint16_t)(w >> 16)); return; }   // an odd count ends on a padding halfword
-    if (g->poly) { poly_word(g, w); return; }
+    if (g->xfer == 1) { pixel_in(m, (uint16_t)w); if (g->xfer == 1) pixel_in(m, (uint16_t)(w >> 16)); return; }   // an odd count ends on a padding halfword
+    if (g->poly) { poly_word(m, w); return; }
     if (!g->n) {
         uint32_t c = w >> 24;
         if ((c & 0xe8) == 0x48) { g->poly = 1; g->pgour = c >> 4 & 1; g->psemi = c >> 1 & 1; g->pnv = 0; g->phave = 1; g->pcol = w; return; }
@@ -339,12 +371,13 @@ void gpu_gp1(ps1 *m, uint32_t w) {
     int vblank = in_vblank(g); uint32_t c = w >> 24 & 0x3f;
     switch (c) {   // 40h..FFh mirror 00h..3Fh
     case 0x00:   // the values of psx-spx, GP1(00h)
+        { ps1_render_op op = {0}; op.type = RENDER_CLEAR; render(m, &op); }
         memset(g->textag, 0, sizeof g->textag); g->clut_valid = 0;
         g->n = g->poly = g->xfer = g->irq = g->dma_dir = 0; g->display_off = 1;
         g->disp_x = g->disp_y = 0; g->hx1 = 0x200; g->hx2 = 0x200 + 256 * 10; g->vy1 = 0x10; g->vy2 = 0x10 + 240; g->dmode = 0;
         g->texpage = g->texwin = g->mask = 0; g->ax1 = g->ay1 = g->ax2 = g->ay2 = g->ox = g->oy = 0;
         break;
-    case 0x01: g->n = g->poly = g->xfer = 0; g->clut_valid = 0; break;   // GP1(01h) also resets CLUT cache
+    case 0x01: { ps1_render_op op = {0}; op.type = RENDER_CLEAR; op.p[0] = 1; render(m, &op); g->n = g->poly = g->xfer = 0; g->clut_valid = 0; break; }   // GP1(01h) also resets CLUT cache
     case 0x02: g->irq = 0; break;
     case 0x03: g->display_off = w & 1; break;
     case 0x04: g->dma_dir = w & 3; break;
@@ -421,6 +454,7 @@ void gpu_line(ps1 *m) {
 
 void gpu_reset(ps1 *m) {   // VRAM keeps its contents, as the other memories do
     ps1_gpu *g = &m->gpu;
+    { ps1_render_op op = {0}; op.type = RENDER_RESET; render(m, &op); }
     memset((char *)g + offsetof(ps1_gpu, buf), 0, sizeof *g - offsetof(ps1_gpu, buf));
     g->line_start = m->cycles; g->next_hblank = NEVER;
     gpu_gp1(m, 0);

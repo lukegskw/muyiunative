@@ -49,6 +49,8 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.14"
+      - name: Offline Metal compiler
+        run: if ! xcrun metal --version >/dev/null 2>&1; then xcodebuild -downloadComponent MetalToolchain; fi
       - name: The test files (tools/tests)
         run: python -m unittest discover -s tools/tests -v
 
@@ -62,6 +64,8 @@ jobs:
           persist-credentials: false
       - name: Toolchain
         run: xcodebuild -version
+      - name: Offline Metal compiler
+        run: if ! xcrun metal --version >/dev/null 2>&1; then xcodebuild -downloadComponent MetalToolchain; fi
       - name: Host and app (make -C shell/mac app)
         run: make -C shell/mac app
       - name: Check the app

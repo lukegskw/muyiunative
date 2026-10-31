@@ -1,5 +1,5 @@
 // Presentation through Metal (plan.md, section 2: the software renderer's frames are shown through Metal): frames go to the CAMetalLayer the front end gives, at their own
-// size, and Core Animation scales them to the layer. There is no shader yet, so nothing needs the Metal compiler
+// size, and Core Animation scales them to the layer. This blit path presents both native software output and the higher-resolution geometry drawn by renderer.h
 #pragma once
 #include <stdint.h>
 int present_init(void *layer);                              // a CAMetalLayer; 0 when there is no Metal device

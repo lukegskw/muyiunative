@@ -17,8 +17,20 @@
 
 static atomic_uint g_buttons;
 static atomic_bool g_stop, g_running;
+static atomic_int g_renderer;
+static NSMenu *g_graphics;
 static BOOL g_quitting;
 int front_stopping(void) { return atomic_load(&g_stop); }
+int front_renderer(void) { return atomic_load(&g_renderer); }
+static void graphics_state(void) {
+    int scale = front_renderer();
+    for (NSMenuItem *item in g_graphics.itemArray) item.state = item.tag == scale ? NSControlStateValueOn : NSControlStateValueOff;
+}
+void front_renderer_set(int scale) {
+    if (scale != 0 && scale != 1 && scale != 2 && scale != 4) return;
+    atomic_store(&g_renderer, scale);
+    if (NSThread.isMainThread) graphics_state(); else dispatch_async(dispatch_get_main_queue(), ^{ graphics_state(); });
+}
 static uint16_t key_event(NSEvent *e, int down) {
     NSString *s = e.charactersIgnoringModifiers;
     return front_keyboard_event(e.keyCode, s.length ? [s characterAtIndex:0] : 0, down);
@@ -45,6 +57,7 @@ uint16_t front_buttons(void) { return (uint16_t)atomic_load(&g_buttons); }
 - (void)windowDidResignKey:(NSNotification *)n { (void)n; release_keys(); }
 - (BOOL)windowShouldClose:(NSWindow *)window { (void)window; [NSApp terminate:nil]; return NO; }
 - (void)keyboard:(id)sender { (void)sender; release_keys(); front_keyboard_settings(); }
+- (void)renderer:(NSMenuItem *)sender { release_keys(); front_renderer_set((int)sender.tag); }
 // AppKit's applicationShouldTerminate: contract: NSTerminateLater keeps its event loop alive while the machine thread finishes a save, then replies on the main queue.
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)app {
     (void)app; if (!atomic_load(&g_running)) return NSTerminateNow;
@@ -153,6 +166,12 @@ void front_run(const char *title, void (*run)(void *arg), void *arg) {
     [menu addItemWithTitle:@"Keyboard Controls…" action:@selector(keyboard:) keyEquivalent:@","].target = g_app;
     [menu addItemWithTitle:[@"Quit " stringByAppendingString:name] action:@selector(terminate:) keyEquivalent:@"q"];
     item.submenu = menu; [bar addItem:item]; app.mainMenu = bar;
+    g_graphics = [[NSMenu alloc] initWithTitle:@"Graphics"]; g_graphics.autoenablesItems = NO;
+    const int scales[] = {0, 1, 2, 4}; NSArray<NSString *> *titles = @[@"Software", @"Metal (1×)", @"Metal (2×)", @"Metal (4×)"];
+    for (unsigned i = 0; i < sizeof scales / sizeof *scales; i++) {
+        NSMenuItem *choice = [g_graphics addItemWithTitle:titles[i] action:@selector(renderer:) keyEquivalent:@""]; choice.tag = scales[i]; choice.target = g_app;
+    }
+    NSMenuItem *graphics = [[NSMenuItem alloc] initWithTitle:@"Graphics" action:nil keyEquivalent:@""]; graphics.submenu = g_graphics; [bar addItem:graphics]; graphics_state();
     g_win = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 640, 480)
                                         styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable
                                           backing:NSBackingStoreBuffered defer:NO];

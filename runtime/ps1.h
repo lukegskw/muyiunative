@@ -9,6 +9,7 @@
 #include "sio.h"
 #include "spu.h"
 #include "mdec.h"
+#include "render.h"
 
 _Static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "the console and the host are both little-endian: memory is read and written as host integers");
 
@@ -32,7 +33,6 @@ typedef struct ps1_dma { uint32_t madr, bcr, chcr, addr, block_left, block_size,
 // acc: CPU cycles not yet counted, 16.16; gate: whether MODE.0's synchronization lets the counter count
 typedef struct ps1_timer { uint32_t mode; uint16_t count, target; uint64_t last, next; uint64_t acc; int fired, gate; } ps1_timer;
 
-typedef struct ps1_vtx { int x, y, r, g, b, u, v; } ps1_vtx;
 typedef struct ps1_gpu {
     uint16_t vram[VRAM_H * VRAM_W];
     uint32_t buf[16]; int n, need;   // the GP0 command being received
@@ -82,6 +82,7 @@ typedef struct ps1 {
     ps1_mdec mdec;
     char tty[256]; int ntty;         // the debug console line being written (0x1F802080)
     void (*tty_out)(void *ctx, const char *line); void *tty_ctx;   // where finished debug console lines go: stderr when NULL
+    void (*on_render)(void *ctx, const ps1_render_op *op); void *render_ctx;   // optional host rendering consumer; console state stays in gpu
     void (*on_step)(struct ps1 *m, uint32_t pc, uint32_t op); void *step_ctx;   // the host's, told of each interpreted instruction after it ran (capture.c)
     uint8_t *exe; size_t exe_n;      // a PS-X EXE waiting for the BIOS to reach its shell (exe.c)
     const ps1_native_set *native[4]; int nnative;   // the native code this machine runs where memory holds the code it was made from (native.c)
