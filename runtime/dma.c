@@ -1,11 +1,12 @@
 // The DMA controller (psx-spx, DMA Channels): channels 0..6 (MDEC in, MDEC out, GPU, CD-ROM, SPU, PIO, OTC) move words between main RAM and the devices; DPCR enables
 // them, DICR collects their completions into IRQ 3. Sync mode 0 moves a block at once, mode 1 a number of blocks, mode 2 (GPU only) follows a linked list of packets.
-// GPU/CD/SPU/OTC run whole when started; MDEC's two channels alternate as their FIFO requests allow. The CPU is charged a cycle per word (device waitstates remain open).
+// GPU linked lists run a packet per scheduled event, releasing the CPU between packets (CPU Operation during DMA). Other transfers run whole when started; MDEC's
+// channels alternate as their FIFO requests allow. Synchronous transfers charge the CPU a cycle per word; linked-list words advance alongside it (device waits remain open).
 // PIO has nothing connected. Public reference: https://psx-spx.consoledev.net/dmachannels/ and Macroblock Decoder, DMA
 #include "ps1.h"
 #include <string.h>
 
-void dma_reset(ps1 *m) { memset(m->dma, 0, sizeof m->dma); m->dpcr = 0x07654321; m->dicr = 0; }
+void dma_reset(ps1 *m) { memset(m->dma, 0, sizeof m->dma); m->dpcr = 0x07654321; m->dicr = 0; m->dma_next = NEVER; }
 
 static uint32_t *ram32(ps1 *m, uint32_t a) { return (uint32_t *)(m->ram + (a & 0x1ffffc)); }
 
@@ -37,7 +38,7 @@ void dma_resume(ps1 *m) {
         if (chosen < 0) return;
         ps1_dma *d = &m->dma[chosen];
         if (!chosen) mdec_write(m, 0, *ram32(m, d->addr));
-        else { int32_t offset = mdec_dma_offset(m); *ram32(m, d->addr + (uint32_t)offset) = mdec_dma_read(m); }
+        else { int32_t offset = mdec_dma_offset(m); *ram32(m, d->addr + (uint32_t)offset) = mdec_dma_read(m); if (m->native_active) native_written(m, (d->addr + (uint32_t)offset) & 0x1ffffc, 4); }
         d->addr = (d->addr + (d->chcr & 2 ? (uint32_t)-4 : 4)) & 0xffffff;
         d->left--; d->block_left--; m->cycles++;
         if (!d->block_left) {
@@ -74,22 +75,25 @@ static uint32_t from_device(ps1 *m, int ch) {
     return 0;
 }
 
-// A GPU list that went 100000h packets without an end code comes back on itself: Brent's cycle detection over its next addresses says where, as evidence of what
-// built it. A console never completes such a list, nor raises its IRQ (the hardware log of ps1-tests dma/chain-looping)
-static uint32_t next_packet(ps1 *m, uint32_t a) { return *ram32(m, a) & 0x1ffffc; }
+// The phase-3 route spent 20 seconds inside one DMA store, drawing a three-packet loop 350,000 times with no guest time passing. This must not be a C loop:
+// psx-spx, CPU Operation during DMA, releases the CPU after each linked-list entry. Read each header when its event arrives, so the CPU can change or stop the list.
+// Transfer Rates gives one cycle per GPU word. GPU drawing time and bus contention within a packet remain open; no packet limit invents a completion or drops data.
+static void list_begin(ps1 *m) {
+    ps1_dma *d = &m->dma[2];
+    if (!d->active) { d->addr = d->madr & 0x1ffffc; d->active = 1; d->chcr &= ~0x10000000u; m->dma_next = m->cycles + 1; }
+    RED_ONCE(m, RED_DMA, "dma: GPU list packets take word-transfer time; GPU drawing waits and bus contention within a packet are not modelled");
+    sched_update(m);
+}
 
-static void loop_report(ps1 *m, uint32_t start) {
-    uint32_t power = 1, len = 1, mu = 0, slow = start, fast = next_packet(m, start);
-    while (slow != fast) { if (power == len) { slow = fast; power *= 2; len = 0; } fast = next_packet(m, fast); len++; }
-    slow = fast = start;
-    for (uint32_t i = 0; i < len; i++) fast = next_packet(m, fast);
-    while (slow != fast) { slow = next_packet(m, slow); fast = next_packet(m, fast); mu++; }
-    char before[48] = "", loop[128] = ""; uint32_t a = start; size_t n = 0;
-    if (mu) { for (uint32_t i = 1; i < mu; i++) a = next_packet(m, a); snprintf(before, sizeof before, ", the last at %06x (%08x)", a, *ram32(m, a)); }
-    a = slow;
-    for (uint32_t i = 0; i < len && i < 4; i++, a = next_packet(m, a)) n += (size_t)snprintf(loop + n, sizeof loop - n, "%s%06x (%08x)", i ? " > " : "", a, *ram32(m, a));
-    RED("dma: the GPU list at %06x comes back on itself at cycle %llu: after %u packets%s, a loop of %u: %s%s; the channel stays busy",
-        start, (unsigned long long)m->cycles, mu, before, len, loop, len > 4 ? " > ..." : "");
+void dma_event(ps1 *m) {
+    ps1_dma *d = &m->dma[2];
+    if (!d->active || !(m->dpcr & 0x800)) { m->dma_next = NEVER; return; }
+    if (d->left) { complete(m, 2); m->dma_next = NEVER; return; }
+    uint32_t h = *ram32(m, d->addr), n = h >> 24;
+    for (uint32_t i = 1; i <= n; i++) gpu_gp0(m, *ram32(m, d->addr + 4 * i));
+    d->madr = h & 0xffffff; d->addr = h & 0x1ffffc;
+    d->left = (h & 0x800000) != 0;   // finish only after the final packet's words have taken their time
+    m->dma_next += n + 1;
 }
 
 static void run(ps1 *m, int ch) {
@@ -97,21 +101,12 @@ static void run(ps1 *m, int ch) {
     uint32_t mode = d->chcr >> 9 & 3, addr = d->madr & 0x1ffffc, step = d->chcr & 2 ? (uint32_t)-4 : 4, words = 0;
     if (ch == 6) {   // an empty ordering table: each entry points to the one before it, the first holds the end code (psx-spx, GPU Depth Ordering)
         uint32_t n = d->bcr & 0xffff ? d->bcr & 0xffff : 0x10000;
-        for (uint32_t i = 0; i < n; i++, addr -= 4) *ram32(m, addr) = i == n - 1 ? 0xffffff : (addr - 4) & 0x1fffff;
+        for (uint32_t i = 0; i < n; i++, addr -= 4) { *ram32(m, addr) = i == n - 1 ? 0xffffff : (addr - 4) & 0x1fffff; if (m->native_active) native_written(m, addr & 0x1ffffc, 4); }
         words = n;
-    } else if (mode == 2) {
-        for (uint32_t guard = 0; ch == 2; guard++) {   // packets of a header (word count, next address) and GP0 words
-            uint32_t h = *ram32(m, addr), n = h >> 24;
-            for (uint32_t i = 1; i <= n; i++) gpu_gp0(m, *ram32(m, addr + 4 * i));
-            words += n + 1;
-            if (h & 0x800000) break;   // the end code (00FFFFFFh in practice)
-            if (guard == 0x100000) { loop_report(m, d->madr & 0x1ffffc); return; }
-            addr = h & 0x1ffffc;
-        }
-        d->madr = 0xffffff;
+    } else if (mode >= 2) { RED_ONCE(m, RED_DMA, "dma: linked-list mode is only supported on the GPU channel"); return;
     } else {
         uint32_t n = mode == 0 ? (d->bcr & 0xffff ? d->bcr & 0xffff : 0x10000) : (d->bcr & 0xffff) * (d->bcr >> 16);
-        for (uint32_t i = 0; i < n; i++, addr += step) { if (d->chcr & 1) to_device(m, ch, *ram32(m, addr)); else *ram32(m, addr) = from_device(m, ch); }
+        for (uint32_t i = 0; i < n; i++, addr += step) { if (d->chcr & 1) to_device(m, ch, *ram32(m, addr)); else { *ram32(m, addr) = from_device(m, ch); if (m->native_active) native_written(m, addr & 0x1ffffc, 4); } }
         words = n;
         if (mode == 1) { d->madr = addr & 0xffffff; d->bcr &= 0xffff; }
     }
@@ -122,7 +117,7 @@ static void run(ps1 *m, int ch) {
 static void maybe_run(ps1 *m, int ch) {   // started by CHCR bit 24, and in sync mode 0 also by the trigger bit 28, on a channel DPCR enables
     uint32_t c = m->dma[ch].chcr;
     if (c & 0x01000000 && (c >> 9 & 3 || c & 0x10000000 || m->dma[ch].active) && m->dpcr >> (4 * ch + 3) & 1) {
-        if (ch < 2) mdec_begin(m, ch); else run(m, ch);
+        if (ch < 2) mdec_begin(m, ch); else if (ch == 2 && (c >> 9 & 3) == 2) list_begin(m); else run(m, ch);
     }
 }
 
@@ -136,7 +131,7 @@ uint32_t dma_read(ps1 *m, uint32_t off) {
 }
 
 void dma_write(ps1 *m, uint32_t off, uint32_t v) {
-    if (off == 0x70) { m->dpcr = v; for (int ch = 0; ch < 7; ch++) maybe_run(m, ch); return; }
+    if (off == 0x70) { m->dpcr = v; if (!(v & 0x800)) m->dma_next = NEVER; else if (m->dma[2].active && m->dma_next == NEVER) m->dma_next = m->cycles + 1; for (int ch = 0; ch < 7; ch++) maybe_run(m, ch); sched_update(m); return; }
     if (off == 0x74) {   // t_dma: keep the old master output until recomputed, so writes that leave it high cannot retrigger IRQ3; a 1 acknowledges each flag
         m->dicr = (m->dicr & 0x80000000) | (m->dicr & 0x7f000000 & ~v) | (v & 0x00ff803f); dicr_update(m); return;
     }
@@ -146,6 +141,6 @@ void dma_write(ps1 *m, uint32_t off, uint32_t v) {
     switch (off & 0xf) {
     case 0: d->madr = v & 0xffffff; break;
     case 4: d->bcr = v; break;
-    case 8: d->active = 0; d->chcr = ch == 6 ? (v & 0x51000000) | 2 : v & 0x71770703; maybe_run(m, ch); break;   // OTC always runs backwards, to RAM
+    case 8: d->active = 0; d->left = 0; if (ch == 2) m->dma_next = NEVER; d->chcr = ch == 6 ? (v & 0x51000000) | 2 : v & 0x71770703; maybe_run(m, ch); sched_update(m); break;   // OTC always runs backwards, to RAM
     }
 }

@@ -20,6 +20,19 @@ static int matches(ps1 *m, const ps1_native_fn *f) {
     return 1;
 }
 
+// t_overlays rewrites a later instruction from inside its native function, also through a RAM mirror and DMA: an entry check alone would execute stale constants.
+// psx-spx, Memory Map (RAM mirrors): compare physical byte ranges. Return after the writing instruction, before fetching the next; the dispatcher checks its bytes again.
+void native_written(ps1 *m, uint32_t addr, unsigned n) {
+    const ps1_native_fn *f = m->native_active;
+    if (!f) return;
+    uint32_t a = ps1_phys(addr); if (a < 0x800000) a &= RAM_SIZE - 1;
+    for (unsigned i = 0; i < f->nruns; i++) {
+        uint32_t lo = ps1_phys(f->runs[i][0]), size = f->runs[i][1] - f->runs[i][0];
+        if (lo < 0x800000) lo &= RAM_SIZE - 1;
+        if ((uint64_t)a < (uint64_t)lo + size && (uint64_t)lo < (uint64_t)a + n) { m->native_dirty = 1; return; }
+    }
+}
+
 int native_run(ps1 *m) {
     uint32_t pc = m->cpu.pc;
     uint64_t at = m->cycles;
@@ -29,7 +42,7 @@ int native_run(ps1 *m) {
         while (lo < hi) { unsigned mid = lo + (hi - lo) / 2; if (s->entries[mid].pc < pc) lo = mid + 1; else hi = mid; }
         for (; lo < s->nentries && s->entries[lo].pc == pc; lo++) {   // run: at least one instruction runs, unless the set's table is wrong
             const ps1_native_fn *f = &s->fns[s->entries[lo].fn];
-            if (matches(m, f)) { m->native_runs++; m->native_pc = pc; m->native_fn = f->start; f->run(m); return m->cycles != at; }
+            if (matches(m, f)) { m->native_runs++; m->native_pc = pc; m->native_fn = f->start; m->native_active = f; m->native_dirty = 0; f->run(m); m->native_active = NULL; return m->cycles != at; }
         }
     }
     return 0;

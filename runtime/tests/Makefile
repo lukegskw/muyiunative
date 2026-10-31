@@ -3,7 +3,7 @@
 B = build
 SAN ?=
 CFLAGS = -O1 -g -Wall -Wextra -I.. $(SAN)
-TESTS = t_mem t_cpu t_cycles t_native t_lockstep t_dma t_timers t_gpu t_texture t_gte t_spu t_sio t_mdec t_cdrom t_disc t_cdread t_cdaudio t_homebrew t_boot t_ps1tests
+TESTS = t_mem t_cpu t_cycles t_native t_overlays t_replay t_keyboard t_lockstep t_dma t_timers t_gpu t_texture t_gte t_spu t_sio t_mdec t_cdrom t_disc t_cdread t_cdaudio t_homebrew t_boot t_ps1tests
 RT = $(sort $(wildcard ../*.c))
 OBJ = $(patsubst ../%.c,$(B)/rt/%.o,$(RT))
 BIOS = $(abspath ../../bios/openbios/openbios.bin)
@@ -23,6 +23,9 @@ $(B)/t_%: t_%.c $(OBJ) Makefile
 	@mkdir -p $(B)
 	clang $(CFLAGS) -DBIOS_PATH='"$(BIOS)"' -DTESTS_DIR='"$(TESTS_DIR)"' -o $@ $< $(OBJ)
 
+$(B)/t_replay: ../../shell/mac/input.h
+$(B)/t_keyboard: ../../shell/mac/keys.h ../../runtime/sio.h
+
 # t_native links the native code the tools generate for its program, into the build folder only (plan.md, decision log)
 $(B)/gen/native_cases.c: $(TOOLS)/tests/native_cases.py $(TOOLS)/tests/asm.py $(TOOLS)/codegen.py $(TOOLS)/analyze.py $(TOOLS)/mips.py
 	@mkdir -p $(@D)
@@ -31,8 +34,16 @@ $(B)/gen/native_cases.c: $(TOOLS)/tests/native_cases.py $(TOOLS)/tests/asm.py $(
 $(B)/t_native: t_native.c $(B)/gen/native_cases.c $(OBJ) Makefile
 	clang $(CFLAGS) -o $@ t_native.c $(B)/gen/native_cases.c $(OBJ)
 
+
+$(B)/gen/overlay_cases.c: $(TOOLS)/tests/overlay_cases.py $(TOOLS)/tests/asm.py $(TOOLS)/codegen.py $(TOOLS)/overlays.py $(TOOLS)/analyze.py $(TOOLS)/mips.py
+	@mkdir -p $(@D)
+	python3 $(TOOLS)/tests/overlay_cases.py $@
+
+$(B)/t_overlays: t_overlays.c $(B)/gen/overlay_cases.c $(OBJ) Makefile
+	clang $(CFLAGS) -o $@ t_overlays.c $(B)/gen/overlay_cases.c $(OBJ)
+
 # t_lockstep runs ps1-tests programs as native code generated from them here: $(1), the set's name; $(2), the program in tests/ps1-tests
-CODEGEN = $(TOOLS)/codegen.py $(TOOLS)/analyze.py $(TOOLS)/mips.py $(TOOLS)/exe.py
+CODEGEN = $(TOOLS)/codegen.py $(TOOLS)/analyze.py $(TOOLS)/mips.py $(TOOLS)/exe.py $(TOOLS)/overlays.py
 define native_exe
 $(B)/gen/$(1).c: $(TESTS_DIR)/ps1-tests/$(2) $(CODEGEN)
 	@mkdir -p $$(@D)

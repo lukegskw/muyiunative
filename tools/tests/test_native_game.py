@@ -1,6 +1,6 @@
 """scripts/native_game.py on discs built here: it finds a game's profile by the serial in the boot executable's name, refuses a disc whose boot executable is not
 the one the profile describes, and a profile without a route. The rest (capture, generation, the host's build, the route in lockstep) takes a host build of a
-minute and a disc that boots, so it is checked by hand: docs/development.md, phase 3. No game files."""
+minute and a disc that boots, so the local game routes check it: docs/development.md, phases 3–4. No game files."""
 import shutil, subprocess, sys, tempfile, unittest
 from pathlib import Path
 
@@ -20,6 +20,8 @@ class NativeGame(unittest.TestCase):
     def run_script(self, *args): return subprocess.run([sys.executable, SCRIPT, self.tmp / 'disc.bin', *args], capture_output=True, text=True)
 
     def test_refused(self):
+        r = self.run_script('--frames', '-1')
+        self.assertTrue(r.returncode and '--frames must be positive' in r.stderr)
         r = self.run_script()
         self.assertTrue(r.returncode and 'no profile profiles/SLUS-00001/game.toml' in r.stderr, r.stderr)
         (self.tmp / 'other.toml').write_text('[disc]\nboot_sha256 = "00"\n[validation]\nframes = 10\n')

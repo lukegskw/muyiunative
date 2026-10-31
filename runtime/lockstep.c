@@ -29,7 +29,7 @@ static int cpu_differ(const ps1 *a, const ps1 *b, char *out, size_t n) {   // wh
 #define PART(f) {#f, offsetof(ps1, f), sizeof ((ps1 *)0)->f}
 static const struct { const char *name; size_t at, n; } parts[] = {
     PART(ram), PART(scratch), PART(bios), PART(next_event), PART(i_stat), PART(i_mask), PART(memctl), PART(ram_size), PART(cache_ctl), PART(dpcr), PART(dicr),
-    PART(post), PART(dma), PART(tmr), PART(gpu), PART(cd), PART(spu), PART(sio), PART(mdec), PART(tty), PART(ntty), PART(exe_n), PART(frame_done),
+    PART(post), PART(dma), PART(dma_next), PART(tmr), PART(gpu), PART(cd), PART(spu), PART(sio), PART(mdec), PART(tty), PART(ntty), PART(exe_n), PART(frame_done),
     PART(exit_requested), PART(exit_code), PART(red), PART(unmapped)};
 #undef PART
 

@@ -4,7 +4,7 @@
 // with the host from the bundled binary (phase 3), where memory holds the code it was made from; --interpret runs everything in the interpreter instead, and
 // --lockstep (headless) runs an interpreting machine beside the native one and stops at their first difference (runtime/lockstep.c). A host built with a game's native
 // code (make -C shell/mac game, scripts/native_game.py) runs that too. --capture (headless) keeps what the interpreted code calls and jumps to, and RAM, for
-// tools/codegen.py; it leaves out the game's native code, so that the capture sees the game's code run
+// tools/codegen.py, including code versions overwritten later (phase 4); it leaves out the game's native code, so the capture sees what the game runs
 #include <limits.h>
 #include <errno.h>
 #include <mach-o/dyld.h>
@@ -17,10 +17,10 @@
 
 enum { MAX_W = 640, MAX_H = 576 };   // the largest picture: 640 pixels by 2 x 288 lines (PAL, 480-line mode)
 
-typedef struct input { unsigned long frame; uint16_t buttons; } input;
+#include "input.h"
 typedef struct host {
     ps1 *m, *ref; ps1_lockstep ls; int diverged;   // ref: the interpreting machine of --lockstep
-    uint32_t *px; int w, h, interactive; unsigned long frame; input input[64]; int ninput, input_pos; uint16_t buttons;
+    uint32_t *px; int w, h, interactive; unsigned long frame; input *input; size_t ninput, input_pos; uint16_t buttons;
 } host;
 extern const ps1_native_set native_openbios;
 #ifdef NATIVE_GAME
@@ -69,7 +69,7 @@ static const char *default_bios(char *buf, size_t cap) {   // in the app's Resou
 
 static int usage(void) {
     fputs("usage: ps1native [--bios <file>] [--disc <file.cue|file.bin>] [--exe <file.exe>] [--interpret] "
-          "[--headless [--frames <n>] [--input <frame>:<hex-buttons>] [--png <file>] [--lockstep | --capture <out>]]\n", stderr);
+          "[--headless [--frames <n>] [--input <frame>:<hex-buttons>] [--input-file <file>] [--png <file>] [--lockstep | --capture <out>]]\n", stderr);
     return 2;
 }
 
@@ -87,7 +87,7 @@ static int load_exe(ps1 *m, const char *path) {   // the whole file, handed to t
 
 int main(int argc, char **argv) {
     const char *bios = NULL, *png = NULL, *disc = NULL, *exe = NULL, *capture = NULL;
-    input inputs[64]; int ninput = 0;
+    input *inputs = NULL; size_t ninput = 0, input_cap = 0;
     int headless = 0, interpret = 0, lockstep = 0; long frames = 300;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--bios") && i + 1 < argc) bios = argv[++i];
@@ -99,14 +99,8 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--capture") && i + 1 < argc) capture = argv[++i];
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc) { char *end; frames = strtol(argv[++i], &end, 10); if (*end || frames < 1) return usage(); }
         else if (!strcmp(argv[i], "--png") && i + 1 < argc) png = argv[++i];
-        else if (!strcmp(argv[i], "--input") && i + 1 < argc) {
-            const char *s = argv[++i]; char *end; errno = 0;
-            unsigned long frame = strtoul(s, &end, 10);
-            if (ninput == 64 || errno || end == s || *end != ':' || frame > LONG_MAX) return usage();
-            s = end + 1; errno = 0; unsigned long buttons = strtoul(s, &end, 16);
-            if (errno || end == s || *end || buttons > 0xffff || (ninput && frame < inputs[ninput - 1].frame)) return usage();
-            inputs[ninput++] = (input){frame, (uint16_t)buttons};
-        }
+        else if (!strcmp(argv[i], "--input") && i + 1 < argc) { if (front_input_add(&inputs, &ninput, &input_cap, argv[++i])) { free(inputs); return usage(); } }
+        else if (!strcmp(argv[i], "--input-file") && i + 1 < argc) { if (front_input_file(&inputs, &ninput, &input_cap, argv[++i])) { free(inputs); return usage(); } }
         else return usage();
     }
     if ((ninput || lockstep || capture) && !headless) return usage();
@@ -114,12 +108,11 @@ int main(int argc, char **argv) {
     char path[PATH_MAX];
     if (!bios && !(bios = default_bios(path, sizeof path))) { RED("host: no BIOS in the app's Resources or the repository's bios/openbios: give one with --bios"); return 1; }
     host h = {.m = ps1_new(), .ref = lockstep ? ps1_new() : NULL, .ls = {.step = 64}, .px = malloc(sizeof *h.px * MAX_W * MAX_H), .interactive = !headless,
-              .ninput = ninput};
-    memcpy(h.input, inputs, (size_t)ninput * sizeof *inputs);
-    if (!h.m || !h.px || (lockstep && !h.ref)) { RED("host: no memory for the machine"); free(h.px); ps1_free(h.m); ps1_free(h.ref); return 1; }
+              .ninput = ninput, .input = inputs};
+    if (!h.m || !h.px || (lockstep && !h.ref)) { RED("host: no memory for the machine"); free(h.input); free(h.px); ps1_free(h.m); ps1_free(h.ref); return 1; }
     if (ps1_load_bios(h.m, bios) || (disc && disc_open(h.m, disc)) || (exe && load_exe(h.m, exe)) ||
         (h.ref && (ps1_load_bios(h.ref, bios) || (disc && disc_open(h.ref, disc)) || (exe && load_exe(h.ref, exe))))) {
-        free(h.px); ps1_free(h.m); ps1_free(h.ref); return 1;
+        free(h.input); free(h.px); ps1_free(h.m); ps1_free(h.ref); return 1;
     }
     if (h.ref) h.ref->tty_out = quiet;   // the native machine prints what both do
     if (!interpret) ps1_native_add(h.m, &native_openbios);
@@ -135,9 +128,11 @@ int main(int argc, char **argv) {
     while (n < frames && !h.m->exit_requested && !h.diverged) { frame(&h); n++; }
     printf("host: %ld frames, %dx%d, frame hash %016llx\n", n, h.w, h.h, (unsigned long long)ps1_frame_hash(h.px, h.w, h.h));
     printf("host: native code entered %llu times; %llu instructions interpreted\n", (unsigned long long)h.m->native_runs, (unsigned long long)h.m->interp_steps);
+    printf("host: %llu instructions native, %llu interpreted (%.2f%% native)\n", (unsigned long long)h.m->native_steps,
+           (unsigned long long)h.m->interp_steps, 100.0 * h.m->native_steps / (h.m->native_steps + h.m->interp_steps + 1));
     if (h.ref) printf("host: lockstep: %s, %llu stops\n", h.diverged ? "the machines differ" : "the machines agree", (unsigned long long)h.ls.stops);
     int r = h.diverged ? 3 : h.m->exit_requested ? h.m->exit_code : png && h.w && front_write_png(png, h.px, h.w, h.h) ? 1 : 0;
     if (capture && ps1_capture_write(h.m, &cap, capture)) r = 1;
-    free(h.px); ps1_free(h.m); ps1_free(h.ref);
+    free(h.input); free(h.px); ps1_free(h.m); ps1_free(h.ref);
     return r;
 }

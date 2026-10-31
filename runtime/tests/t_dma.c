@@ -3,7 +3,7 @@
 // changes until acknowledged, and can reassert IRQ3 when master enable rises (psx-spx, DMA Channels, 1F8010F4h)
 #include "ps1.h"
 #include <string.h>
-#include <unistd.h>
+
 
 static int checks, fails;
 #define CHECK(c, msg) do { checks++; if (!(c)) { fails++; fprintf(stderr, "FAIL: %s\n", msg); } } while (0)
@@ -13,6 +13,7 @@ static void start(int ch, uint32_t madr, uint32_t bcr, uint32_t chcr) {
     mem_write32(m, 0x1f801080 + 16 * (uint32_t)ch, madr); mem_write32(m, 0x1f801084 + 16 * (uint32_t)ch, bcr); mem_write32(m, 0x1f801088 + 16 * (uint32_t)ch, chcr);
 }
 static uint32_t chcr(int ch) { return mem_read32(m, 0x1f801088 + 16 * (uint32_t)ch); }
+static void advance(uint64_t cycles) { m->cycles += cycles; sched_run(m); }
 static uint16_t px(int x, int y) { return m->gpu.vram[y * VRAM_W + x]; }
 
 int main(void) {
@@ -34,6 +35,8 @@ int main(void) {
     const uint32_t at[] = {0x80010000, 0x80010100, 0x80010200};
     for (int p = 0; p < 3; p++) for (uint32_t i = 0; i <= list[p][0] >> 24; i++) mem_write32(m, at[p] + 4 * i, list[p][i]);
     start(2, 0x010000, 0, 0x01000401);
+    CHECK(chcr(2) & 0x01000000 && !px(0, 0), "GPU list start schedules work without drawing or advancing the CPU");
+    advance(16);
     CHECK(px(0, 0) == 0x001f && px(15, 0) == 0x001f && (gpu_stat(m) & 0x7ff) == 0x123, "GPU linked list: every packet's words reach GP0, an empty one too");
     CHECK(mem_read32(m, 0x1f8010a0) == 0xffffff && !(chcr(2) & 0x01000000), "GPU linked list: MADR at the end code, start bit clear");
     CHECK(mem_read32(m, DICR) >> 24 == 0x84 && m->i_stat & 1u << IRQ_DMA, "DICR: channel 2's flag and the master flag set, IRQ 3 raised");
@@ -44,18 +47,22 @@ int main(void) {
     CHECK(chcr(2) & 0x01000000 && mem_read32(m, DICR) == 0x00840000 && !(m->i_stat & 1u << IRQ_DMA),
           "a GPU list that comes back on itself never completes, nor raises its IRQ (ps1-tests dma/chain-looping)");
     mem_write32(m, 0x1f8010a8, 0);
-    const uint32_t chain[] = {0x010410, 0x010420, 0x010430, 0x010440, 0x010420};   // two packets, then a loop of three
-    for (uint32_t i = 0; i < 5; i++) mem_write32(m, 0x80010400 + 16 * i, chain[i]);
-    FILE *log = tmpfile(); int err = dup(2); char line[300] = "";
-    if (log && err >= 0) {
-        fflush(stderr); dup2(fileno(log), 2); start(2, 0x010400, 0, 0x01000401); fflush(stderr); dup2(err, 2);
-        rewind(log); if (!fgets(line, sizeof line, log)) line[0] = 0;
-    }
-    if (log) fclose(log);
-    if (err >= 0) close(err);
-    CHECK(strstr(line, "after 2 packets, the last at 010410 (00010420), a loop of 3: 010420 (00010430) > 010430 (00010440) > 010440 (00010420);"),
-          "a looping list's report shows the packet that leads into the loop, and the loop");
-    mem_write32(m, 0x1f8010a8, 0);
+    // A synthetic list containing a drawing command, not just empty headers: the CPU must get back to stop it, with no packet-count escape.
+    mem_write32(m, 0x80010400, 0x03010410); mem_write32(m, 0x80010404, 0x0200ff00);
+    mem_write32(m, 0x80010408, 0x00020000); mem_write32(m, 0x8001040c, 0x00010010); mem_write32(m, 0x80010410, 0x010400);
+    uint64_t at_cycle = m->cycles;
+    start(2, 0x010400, 0, 0x01000401);
+    advance(20);
+    CHECK(m->cycles == at_cycle + 20 && (chcr(2) & 0x01000000) && px(0, 2) == 0x03e0, "a looping list advances in guest time and stays busy");
+    uint32_t enable = mem_read32(m, DPCR), next = mem_read32(m, 0x1f8010a0);
+    mem_write32(m, DPCR, enable & ~0x800u); advance(20);
+    CHECK(m->dma_next == NEVER && mem_read32(m, 0x1f8010a0) == next && (chcr(2) & 0x01000000), "DPCR disables service without completing or losing a running GPU list");
+    mem_write32(m, DPCR, enable);
+    mem_write32(m, 0x80010400, 0xffffff); advance(5);
+    CHECK(!(chcr(2) & 0x01000000), "the CPU can break a running list by changing its next header");
+    mem_write32(m, DICR, 0x04840000);
+    start(2, 0x010410, 0, 0x01000401); mem_write32(m, 0x1f8010a8, 0); advance(20);
+    CHECK(!(chcr(2) & 0x01000000) && m->dma_next == NEVER && mem_read32(m, DICR) == 0x00840000, "stopping DMA cancels its scheduled event without an IRQ");
 
     gpu_gp0(m, 0xa0000000); gpu_gp0(m, 0x00000020); gpu_gp0(m, 0x00020002);
     mem_write32(m, 0x80011000, 0x7fff0001); mem_write32(m, 0x80011004, 0x00030002);

@@ -62,6 +62,7 @@ typedef struct ps1_cdrom {
     int16_t audio[CD_AUDIO_FRAMES * 2]; unsigned audio_read, audio_n; int audio_xa;   // stereo frames on their way to the SPU, and whether they are XA-ADPCM
 } ps1_cdrom;
 
+typedef struct ps1_native_fn ps1_native_fn;
 typedef struct ps1_native_set ps1_native_set;   // native code generated for some guest code (native.h)
 
 typedef struct ps1 {
@@ -71,7 +72,7 @@ typedef struct ps1 {
     ps1_cpu cpu;
     uint64_t cycles, next_event;     // CPU cycles since reset; the cycle of the next scheduled event (sched.c)
     uint32_t i_stat, i_mask, memctl[9], ram_size, cache_ctl, dpcr, dicr, post;
-    ps1_dma dma[7];
+    ps1_dma dma[7]; uint64_t dma_next;   // GPU linked-list packet event, NEVER when stopped
     ps1_timer tmr[3];
     ps1_gpu gpu;
     ps1_cdrom cd;
@@ -84,7 +85,8 @@ typedef struct ps1 {
     void (*on_step)(struct ps1 *m, uint32_t pc, uint32_t op); void *step_ctx;   // the host's, told of each interpreted instruction after it ran (capture.c)
     uint8_t *exe; size_t exe_n;      // a PS-X EXE waiting for the BIOS to reach its shell (exe.c)
     const ps1_native_set *native[4]; int nnative;   // the native code this machine runs where memory holds the code it was made from (native.c)
-    uint64_t native_runs, interp_steps;   // entries into native code from the dispatcher, and instructions interpreted: how much runs native
+    uint64_t native_runs, native_steps, interp_steps;   // native entries and instruction counts: how much runs native
+    const ps1_native_fn *native_active; int native_dirty;   // host bookkeeping: a store into the running function returns to the dispatcher immediately
     uint32_t native_pc, native_fn;   // where native code was last entered, and its guest function (for lockstep reports)
     int frame_done, exit_requested, exit_code;
     unsigned red, unmapped;          // [RED] reports already made: features (RED_ONCE bits), and unmapped accesses (a count)
@@ -127,6 +129,7 @@ void cpu_step(ps1 *m);                          // one instruction, interpreted 
 void cpu_run(ps1 *m);                           // runs until the end of a block at or after the next scheduled event
 void cpu_exception(ps1 *m, uint32_t code);
 int ps1_native_add(ps1 *m, const ps1_native_set *set);   // 0, or -1 after a [RED] line when the machine has no room for more
+void native_written(ps1 *m, uint32_t addr, unsigned n);   // CPU or synchronous DMA wrote RAM/scratchpad while native code was running
 int native_run(ps1 *m);                         // runs native code from the CPU's pc, where some matches memory: 1 if it ran
 
 // The lockstep comparison (lockstep.c): two machines from the same state, ref interpreting and nat with native code, stop together at the end of the first block
@@ -134,15 +137,20 @@ int native_run(ps1 *m);                         // runs native code from the CPU
 typedef struct ps1_lockstep { uint64_t stops; unsigned step, full_every; char report[400]; } ps1_lockstep;
 int ps1_lockstep_frame(ps1 *ref, ps1 *nat, ps1_lockstep *ls);   // one frame in step: 0 while they agree, else -1 with the first difference in ls->report
 
-// The capture (capture.c): the addresses the interpreted code calls or jumps to through a register, and RAM, for tools/codegen.py --capture; the host's, not the machine's
-typedef struct ps1_capture { uint32_t *a; size_t n, cap; int failed; } ps1_capture;
+// The capture (capture.c): interpreted blocks and their versions, call targets and final RAM, for tools/codegen.py --capture; the host's, not machine state
+typedef struct ps1_capture_block ps1_capture_block;
+typedef struct ps1_capture {
+    uint32_t *a; size_t n, cap; int failed;
+    ps1_capture_block *blocks[4096]; uint32_t pc, words[258]; unsigned nwords;   // immutable interpreted blocks, including overwritten versions
+} ps1_capture;
 void ps1_capture_start(ps1 *m, ps1_capture *c);   // from now on (it takes on_step)
-int ps1_capture_write(const ps1 *m, ps1_capture *c, const char *out);   // <out>.txt and <out>.ram; 0, or -1 after a [RED] line
+int ps1_capture_write(ps1 *m, ps1_capture *c, const char *out);   // <out>.txt, .ram and .blocks, then stop capturing; 0, or -1 after a [RED] line
 
 // The devices, each by its register offset
 void sched_run(ps1 *m);                         // runs the events that are due (sched.c)
 void sched_update(ps1 *m);                      // after an event moved: the next one
 void dma_reset(ps1 *m);
+void dma_event(ps1 *m);
 uint32_t dma_read(ps1 *m, uint32_t off);
 void dma_write(ps1 *m, uint32_t off, uint32_t v);
 void dma_resume(ps1 *m);                        // re-evaluate MDEC requests after a CPU-side FIFO/control access
