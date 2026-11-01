@@ -241,6 +241,32 @@ kernel void render_flat(device ushort *vram [[buffer(0)]], device ushort *hires 
     }
 }
 
+// The OpenBIOS animation missed 16.7 ms on 145 boot frames: two large untextured triangles alone took ~64 ms in the single-lane native shader. Their pixels have
+// unique destinations and no texture/cache feedback, so exact native coverage and color can run in parallel. Prepare the reference's 12-bit gradients once per
+// Gouraud triangle; keep the same top-left edges, winding, size rejection and flat/Gouraud dither rules (psx-spx, GPU Render Polygon Commands / Vertex attributes).
+kernel void render_triangle_prepare(constant ps1_render_op &o [[buffer(3)]], device long *grad [[buffer(5)]], uint tid [[thread_position_in_grid]]) {
+    if (tid) return;
+    ps1_vtx a = o.a, b = o.b, c = o.c; long area = edge(a, b, c.x, c.y, 1);
+    if (!area || max(max(a.x, b.x), c.x) - min(min(a.x, b.x), c.x) > 1023 || max(max(a.y, b.y), c.y) - min(min(a.y, b.y), c.y) > 511) return;
+    if (area < 0) { ps1_vtx t = b; b = c; c = t; area = -area; }
+    gradients(a, b, c, area, grad);
+}
+
+kernel void render_triangle(device ushort *vram [[buffer(0)]], constant ps1_render_op &o [[buffer(3)]],
+                            device const long *grad [[buffer(5)]], uint2 gid [[thread_position_in_grid]]) {
+    ps1_vtx a = o.a, b = o.b, c = o.c; long area = edge(a, b, c.x, c.y, 1);
+    if (!area || max(max(a.x, b.x), c.x) - min(min(a.x, b.x), c.x) > 1023 || max(max(a.y, b.y), c.y) - min(min(a.y, b.y), c.y) > 511) return;
+    if (area < 0) { ps1_vtx t = b; b = c; c = t; }
+    int4 box = bounds(o);
+    if (gid.x >= uint(box.z - box.x + 1) || gid.y >= uint(box.w - box.y + 1)) return;
+    int x = box.x + int(gid.x), y = box.y + int(gid.y);
+    if (!inside(a, b, c, x, y, 1)) return;
+    ushort color = rgb15(0, 0, a.r, a.g, a.b, false);
+    if (o.flags & RENDER_GOURAUD) color = rgb15(x, y, interpolate(a.r, a, x, y, 1, grad, 0), interpolate(a.g, a, x, y, 1, grad, 1),
+                                             interpolate(a.b, a, x, y, 1, grad, 2), o.flags & RENDER_DITHER);
+    plot(vram, x, y, 1, color, o.flags & RENDER_SEMI, o.mask, o.texpage);
+}
+
 // The title replay remains 46.65 s against the 18.52 s software baseline after parallel flat fills: it sends about 280 rectangle/fill/copy operations a frame.
 // For a <=16x16 sprite with no texture window, each requested cache slot has only one tag: horizontal slot periods span at least 32 UV samples and vertical periods
 // at least 32 rows, while the UV wrap period is 256, a multiple of each cache period. Flips retain that bound. The host excludes the full source page and CLUT from
@@ -280,6 +306,75 @@ kernel void render_sprites(device ushort *vram [[buffer(0)]], device ushort *hir
                 textured_plot(hires, x * int(scale) + int(fx), y * int(scale) + int(fy), scale, sample, o.a.r, o.a.g, o.a.b, o);
         }
         threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
+    }
+}
+
+// Soldier selection measured ~64 ms of GPU work at 1x: sixteen large textured rectangles fell through to the serial native shader. A nonfeedback rectangle has
+// immutable source VRAM, but its incoming texture cache may be stale (psx-spx, GPU Texture Caching / Cache entries, and Clear Cache). For each slot, stale bytes
+// survive exactly until its first requested tag different from the incoming tag. After that miss, every requested block comes from immutable VRAM, even on a
+// return to the original tag. Track that first miss and the last requested tag, shade independent pixels from the original cache/VRAM, then commit final tags.
+// Host barriers separate these four passes. Feedback retains the scanline-ordered path; this optimization never samples the software renderer's result.
+static int2 rectangle_uv(constant ps1_render_op &o, int x, int y) {
+    return int2(o.a.u + (o.texpage & 0x1000 ? o.a.x - x + 1 : x - o.a.x), o.a.v + (o.texpage & 0x2000 ? o.a.y - y : y - o.a.y));
+}
+
+kernel void render_rect_prepare(device const ushort *vram [[buffer(0)]], device ps1_render_cache &cache [[buffer(2)]],
+                                constant ps1_render_op &o [[buffer(3)]], device atomic_uint *state [[buffer(5)]], uint tid [[thread_position_in_grid]]) {
+    atomic_store_explicit(state + tid, 0xffffffffu, memory_order_relaxed);
+    atomic_store_explicit(state + 256 + tid, 0u, memory_order_relaxed);
+    uint depth = o.texpage >> 7 & 3, need = depth == 0 ? 16 : depth == 1 ? 256 : 0, clut = o.clut & 0x7fff;
+    // Every lane reads the old CLUT metadata before any lane changes it. Publish new metadata in the final pass instead.
+    if (need && (!cache.clut_valid || cache.clut_id != clut || uint(cache.clut_n) < need) && tid < need)
+        cache.clutcache[tid] = vram[(clut >> 6) * 1024 + (((clut & 63) * 16 + tid) & 1023)];
+}
+
+kernel void render_rect_track(device const ps1_render_cache &cache [[buffer(2)]], constant ps1_render_op &o [[buffer(3)]],
+                              device atomic_uint *state [[buffer(5)]], uint2 gid [[thread_position_in_grid]]) {
+    int4 box = bounds(o); uint width = uint(box.z - box.x + 1);
+    if (gid.x >= width || gid.y >= uint(box.w - box.y + 1)) return;
+    int x = box.x + int(gid.x), y = box.y + int(gid.y); int2 uv = rectangle_uv(o, x, y);
+    uint4 a = texture_address(uv.x, uv.y, o.texpage, o.texwin); uint tag = a.y * 1024 + (a.x & ~3u);
+    // Repeated hits within one horizontal cache-line run cannot change either event. Only its first pixel needs atomics.
+    if (gid.x) {
+        int2 previous_uv = rectangle_uv(o, x - 1, y); uint4 previous = texture_address(previous_uv.x, previous_uv.y, o.texpage, o.texwin);
+        if (previous.y * 1024 + (previous.x & ~3u) == tag) return;
+    }
+    uint at = gid.y * width + gid.x;
+    if (cache.textag[a.z] != tag + 1) atomic_fetch_min_explicit(state + a.z, at, memory_order_relaxed);
+    atomic_fetch_max_explicit(state + 256 + a.z, at + 1, memory_order_relaxed);
+}
+
+kernel void render_rect_draw(device ushort *vram [[buffer(0)]], device ushort *hires [[buffer(1)]], device const ps1_render_cache &cache [[buffer(2)]],
+                             constant ps1_render_op &o [[buffer(3)]], constant uint &scale [[buffer(4)]], device const uint *state [[buffer(5)]],
+                             uint2 gid [[thread_position_in_grid]]) {
+    int4 box = bounds(o); uint width = uint(box.z - box.x + 1);
+    if (gid.x >= width || gid.y >= uint(box.w - box.y + 1)) return;
+    int x = box.x + int(gid.x), y = box.y + int(gid.y); int2 uv = rectangle_uv(o, x, y);
+    uint4 a = texture_address(uv.x, uv.y, o.texpage, o.texwin); uint tag = a.y * 1024 + (a.x & ~3u);
+    ushort sample = cache.textag[a.z] == tag + 1 && gid.y * width + gid.x < state[a.z] ? cache.texcache[a.z][a.x & 3] : vram[a.y * 1024 + a.x];
+    if (a.w) {
+        int2 mapped = window_uv(uv.x, uv.y, o.texwin);
+        uint entry = a.w == 2 ? sample >> ((mapped.x & 3) * 4) & 15 : sample >> ((mapped.x & 1) * 8) & 255;
+        sample = cache.clutcache[entry];
+    }
+    textured_plot(vram, x, y, 1, sample, o.a.r, o.a.g, o.a.b, o);
+    if (scale > 1) for (uint fy = 0; fy < scale; fy++) for (uint fx = 0; fx < scale; fx++)
+        textured_plot(hires, x * int(scale) + int(fx), y * int(scale) + int(fy), scale, sample, o.a.r, o.a.g, o.a.b, o);
+}
+
+kernel void render_rect_finish(device const ushort *vram [[buffer(0)]], device ps1_render_cache &cache [[buffer(2)]],
+                               constant ps1_render_op &o [[buffer(3)]], device const uint *state [[buffer(5)]], uint tid [[thread_position_in_grid]]) {
+    if (state[256 + tid] && state[tid] != 0xffffffffu) {
+        int4 box = bounds(o); uint width = uint(box.z - box.x + 1), at = state[256 + tid] - 1;
+        int2 uv = rectangle_uv(o, box.x + int(at % width), box.y + int(at / width));
+        uint4 a = texture_address(uv.x, uv.y, o.texpage, o.texwin); uint tag = a.y * 1024 + (a.x & ~3u);
+        for (uint i = 0; i < 4; i++) cache.texcache[tid][i] = vram[tag + i]; cache.textag[tid] = tag + 1;
+    }
+    if (!tid) {
+        uint depth = o.texpage >> 7 & 3, need = depth == 0 ? 16 : depth == 1 ? 256 : 0, clut = o.clut & 0x7fff;
+        if (need && (!cache.clut_valid || cache.clut_id != clut || uint(cache.clut_n) < need)) {
+            cache.clut_id = ushort(clut); cache.clut_valid = 1; cache.clut_n = int(need);
+        }
     }
 }
 
