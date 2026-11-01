@@ -15,6 +15,57 @@ static void start(int ch, uint32_t madr, uint32_t bcr, uint32_t chcr) {
 static uint32_t chcr(int ch) { return mem_read32(m, 0x1f801088 + 16 * (uint32_t)ch); }
 static void advance(uint64_t cycles) { m->cycles += cycles; sched_run(m); }
 static uint16_t px(int x, int y) { return m->gpu.vram[y * VRAM_W + x]; }
+static void count_rectangles(void *ctx, const ps1_render_op *op) { if (op->type == RENDER_RECT) (*(unsigned *)ctx)++; }
+
+static void drawing_waits(void) {
+    gpu_reset(m); unsigned rectangles = 0; m->render_ctx = &rectangles; m->on_render = count_rectangles;
+    const uint32_t setup[] = {0xe1000040, 0xe3000000, 0xe4000000 | 303 | 223 << 10, 0xe5000000, 0xe6000000};
+    for (unsigned i = 0; i < sizeof setup / sizeof *setup; i++) gpu_gp0(m, setup[i]);
+    // The measured failing loop requested this primitive >70,000 times/frame. The v2 hardware fit for a clipped 304x224 semi rectangle is 54,957 CPU cycles.
+    mem_write32(m, 0x80020000, 0x03020000); mem_write32(m, 0x80020004, 0x62a0b0c0);
+    mem_write32(m, 0x80020008, 0); mem_write32(m, 0x8002000c, 0x01000140);
+    start(2, 0x020000, 0, 0x01000401);
+    CHECK(m->dma[2].active && m->dma_next == NEVER && !rectangles, "GPU direction off holds a linked list without consuming its header");
+    uint64_t issued = m->cycles;
+    gpu_gp1(m, 0x04000002); advance(4);
+    uint64_t done = m->gpu.draw_until;
+    CHECK(rectangles == 1 && done == issued + 4 + 54957, "a semi rectangle occupies the GPU for its measured clipped drawing time");
+    CHECK(!(gpu_stat(m) & ((1u << 26) | (1u << 28) | (1u << 25))), "GPUSTAT command-ready, DMA-ready and mode2 request stay low while drawing");
+    advance(1000); mem_write32(m, 0x80021000, 0x12345678);
+    CHECK(rectangles == 1 && mem_read32(m, 0x80021000) == 0x12345678 && m->dma[2].active, "the CPU runs during device backpressure without repeating the draw");
+    advance(done - m->cycles - 1);
+    CHECK(rectangles == 1, "a cyclic list cannot submit its next draw before the GPU is ready");
+    advance(1);
+    CHECK(rectangles == 2 && m->gpu.draw_until > done, "the same live list resumes on GPU readiness without skipping a command");
+    advance(10);
+    CHECK(m->dma[2].gpu_wait, "a drawing wait is distinguished from a packet's word-transfer deadline");
+    gpu_gp1(m, 0x01000000); advance(1);
+    CHECK(rectangles == 3, "resetting the command buffer wakes a list waiting on cancelled drawing occupancy");
+    mem_write32(m, 0x1f8010a8, 0x00000401); advance(1000);
+    CHECK(!m->dma[2].active && rectangles == 3 && m->dma_next == NEVER, "the guest can stop a live list during a drawing wait");
+    CHECK(!(gpu_stat(m) & 1u << 28), "stopping DMA does not invent completion of GPU drawing");
+    gpu_gp1(m, 0x01000000);
+    CHECK((gpu_stat(m) & ((1u << 26) | (1u << 28))) == ((1u << 26) | (1u << 28)), "resetting the GPU command buffer releases drawing occupancy");
+    // A command can span packets. An unfinished rectangle must receive its parameters rather than deadlock behind its own not-yet-started draw.
+    mem_write32(m, 0x80022000, 0x01022010); mem_write32(m, 0x80022004, 0x600000ff);
+    mem_write32(m, 0x80022010, 0x02ffffff); mem_write32(m, 0x80022014, 0x000a000a); mem_write32(m, 0x80022018, 0x00020002);
+    start(2, 0x022000, 0, 0x01000401); advance(1);
+    CHECK(m->gpu.n == 1, "a partial rectangle packet awaits parameters");
+    gpu_gp1(m, 0x04000000); advance(20);
+    CHECK(m->gpu.n == 1 && m->dma[2].active && m->dma_next == NEVER, "GP1 direction off pauses a partial command without losing it");
+    gpu_gp1(m, 0x04000002); advance(10);
+    CHECK(rectangles == 4 && px(10, 10) == 0x1f && !m->dma[2].active, "restoring DMA direction completes a split command and its transfer");
+    gpu_gp1(m, 0x01000000);
+    mem_write32(m, 0x80023000, 0x01ffffff); mem_write32(m, 0x80023004, 0);
+    start(2, 0x023000, 0, 0x01000401); advance(1);
+    CHECK(m->dma[2].active && m->dma[2].left, "a terminal packet waits for its last transferred word before DMA completion");
+    uint32_t enabled = mem_read32(m, 0x1f8010f0);
+    mem_write32(m, 0x1f8010f0, enabled & ~0x800u); gpu_gp1(m, 0x04000000);
+    mem_write32(m, 0x1f8010f0, enabled); advance(2);
+    CHECK(!m->dma[2].active && m->dma_next == NEVER && m->dma[2].madr == 0xffffff,
+          "DPCR resume completes an already-transferred terminal packet even after GPU requests are disabled");
+    m->on_render = NULL; m->render_ctx = NULL;
+}
 
 int main(void) {
     m = ps1_new();
@@ -30,6 +81,7 @@ int main(void) {
     CHECK(!(chcr(6) & 0x11000000), "OTC: start and trigger bits clear when done");
 
     mem_write32(m, DPCR, mem_read32(m, DPCR) | 1u << 11);
+    gpu_gp1(m, 0x04000002);
     mem_write32(m, DICR, 0x00840000);   // IRQ on channel 2's completion, master enable
     const uint32_t list[][4] = {{3u << 24 | 0x010100, 0x020000ff, 0x00000000, 0x00010010}, {0x010200}, {1u << 24 | 0xffffff, 0xe1000123}};
     const uint32_t at[] = {0x80010000, 0x80010100, 0x80010200};
@@ -91,6 +143,7 @@ int main(void) {
     CHECK(mem_read32(m, DICR) == 0x00800000 && !(m->i_stat & (1u << IRQ_DMA)), "channel-disabled completion does not latch a new flag with master enabled");
     mem_write32(m, DICR, 0x00008000);
     CHECK(mem_read32(m, DICR) == 0x80008000 && (m->i_stat & (1u << IRQ_DMA)), "force interrupt bypasses both enables");
+    drawing_waits();
     printf("dma: %d checks, %d failed\n", checks, fails);
     ps1_free(m);
     return fails != 0;

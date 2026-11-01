@@ -29,7 +29,7 @@ typedef struct ps1_cpu {
     uint64_t gte_busy, hilo_busy;   // the cycles at which the GTE's command and MULT/DIV's result are done (reading early waits)
 } ps1_cpu;
 
-typedef struct ps1_dma { uint32_t madr, bcr, chcr, addr, block_left, block_size, blocks; uint64_t left; int active; } ps1_dma;
+typedef struct ps1_dma { uint32_t madr, bcr, chcr, addr, block_left, block_size, blocks; uint64_t left; int active, gpu_wait; } ps1_dma;
 // acc: CPU cycles not yet counted, 16.16; gate: whether MODE.0's synchronization lets the counter count
 typedef struct ps1_timer { uint32_t mode; uint16_t count, target; uint64_t last, next; uint64_t acc; int fired, gate; } ps1_timer;
 
@@ -45,6 +45,7 @@ typedef struct ps1_gpu {
     uint16_t disp_x, disp_y, hx1, hx2, vy1, vy2; uint32_t dmode;   // GP1(05h..08h)
     int line, field; uint64_t next_line; uint32_t line_frac;   // video timing: scanline, interlace field, next scanline's cycle and its 16.16 remainder
     uint64_t line_start, next_hblank; int hblank;   // the scanline's first cycle; while timer 0 synchronizes: its next hblank edge, and whether in hblank
+    uint64_t draw_until;   // measured flat-rectangle draw occupancy, in CPU cycles; other drawing costs remain unmodelled
 } ps1_gpu;
 
 enum { CD_AUDIO_FRAMES = 16384 };   // 44.1 kHz frames the drive holds for the SPU: one 18.9 kHz mono XA-ADPCM sector makes 9408
@@ -155,6 +156,7 @@ void dma_event(ps1 *m);
 uint32_t dma_read(ps1 *m, uint32_t off);
 void dma_write(ps1 *m, uint32_t off, uint32_t v);
 void dma_resume(ps1 *m);                        // re-evaluate MDEC requests after a CPU-side FIFO/control access
+void dma_gpu_resume(ps1 *m);                    // re-evaluate a linked-list request after GP1 changes its DMA direction
 void tmr_reset(ps1 *m);
 uint32_t tmr_read(ps1 *m, uint32_t off);
 void tmr_write(ps1 *m, uint32_t off, uint32_t v);
@@ -163,6 +165,7 @@ void tmr_blank(ps1 *m, int n, int start, uint64_t at);   // timer n's blank (0: 
 void tmr_event(ps1 *m, int n);
 void gpu_reset(ps1 *m);
 void gpu_gp0(ps1 *m, uint32_t w);
+void gpu_gp0_at(ps1 *m, uint32_t w, uint64_t at); // DMA words use their scheduled bus time, independent of the CPU's event-dispatch lateness
 void gpu_gp1(ps1 *m, uint32_t w);
 uint32_t gpu_read(ps1 *m);
 uint32_t gpu_stat(ps1 *m);

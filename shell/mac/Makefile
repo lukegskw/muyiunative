@@ -12,7 +12,7 @@ TOOLS = ../../tools
 LIB = $(GEN)/ps1gpu.metallib
 RTSRC = $(sort $(wildcard $(RT)/*.c))
 SRC = main.c front_mac.m keyboard.m product.m saves.c $(GFX)/present.m $(GFX)/renderer.m $(RTSRC) $(GEN)/openbios.c
-HDR = front.h input.h keys.h keyboard.h product.h saves.h $(GFX)/present.h $(GFX)/renderer.h $(wildcard $(RT)/*.h)
+HDR = front.h audio.h input.h keys.h keyboard.h product.h saves.h $(GFX)/present.h $(GFX)/renderer.h $(wildcard $(RT)/*.h)
 CODEGEN = $(TOOLS)/codegen.py $(TOOLS)/analyze.py $(TOOLS)/mips.py $(TOOLS)/exe.py $(TOOLS)/overlays.py
 CFLAGS = -arch arm64 -mmacosx-version-min=$(MINOS) -O2 -g -Wall -Wextra -fobjc-arc -I$(RT) -I$(GFX)
 FRAMEWORKS = -framework AppKit -framework QuartzCore -framework Metal -framework CoreGraphics -framework ImageIO -framework AudioToolbox -framework UniformTypeIdentifiers

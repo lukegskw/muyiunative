@@ -1,7 +1,8 @@
 // The GPU (psx-spx, Graphics Processing Unit): GP0 commands draw into the 1 MB VRAM and move rectangles in and out of it, GP1 commands set up the display, and GPUSTAT
 // reports both. Drawing is done in software as each command completes: textured/untextured polygons (flat or gouraud), lines and polylines, rectangles, fills and copies, with
 // semi-transparency, dithering and the mask bit. The video timing (GPU Timings) drives the scanline events: hblanks for timer 1, the blanks the timers synchronize to,
-// the vertical blank IRQ, the end of a frame. Public reference: https://psx-spx.consoledev.net/graphicsprocessingunitgpu/ . Not modelled: the time drawing takes, and
+// the vertical blank IRQ, the end of a frame. Flat-rectangle occupancy follows measured v2 drawing timings; other drawing costs and FIFO word timing remain open.
+// Public reference: https://psx-spx.consoledev.net/graphicsprocessingunitgpu/ . Not modelled:
 // which lines 480-line interlaced mode keeps drawing from (psx-spx does not say)
 #include "ps1.h"
 #include <stddef.h>
@@ -176,7 +177,7 @@ static void polygon(ps1 *m, uint32_t c) {
     if (n == 4) triangle(m, v[1], v[2], v[3], gouraud, c >> 1 & 1, tex, c & 1, clut);   // a quad is the triangles 1-2-3 and 2-3-4
 }
 
-static void rectangle(ps1 *m, uint32_t c) {
+static void rectangle(ps1 *m, uint32_t c, uint64_t at) {
     static const int side[4] = {0, 1, 8, 16};
     ps1_gpu *g = &m->gpu;
     int tex = c >> 2 & 1, w = side[c >> 3 & 3], h = w;
@@ -188,6 +189,17 @@ static void rectangle(ps1 *m, uint32_t c) {
         if (tex) { op.a.u = g->buf[2] & 255; op.a.v = g->buf[2] >> 8 & 255; op.clut = g->buf[2] >> 16; } render(m, &op);
     }
     uint16_t col = rgb15(0, 0, v.r, v.g, v.b, 0);
+    if (!tex) {
+        int width = MAX(0, MIN(v.x + w - 1, g->ax2) - MAX(v.x, g->ax1) + 1);
+        int rows = MAX(0, MIN(v.y + h - 1, g->ay2) - MAX(v.y, g->ay1) + 1), semi = c >> 1 & 1;
+        // A live DMA cycle requested 70,774 subtractive 304x224 rectangles in one frame: 4.8 billion pixels while GPUSTAT always said ready. Drawing takes time.
+        // psx-spx, Drawing Timings, v2 GPU: setup + rows*per_row + pixels*per_pixel, measured in CPU cycles by nugget's hardware test. Use the documented flat and
+        // semi fits, counting clipped pixels; opaque rectangles draw pixel pairs. These are measured estimates, not cycle-exact FIFO or VRAM arbitration.
+        // https://psx-spx.consoledev.net/dev/ps1/gpu/drawing-timings/
+        uint64_t pixels = (uint64_t)(semi ? width : width & ~1) * (uint64_t)rows;
+        uint64_t clocks = 50 + (uint64_t)rows * (semi ? 8u : width < 8 ? 5u : 2u) + (pixels * (semi ? 78u : 53u) + 99) / 100;
+        g->draw_until = (g->draw_until > at ? g->draw_until : at) + clocks;
+    }
     // GP0(E1h) bits 12/13 flip rectangles' textures. The hardware VRAM of ps1-tests gpu/texture-flip shows U running u0+1, u0, u0-1... across an X-flipped rectangle
     // and V running v0, v0-1... down a Y-flipped one; polygons ignore both bits
     for (int y = MAX(v.y, g->ay1); y <= MIN(v.y + h - 1, g->ay2); y++)
@@ -288,7 +300,7 @@ static int gp0_len(uint32_t c) {   // the words of a GP0 command, its first incl
     }
 }
 
-static void execute(ps1 *m) {
+static void execute(ps1 *m, uint64_t at) {
     ps1_gpu *g = &m->gpu;
     uint32_t c = g->buf[0] >> 24;
     if (c >> 5 >= 1 && c >> 5 <= 3 && (g->dmode & 0x24) == 0x24)   // psx-spx, GP1(08h): "the Vertical Interlace flag DOES affect GP0 draw commands", without saying how
@@ -306,7 +318,7 @@ static void execute(ps1 *m) {
         line(m, &a, &b, gouraud, c >> 1 & 1);
         break;
     }
-    case 3: rectangle(m, c); break;
+    case 3: rectangle(m, c, at); break;
     case 4: copy(m, g->buf); break;
     case 5: xfer_start(g, g->buf[1], g->buf[2], 1); break;
     case 6: xfer_start(g, g->buf[1], g->buf[2], 2); break;
@@ -314,7 +326,7 @@ static void execute(ps1 *m) {
     }
 }
 
-void gpu_gp0(ps1 *m, uint32_t w) {
+void gpu_gp0_at(ps1 *m, uint32_t w, uint64_t at) {
     ps1_gpu *g = &m->gpu;
     if (g->xfer == 1) { pixel_in(m, (uint16_t)w); if (g->xfer == 1) pixel_in(m, (uint16_t)(w >> 16)); return; }   // an odd count ends on a padding halfword
     if (g->poly) { poly_word(m, w); return; }
@@ -324,8 +336,10 @@ void gpu_gp0(ps1 *m, uint32_t w) {
         g->need = gp0_len(c);
     }
     g->buf[g->n++] = w;
-    if (g->n == g->need) { g->n = 0; execute(m); }
+    if (g->n == g->need) { g->n = 0; execute(m, at); }
 }
+
+void gpu_gp0(ps1 *m, uint32_t w) { gpu_gp0_at(m, w, m->cycles); }
 
 // The blanks the timers synchronize to (psx-spx, Timers, MODE). The vertical blank is the lines outside GP1(07h)'s display range Y1..Y2, as for IRQ 0. Timer 0's hblank is
 // the part of a scanline outside GP1(06h)'s range X1..X2, which counts video cycles from HSYNC, here the scanline's first cycle: "a display configured to 0 pixels
@@ -373,11 +387,11 @@ void gpu_gp1(ps1 *m, uint32_t w) {
     case 0x00:   // the values of psx-spx, GP1(00h)
         { ps1_render_op op = {0}; op.type = RENDER_CLEAR; render(m, &op); }
         memset(g->textag, 0, sizeof g->textag); g->clut_valid = 0;
-        g->n = g->poly = g->xfer = g->irq = g->dma_dir = 0; g->display_off = 1;
+        g->n = g->poly = g->xfer = g->irq = g->dma_dir = 0; g->display_off = 1; g->draw_until = m->cycles;
         g->disp_x = g->disp_y = 0; g->hx1 = 0x200; g->hx2 = 0x200 + 256 * 10; g->vy1 = 0x10; g->vy2 = 0x10 + 240; g->dmode = 0;
         g->texpage = g->texwin = g->mask = 0; g->ax1 = g->ay1 = g->ax2 = g->ay2 = g->ox = g->oy = 0;
         break;
-    case 0x01: { ps1_render_op op = {0}; op.type = RENDER_CLEAR; op.p[0] = 1; render(m, &op); g->n = g->poly = g->xfer = 0; g->clut_valid = 0; break; }   // GP1(01h) also resets CLUT cache
+    case 0x01: { ps1_render_op op = {0}; op.type = RENDER_CLEAR; op.p[0] = 1; render(m, &op); g->n = g->poly = g->xfer = 0; g->clut_valid = 0; g->draw_until = m->cycles; break; }   // GP1(01h) also resets CLUT cache
     case 0x02: g->irq = 0; break;
     case 0x03: g->display_off = w & 1; break;
     case 0x04: g->dma_dir = w & 3; break;
@@ -400,6 +414,7 @@ void gpu_gp1(ps1 *m, uint32_t w) {
     default: break;
     }
     if (c == 0 || (c >= 6 && c <= 8)) blank_edges(m, vblank, m->cycles);   // GP1(00h) and (06h..08h) move the blanks
+    if (c == 0 || c == 1 || c == 4) dma_gpu_resume(m);
 }
 
 uint32_t gpu_read(ps1 *m) {
@@ -408,14 +423,16 @@ uint32_t gpu_read(ps1 *m) {
     return g->read;
 }
 
-// Drawing is instant, so the GPU is always ready for commands and DMA. Bit 31 is the field in 480-line mode and the scanline's parity otherwise, 0 in vertical blank
+// GPUSTAT.26/28 stay low during the modelled drawing occupancy (psx-spx, Status Register). Other primitive timing and FIFO word-level occupancy remain open.
+// Bit 31 is the field in 480-line mode and the scanline's parity otherwise, 0 in vertical blank.
 uint32_t gpu_stat(ps1 *m) {
     ps1_gpu *g = &m->gpu;
     uint32_t d = g->dmode, il = d >> 5 & 1, vblank = g->line < g->vy1 || g->line >= g->vy2;
     uint32_t odd = vblank ? 0 : (d & 0x24) == 0x24 ? (uint32_t)g->field : (uint32_t)g->line & 1;
+    uint32_t idle = m->cycles >= g->draw_until;
     uint32_t s = (g->texpage & 0x7ff) | (g->mask & 3) << 11 | (uint32_t)(!il || g->field) << 13 | (d >> 7 & 1) << 14 | (g->texpage >> 11 & 1) << 15 |
                  (d >> 6 & 1) << 16 | (d & 3) << 17 | (d >> 2 & 1) << 19 | (d >> 3 & 1) << 20 | (d >> 4 & 1) << 21 | il << 22 |
-                 (uint32_t)g->display_off << 23 | (uint32_t)g->irq << 24 | 1u << 26 | (uint32_t)(g->xfer == 2) << 27 | 1u << 28 | (uint32_t)g->dma_dir << 29 | odd << 31;
+                 (uint32_t)g->display_off << 23 | (uint32_t)g->irq << 24 | idle << 26 | (uint32_t)(g->xfer == 2) << 27 | idle << 28 | (uint32_t)g->dma_dir << 29 | odd << 31;
     uint32_t req = g->dma_dir == 0 ? 0 : g->dma_dir == 1 ? 1 : g->dma_dir == 2 ? s >> 28 & 1 : s >> 27 & 1;
     return s | req << 25;
 }

@@ -11,7 +11,7 @@
 struct metal_renderer {
     ps1 *m; int scale, failed;
     id<MTLCommandQueue> queue;
-    id<MTLComputePipelineState> native, scaled, upload, display, flat, sprites, rect_prepare, rect_track, rect_draw, rect_finish, triangle_prepare, triangle;
+    id<MTLComputePipelineState> native, scaled, upload, display, flat, sprites, texture_prepare, texture_track, texture_draw, texture_finish, triangle_prepare, triangle;
     id<MTLBuffer> vram, hires, cache, scratch, output;
     ps1_render_op *ops; size_t n, cap;
     uint64_t batches;
@@ -50,15 +50,15 @@ metal_renderer *metal_renderer_new(ps1 *m, const char *path, int scale) {
         r->upload = pipeline(dev, lib, @"render_upload"); r->display = pipeline(dev, lib, @"render_display");
         r->flat = pipeline(dev, lib, @"render_flat");
         r->sprites = pipeline(dev, lib, @"render_sprites");
-        r->rect_prepare = pipeline(dev, lib, @"render_rect_prepare"); r->rect_track = pipeline(dev, lib, @"render_rect_track");
-        r->rect_draw = pipeline(dev, lib, @"render_rect_draw"); r->rect_finish = pipeline(dev, lib, @"render_rect_finish");
+        r->texture_prepare = pipeline(dev, lib, @"render_texture_prepare"); r->texture_track = pipeline(dev, lib, @"render_texture_track");
+        r->texture_draw = pipeline(dev, lib, @"render_texture_draw"); r->texture_finish = pipeline(dev, lib, @"render_texture_finish");
         r->triangle_prepare = pipeline(dev, lib, @"render_triangle_prepare"); r->triangle = pipeline(dev, lib, @"render_triangle");
         r->vram = [dev newBufferWithBytes:m->gpu.vram length:sizeof m->gpu.vram options:MTLResourceStorageModeShared];
         r->cache = [dev newBufferWithBytes:m->gpu.texcache length:sizeof(ps1_render_cache) options:MTLResourceStorageModeShared];
         r->hires = [dev newBufferWithLength:sizeof m->gpu.vram * scale * scale options:MTLResourceStorageModeShared];
         r->scratch = [dev newBufferWithLength:4 << 20 options:MTLResourceStorageModeShared];
         if (!r->queue || !r->native || !r->scaled || !r->upload || !r->display || !r->flat || !r->sprites ||
-            !r->rect_prepare || !r->rect_track || !r->rect_draw || !r->rect_finish || !r->triangle_prepare || !r->triangle ||
+            !r->texture_prepare || !r->texture_track || !r->texture_draw || !r->texture_finish || !r->triangle_prepare || !r->triangle ||
             !r->vram || !r->cache || !r->hires || !r->scratch) {
             RED("metal: cannot allocate renderer resources"); metal_renderer_free(r); return NULL;
         }
@@ -76,7 +76,7 @@ void metal_renderer_free(metal_renderer *r) {
     r->queue = nil; r->native = r->scaled = r->upload = r->display = nil;
     r->flat = nil;
     r->sprites = nil;
-    r->rect_prepare = r->rect_track = r->rect_draw = r->rect_finish = nil;
+    r->texture_prepare = r->texture_track = r->texture_draw = r->texture_finish = nil;
     r->triangle_prepare = r->triangle = nil;
     r->vram = r->hires = r->cache = r->scratch = r->output = nil;
     free(r->ops); free(r);
@@ -105,9 +105,13 @@ static int overlaps_x(int x0, int x1, int source, int width) {
     return (x1 >= source && x0 <= MIN(end, 1023)) || (end >= 1024 && x0 <= end - 1024);
 }
 // Feedback is excluded conservatively by the whole page and CLUT ranges; overlapping sources retain the ordered reference shader, never a guessed texture snapshot.
-static int independent_rectangle(const ps1_render_op *o) {
-    if (o->type != RENDER_RECT || !(o->flags & RENDER_TEXTURE)) return 0;
-    int x0 = MAX(o->a.x, o->ax1), y0 = MAX(o->a.y, o->ay1), x1 = MIN(o->a.x + (int)o->p[0] - 1, o->ax2), y1 = MIN(o->a.y + (int)o->p[1] - 1, o->ay2);
+static int independent_texture(const ps1_render_op *o) {
+    if ((o->type != RENDER_RECT && o->type != RENDER_TRIANGLE) || !(o->flags & RENDER_TEXTURE)) return 0;
+    int x0, y0, x1, y1;
+    if (o->type == RENDER_RECT) { x0 = o->a.x; y0 = o->a.y; x1 = x0 + (int)o->p[0] - 1; y1 = y0 + (int)o->p[1] - 1; }
+    else { x0 = MIN(o->a.x, MIN(o->b.x, o->c.x)); y0 = MIN(o->a.y, MIN(o->b.y, o->c.y));
+        x1 = MAX(o->a.x, MAX(o->b.x, o->c.x)); y1 = MAX(o->a.y, MAX(o->b.y, o->c.y)); }
+    x0 = MAX(x0, o->ax1); y0 = MAX(y0, o->ay1); x1 = MIN(x1, o->ax2); y1 = MIN(y1, o->ay2);
     if (x0 < 0 || y0 < 0 || x1 > 1023 || y1 > 511 || x1 < x0 || y1 < y0) return 0;
     int depth = o->texpage >> 7 & 3, sy = (o->texpage >> 4 & 1) * 256, width = depth == 0 ? 64 : depth == 1 ? 128 : 256;
     if (y1 >= sy && y0 <= sy + 255 && overlaps_x(x0, x1, (o->texpage & 15) * 64, width)) return 0;
@@ -118,7 +122,7 @@ static int independent_rectangle(const ps1_render_op *o) {
 // The title's 280 small rectangles per busy frame made GPU command barriers dominate (46.65s versus 18.52s software). A <=16x16 texture footprint with no window
 // cannot alias a cache slot to different tags. One workgroup can load its entries and shade it in parallel, then process the next sprite in original command order.
 static int sprite(const ps1_render_op *o) {
-    return !o->texwin && o->p[0] <= 16 && o->p[1] <= 16 && independent_rectangle(o);
+    return o->type == RENDER_RECT && !o->texwin && o->p[0] <= 16 && o->p[1] <= 16 && independent_texture(o);
 }
 
 static int flush(metal_renderer *r) {
@@ -148,15 +152,19 @@ static int flush(metal_renderer *r) {
                 while (i + count < r->n && sprite(r->ops + i + count)) count++;
                 [e setComputePipelineState:r->sprites]; [e setBytes:&count length:sizeof count atIndex:6];
                 [e dispatchThreadgroups:MTLSizeMake(1, 1, 1) threadsPerThreadgroup:MTLSizeMake(256, 1, 1)]; i += count - 1;
-            } else if (independent_rectangle(o)) {
+            } else if (independent_texture(o)) {
                 MTLSize size = bounds(o, 1), slots = MTLSizeMake(256, 1, 1), group = MTLSizeMake(128, 1, 1);
-                [e setComputePipelineState:r->rect_prepare]; [e dispatchThreads:slots threadsPerThreadgroup:group];
+                [e setComputePipelineState:r->texture_prepare]; [e dispatchThreads:slots threadsPerThreadgroup:group];
                 [e memoryBarrierWithScope:MTLBarrierScopeBuffers];
-                [e setComputePipelineState:r->rect_track]; [e dispatchThreads:size threadsPerThreadgroup:MTLSizeMake(8, 8, 1)];
+                [e setComputePipelineState:r->texture_track]; [e dispatchThreads:size threadsPerThreadgroup:MTLSizeMake(8, 8, 1)];
                 [e memoryBarrierWithScope:MTLBarrierScopeBuffers];
-                [e setComputePipelineState:r->rect_draw]; [e dispatchThreads:size threadsPerThreadgroup:MTLSizeMake(8, 8, 1)];
+                [e setComputePipelineState:r->texture_draw]; [e dispatchThreads:size threadsPerThreadgroup:MTLSizeMake(8, 8, 1)];
                 [e memoryBarrierWithScope:MTLBarrierScopeBuffers];
-                [e setComputePipelineState:r->rect_finish]; [e dispatchThreads:slots threadsPerThreadgroup:group];
+                [e setComputePipelineState:r->texture_finish]; [e dispatchThreads:slots threadsPerThreadgroup:group];
+                if (o->type == RENDER_TRIANGLE && r->scale > 1) {
+                    [e memoryBarrierWithScope:MTLBarrierScopeBuffers];
+                    [e setComputePipelineState:r->scaled]; [e dispatchThreads:bounds(o, r->scale) threadsPerThreadgroup:MTLSizeMake(8, 8, 1)];
+                }
             } else if (o->type == RENDER_FILL || (o->type == RENDER_RECT && !(o->flags & RENDER_TEXTURE))) {
                 MTLSize size = bounds(o, 1);
                 if (size.width && size.height) { [e setComputePipelineState:r->flat]; [e dispatchThreads:size threadsPerThreadgroup:MTLSizeMake(8, 8, 1)]; }

@@ -270,6 +270,81 @@ static void large_rectangles(int scale) {
     frame(&t); drop(&t);
 }
 
+static void textured_triangles(int scale) {
+    fixture t = create(scale); if (!t.r) { drop(&t); return; } drawing(&t);
+    uint16_t palette[256]; unsigned clut = 63 | 480 << 6;
+    for (unsigned i = 0; i < 256; i++) palette[i] = (uint16_t)((i * 173 & 0x7fff) | (i & 1 ? 0x8000 : 0));
+    palette[1] = 0x801f; palette[2] = 0x83e0; upload(&t, 1008, 480, palette, 256);
+    for (unsigned depth = 0; depth < 4; depth++) {
+        uint32_t seed = 0x71c12e03 + depth;
+        gpu_gp0(t.m, 0xa0000000); gpu_gp0(t.m, V(960, 0)); gpu_gp0(t.m, V(256, 256));
+        for (unsigned i = 0; i < 256 * 256; i += 2) {
+            uint16_t a = i % 17 ? (uint16_t)next(&seed) : 0, b = i % 23 ? (uint16_t)next(&seed) : 0;
+            gpu_gp0(t.m, a | (uint32_t)b << 16);
+        }
+        equal(&t);
+        for (unsigned mode = 0; mode < 4; mode++) {
+            uint32_t page = 15 | depth << 7 | mode << 5, xy[] = {V(310, 93), V(617, 109), V(389, 419)};
+            uint32_t uv[] = {UV(3, 251, 0), UV(247, 5, 0), UV(19, 229, 0)}, color[] = {0x906040, 0x20f0a0, 0xf030d0};
+            if (depth & 1) { uint32_t tmp = xy[1]; xy[1] = xy[2]; xy[2] = tmp; tmp = uv[1]; uv[1] = uv[2]; uv[2] = tmp; tmp = color[1]; color[1] = color[2]; color[2] = tmp; }
+            drawing(&t);
+            GP0(&t, 0x02404040, V(320, 100), V(320, 340), 0xe6000001, 0x60808080, V(320, 100), V(160, 340),
+                0xe6000000 | mode, 0xe1000000 | page | (mode & 2 ? 512 : 0),
+                0xe2000000 | (mode & 1 ? 1 | 2 << 5 | 1 << 10 | 2 << 15 : 0),
+                0xe3000000 | 327 | 113 << 10, 0xe4000000 | 601 | 383 << 10, 0xe5000000 | 5 | 0x7fd << 11, 0x01000000);
+            uint32_t cmd = (mode & 2 ? 0x36000000 : 0x26000000) | (mode & 1) << 24 | color[0];
+            if (mode & 2) GP0(&t, cmd, xy[0], uv[0] | clut << 16, color[1], xy[1], uv[1] | page << 16, color[2], xy[2], uv[2]);
+            else GP0(&t, cmd, xy[0], uv[0] | clut << 16, xy[1], uv[1] | page << 16, xy[2], uv[2]);
+            CHECK(!(mode & 2) || t.m->gpu.vram[200 * VRAM_W + 400] == 0xc210, "%dx depth %u textured triangle preserves a protected pixel", scale, depth);
+            CHECK(t.m->gpu.vram[100 * VRAM_W + 320] == 0xc210, "%dx depth %u textured triangle retains pixels outside its clip", scale, depth);
+        }
+        drawing(&t); GP0(&t, 0xe1000000 | 15 | depth << 7);
+        for (unsigned holes_first = 0; holes_first < 2; holes_first++) {
+            // A triangle's bounding box contains uncovered pixels. In the second shape, those holes precede the first cache eviction in raster order.
+            // They must not terminate the stale prefix; a later covered alias must evict it before the next row/return to the original texture word.
+            pixel(&t, 960, 0, depth == 0 ? 0x1111 : depth == 1 ? 0x0101 : 0x801f); GP0(&t, 0x01000000);
+            sprite(&t, 0x65000000, 700, 450, 0, 0, clut, 1, 1); pixel(&t, 960, 0, depth == 0 ? 0x2222 : depth == 1 ? 0x0202 : 0x83e0);
+            GP0(&t, 0x25000000, V(320, 100), UV(0, 0, clut), V(620, holes_first ? 400 : 100), UV(255, 0, 15 | depth << 7), V(320, 400), UV(0, 0, 0));
+            CHECK(t.m->gpu.vram[(100 + holes_first) * VRAM_W + 320] == 0x801f, "%dx depth %u triangle keeps its stale prefix with %s holes", scale, depth, holes_first ? "leading" : "trailing");
+            CHECK(t.m->gpu.vram[(holes_first ? 350 : 101) * VRAM_W + 320] == 0x83e0, "%dx depth %u triangle fetches fresh data after a covered eviction", scale, depth);
+        }
+    }
+    drawing(&t); GP0(&t, 0xe100010f, 0x01000000);
+    GP0(&t, 0x25000000, V(962, 1), UV(0, 0, 0), V(995, 1), UV(33, 0, 0x10f), V(962, 35), UV(0, 34, 0));
+    GP0(&t, 0x01000000, 0x25000000, V(1008, 480), UV(0, 0, clut), V(1041, 480), UV(33, 0, 15), V(1008, 515), UV(0, 35, 0));
+    GP0(&t, 0x01000000, 0x25000000, V(10, 10), UV(0, 0, clut ^ 1), V(20, 20), UV(255, 0, 15), V(30, 30), UV(0, 255, 0));
+    GP0(&t, 0xe4000000 | 100 | 100 << 10, 0x25000000, V(320, 100), UV(0, 0, clut ^ 1), V(620, 100), UV(255, 0, 15), V(320, 400), UV(0, 255, 0));
+    drawing(&t); GP0(&t, 0x02000000, V(0, 0), V(320, 240));
+    uint16_t source[256]; for (unsigned i = 0; i < 256; i++) source[i] = i & 1 ? 0x3e0 : 0x1f;
+    upload(&t, 512, 0, source, 256); pixel(&t, 768, 300, 0); pixel(&t, 769, 300, 0x801f); pixel(&t, 512, 0, 0x1111);
+    GP0(&t, 0xe1000008, 0x01000000, 0x25000000, V(10, 10), UV(0, 0, 48 | 300 << 6), V(12, 11), UV(0, 0, 8), V(11, 11), UV(0, 0, 0));
+    CHECK(!t.m->gpu.clut_valid, "%dx nondegenerate triangle without native samples does not load the palette", scale);
+    int tags = 0; for (unsigned i = 0; i < 256; i++) tags += t.m->gpu.textag[i] != 0;
+    CHECK(!tags, "%dx nondegenerate triangle without native samples does not load texture cache lines", scale);
+    int cap_w = 640 * scale, cap_h = 576 * scale, w = 0, h = 0, sw = 0, sh = 0;
+    uint32_t *out = calloc((size_t)cap_w * cap_h, sizeof *out), *ref = calloc(640 * 576, sizeof *ref);
+    CHECK(out && ref, "%dx textured-triangle display buffers allocate", scale);
+    if (out && ref) {
+        CHECK(!metal_renderer_frame(t.r, out, cap_w, cap_h, &w, &h, 1), "%dx thin textured triangle verifies untouched native caches", scale);
+        int colored = 0; for (int i = 0; i < w * h; i++) colored += (out[i] & 0xffffff) != 0;
+        CHECK(colored == scale * (scale - 1) / 2, "%dx native-empty triangle still draws %d fine samples", scale, colored);
+        GP0(&t, 0x02000000, V(0, 0), V(320, 240)); upload(&t, 512, 0, source, 256); GP0(&t, 0xe1000108, 0x01000000);
+        sprite(&t, 0x65000000, 700, 450, 0, 0, 0, 1, 1); pixel(&t, 512, 0, 0x7c00);
+        // Native sample records at y=0, x<256 previously occupied the same scratch words as cache events. Their stale values must survive until fine shading.
+        GP0(&t, 0x25000000, V(0, 0), UV(0, 0, 0), V(200, 0), UV(200, 0, 0x108), V(0, 200), UV(0, 0, 0));
+        CHECK(!metal_renderer_frame(t.r, out, cap_w, cap_h, &w, &h, 1), "%dx textured triangle verifies recorded native samples", scale);
+        ps1_display(t.m, ref, 640, 576, &sw, &sh); size_t mismatch = 0;
+        if (w == sw * scale && h == sh * scale) for (int y = 0; y < sh; y++) for (int x = 0; x < sw; x++) mismatch += out[y * scale * w + x * scale] != ref[y * sw + x];
+        CHECK(w == sw * scale && h == sh * scale && !mismatch && out[0] == 0xffff0000, "%dx textured triangle fine grid retains every native sample, including stale low-row texels", scale);
+        CHECK(out[12 * scale] == 0xffff0000 && (scale == 1 || out[12 * scale + scale / 2] == 0xff00ff00), "%dx textured triangle interpolates genuine subpixel UVs", scale);
+        GP0(&t, 0x02000000, V(0, 0), V(320, 240)); pixel(&t, 512, 0, 0x7fff); GP0(&t, 0x01000000);
+        GP0(&t, 0x34000000, V(0, 0), UV(0, 0, 0), 0x000000ff, V(200, 0), UV(0, 0, 0x108), 0x0000ff00, V(0, 200), UV(0, 0, 0));
+        CHECK(!metal_renderer_frame(t.r, out, cap_w, cap_h, &w, &h, 1), "%dx Gouraud textured triangle verifies native VRAM/cache", scale);
+        CHECK(out[16 * scale] == 0xff210000 && (scale == 1 || out[16 * scale + scale / 2] == 0xff290000), "%dx textured Gouraud colors interpolate between native samples", scale);
+    }
+    free(out); free(ref); drop(&t);
+}
+
 static void large_triangles(int scale) {
     fixture t = create(scale); if (!t.r) { drop(&t); return; } drawing(&t);
     // The BIOS profile found two large untextured triangles spending 63.59 ms in the serial shader. Synthetic screen-sized pairs exercise that area and the
@@ -370,6 +445,20 @@ static void hires(int scale) {
             CHECK(out[(10 * scale + y) * w + 14 * scale + x] == (keep ? old : 0xffffffff), "%dx large masked rectangle %s fine sample (%d,%d)", scale, keep ? "preserves protected" : "updates unprotected", x, y);
         }
         CHECK(protected && updated, "%dx masked rectangle tests both protected and unprotected children of one native pixel", scale);
+        GP0(&t, 0xe6000000); pixel(&t, 768, 0, 0); GP0(&t, 0xe6000002, 0xe100010c, 0x01000000);
+        GP0(&t, 0x25000000, V(10, 10), UV(0, 0, 0), V(43, 10), UV(0, 0, 0x10c), V(10, 45), UV(0, 0, 0));
+        CHECK(!metal_renderer_frame(t.r, out, cap_w, cap_h, &w, &h, 1), "%dx transparent independent triangle verifies", scale);
+        for (int y = 0; y < scale; y++) for (int x = 0; x < scale; x++) {
+            uint32_t old = fine[y * scale + x];
+            CHECK(out[(10 * scale + y) * w + 14 * scale + x] == ((old & 0xffffff) ? old : 0xffffffff), "%dx transparent triangle preserves fine sample (%d,%d)", scale, x, y);
+        }
+        GP0(&t, 0xe6000000); pixel(&t, 768, 0, 0x7c00); GP0(&t, 0xe6000002, 0x01000000);
+        GP0(&t, 0x25000000, V(10, 10), UV(0, 0, 0), V(43, 10), UV(0, 0, 0x10c), V(10, 45), UV(0, 0, 0));
+        CHECK(!metal_renderer_frame(t.r, out, cap_w, cap_h, &w, &h, 1), "%dx masked independent triangle verifies", scale);
+        for (int y = 0; y < scale; y++) for (int x = 0; x < scale; x++) {
+            uint32_t old = fine[y * scale + x];
+            CHECK(out[(10 * scale + y) * w + 14 * scale + x] == ((old & 0xffffff) ? old : 0xff0000ff), "%dx masked triangle preserves protected and updates unprotected fine sample (%d,%d)", scale, x, y);
+        }
         GP0(&t, 0xe6000000);
         pixel(&t, 767, 255, 0x1f); pixel(&t, 512, 255, 0x3e0); pixel(&t, 767, 0, 0x7c00); pixel(&t, 512, 0, 0x7fff);
         GP0(&t, 0x01000000);
@@ -400,6 +489,6 @@ int main(void) { @autoreleasepool {
         CHECK(!a.m->on_render && !a.m->render_ctx, "freeing a renderer detaches its machine callback");
     }
     drop(&a); drop(&b); large_rectangles(1); large_rectangles(2); large_rectangles(4);
-    large_triangles(1); large_triangles(2); large_triangles(4); hires(2); hires(4);
+    large_triangles(1); large_triangles(2); large_triangles(4); textured_triangles(1); textured_triangles(2); textured_triangles(4); hires(2); hires(4);
     printf("metal: %d checks, %d failed\n", checks, fails); return fails != 0;
 } }

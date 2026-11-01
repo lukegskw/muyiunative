@@ -48,12 +48,14 @@ static void frame(host *h) {
         if (ps1_lockstep_frame(h->ref, h->m, &h->ls)) { RED("host: lockstep, frame %lu: %s", h->frame - 1, h->ls.report); h->diverged = 1; }
         drain(h->ref, 0);
     } else ps1_run_frame(h->m);
+    // AudioQueue missed 167 sample frames in a paced results scene although samples were ready ~10 ms before the Metal wait ended. Publish produced audio now;
+    // presentation does not affect SPU output. Buffer sizes and guest timing stay unchanged, and the reference above drains its own copy at the same boundary.
+    drain(h->m, h->interactive);
     if (h->renderer) {
         if (metal_renderer_frame(h->renderer, h->px, MAX_W * h->capscale, MAX_H * h->capscale, &h->w, &h->h, h->verify_renderer)) {
             RED("host: renderer failed at frame %lu", h->frame - 1); h->graphics_failed = 1;
         }
     } else ps1_display(h->m, h->px, MAX_W, MAX_H, &h->w, &h->h);
-    drain(h->m, h->interactive);
 }
 
 static void run(void *arg) {   // the machine's thread: a frame, shown, then a wait until the console would have finished it
