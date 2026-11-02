@@ -1,5 +1,6 @@
 # Tests that need no game files, retail BIOS or GPU (plan.md, Testing): the runtime's unit tests, plain and under ASan and UBSan, OpenBIOS's boot among them; the tool
-# tests; and the Mac app, built, packed, signed, checked and run without a window. docs/development.md says how to run each one locally.
+# tests; the Mac host tests; and the Mac app, built, packed, signed, checked and run without a window. Metal comparisons run too, skipped without a device.
+# docs/development.md says how to run each one locally.
 name: tests
 
 on:
@@ -26,7 +27,7 @@ defaults:
 # Actions are pinned to commit SHAs (the tag in the comment): a tag can be moved, a SHA cannot
 jobs:
   runtime-tests:
-    name: Runtime unit tests (plain, then ASan and UBSan)
+    name: Runtime and Mac host tests (plain, then ASan and UBSan)
     runs-on: xcode-27
     timeout-minutes: 15
     steps:
@@ -37,6 +38,14 @@ jobs:
         run: make -C runtime/tests -j3 run
       - name: The same under ASan and UBSan
         run: make -C runtime/tests -j3 asan
+      - name: Mac host unit tests (shell/mac/tests)
+        run: make -C shell/mac/tests -j3 run
+      - name: Mac host tests under ASan and UBSan
+        run: make -C shell/mac/tests -j3 asan
+      - name: Offline Metal compiler
+        run: if ! xcrun metal --version >/dev/null 2>&1; then xcodebuild -downloadComponent MetalToolchain; fi
+      - name: Metal comparisons (exit 77 skips unavailable hardware)
+        run: make -C gfx/metal/tests -j3 run
 
   tool-tests:
     name: Tool tests

@@ -1,5 +1,5 @@
-// Phase 6's local Metal differential test: synthetic GP0/GP1 streams exercise independent native VRAM/cache and display output against gpu_sw.c. No game, SDK,
-// retail BIOS, window or screenshots. The explicit GPU test complements CPU-only CI tests; a missing Metal device is reported, never counted as a pass.
+// Phase 6's Metal differential test: synthetic GP0/GP1 streams exercise independent native VRAM/cache and display output against gpu_sw.c. No game, SDK,
+// retail BIOS, window or screenshots. The GPU test complements CPU-only tests locally and in CI; a missing Metal device is reported as skipped, never as a pass.
 #import <Metal/Metal.h>
 #include "../renderer.h"
 #include <stdlib.h>

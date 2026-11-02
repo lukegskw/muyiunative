@@ -1,4 +1,4 @@
-# Explicit local GPU validation (plan.md, phase 6); default CI remains CPU-only. Shader source is compiled offline; tests never compile source at runtime.
+# GPU validation locally and in CI (plan.md, phase 6); a missing Metal device (exit 77) is explicitly skipped. Shaders are compiled offline, never at runtime.
 B = build
 RT = ../../../runtime
 SRC = $(sort $(wildcard $(RT)/*.c))
@@ -17,7 +17,8 @@ $(B)/t_renderer: t_renderer.m ../renderer.m ../renderer.h $(SRC) $(wildcard $(RT
 	clang $(CFLAGS) -DMETALLIB_PATH='"$(abspath $(B)/renderer.metallib)"' -o $@ t_renderer.m ../renderer.m $(SRC) -framework Foundation -framework Metal
 
 run: $(B)/t_renderer
-	$(B)/t_renderer
+	@status=0; $(B)/t_renderer || status=$$?; \
+	if [ $$status -eq 77 ]; then echo "metal tests: skipped (no Metal device)"; else exit $$status; fi
 
 clean:
 	rm -rf $(B)

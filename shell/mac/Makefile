@@ -1,7 +1,8 @@
 # The Mac host and app. make -C shell/mac: the host, build/ps1native; make -C shell/mac app: build/ps1native.app, packed and signed by tools/pack_app.py with the bundled
 # OpenBIOS in its Resources (docs/development.md). Apple silicon only, macOS 14 or later. One clang command builds the host from every source; the runtime's are taken by
 # wildcard, so a new file does not touch this line. The host links OpenBIOS's native code, generated here from the bundled binary (plan.md, decision log): the capture
-# runs OpenBIOS in the interpreter for what it copies into RAM and runs there (tools/capture.c), and tools/codegen.py writes the C, into build/gen only
+# runs OpenBIOS in the interpreter for what it copies into RAM and runs there (tools/capture.c), and tools/codegen.py writes the C, into build/gen only.
+# The host build compiles gfx/metal/*.metal into build/gen/ps1gpu.metallib with xcrun (Xcode's Metal Toolchain); make app bundles that offline library.
 B = build
 GEN = $(B)/gen
 MINOS = 14.0

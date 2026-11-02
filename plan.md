@@ -52,14 +52,14 @@ flowchart LR
 
 ```
 ps1native/            (working name)
-  tools/              Python: disc, exe, mips, analyze, codegen, package; C: capture (what a program runs, at build time)
-  scripts/            Python, run by the user: disc_info (what identifies a disc in its profile), native_game (a game as native code, in lockstep on its route)
-  runtime/            C: cpu, cpu_ops, interp, native, lockstep, mem, gte, gpu_sw, spu, cdrom, mdec, sio, sched
+  tools/              Python: disc, exe, mips, analyze, codegen, overlays, replay, mac_build, pack_app; C: capture (what a program runs, at build time)
+  scripts/            Run by the user: ps1native (build an app), disc_info (identify a disc), native_game (native code checked in lockstep), survey_game (capture unknown games)
+  runtime/            C: cpu, cpu_ops, interp, native, lockstep, capture, mem, gte, gpu_sw, render, spu, cdrom, mdec, sio, sched
   gfx/metal/          Metal command renderer, offline shaders and presentation
   shell/mac/  shell/ios/
   bios/openbios/      MIT, bundled
   profiles/<serial>/  game.toml: hash, overlays, function hints, patches
-  tests/              homebrew test programs (no game data); unit tests sit beside their code (runtime/tests, tools/tests)
+  tests/              homebrew test programs (no game data); unit tests sit beside their code (runtime/tests, shell/mac/tests, gfx/metal/tests, tools/tests)
   docs/               development: building, tests, CI, house style
 ```
 
@@ -136,3 +136,6 @@ Dump it with an accurate ripping tool (e.g. redumper) to `.cue`/`.bin`.
 | Interrupts taken at the end of a block of code, in the interpreter and in native code       | Between any two instructions            | Both sides see each interrupt at the same point, so the lockstep comparison is exact           |
 | Generated C only in build folders, never in the repository, OpenBIOS's included             | Commit OpenBIOS's generated C           | A game's code is disc data; OpenBIOS's is rebuilt from its committed binary in each build      |
 | Keyboard: WASD + IJKL, Q/E, 1/3, Enter and Backspace; remapping in phase 5                  | Arrows + Z/X/A/S; a numeric keypad      | User's choice for a two-hand keyboard layout without a numeric keypad                          |
+| Metal comparisons in `gfx/metal/tests`, in CI and locally; skip exit 77 without a device    | CPU-only tests; local-only GPU checks   | Exception to GPU-free tests: synthetic input, real renderer; CI skips absent Metal devices     |
+| Offline metallib required by every host build, bundled by `make app`                        | `newLibraryWithSource:` at run time     | No shader source compiled on device; cost: Xcode's Metal Toolchain download, even for software |
+| Mac host tests in `shell/mac/tests`, plain and under ASan/UBSan in CI                       | Keep them in `runtime/tests`            | Tests beside their code; keyboard, replay, audio and saves need no GPU or Apple frameworks     |

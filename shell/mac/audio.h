@@ -1,5 +1,5 @@
-// Host playback policy, not console state. A live callback had 368 of 512 frames and inserted 144 zeros; 737 real frames arrived 1.68 ms later while two other
-// buffers were still queued. Keep returned buffer IDs pending until a complete real chunk is available instead of inserting silence into buffered playback.
+// Host playback policy (plan.md, phase 6 follow-up), not console state. A live callback had 368 of 512 frames and inserted 144 zeros; 737 real frames arrived 1.68 ms
+// later while two other buffers were still queued. Keep returned buffer IDs pending until a complete real chunk is available instead of inserting silence into buffered playback.
 // The adapter serializes access; this plain-C state owns no OS resources and needs no audio device for t_audio. Zero initialization resets it.
 #pragma once
 #include <stdint.h>

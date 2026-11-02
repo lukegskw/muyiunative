@@ -1,6 +1,6 @@
-// Deferred host playback refills: a short ring must wait for real samples while the device's other buffers keep playing. Synthetic interleaved ramps expose
+// Deferred host playback refills (plan.md, phase 6 follow-up): a short ring must wait for real samples while the device's other buffers keep playing. Synthetic interleaved ramps expose
 // inserted silence, channel swaps, dropped/duplicated samples and buffer reordering, without Audio Queue Services, a game, a BIOS or an audio device.
-#include "../../shell/mac/audio.h"
+#include "../audio.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
