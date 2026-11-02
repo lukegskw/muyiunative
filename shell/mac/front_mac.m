@@ -124,7 +124,7 @@ static void audio_buffer(AudioQueueRef q, AudioQueueBufferRef b) {
 }
 static void audio_start(void) {
     dispatch_queue_attr_t attr = dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INTERACTIVE, 0);
-    g_audio_delivery = dispatch_queue_create("org.ps1native.audio", attr);
+    g_audio_delivery = dispatch_queue_create("org.muyiunative.audio", attr);
     if (!g_audio_delivery) { RED("front end: cannot create audio delivery queue"); return; }
     __block OSStatus err = 0;
     dispatch_sync(g_audio_delivery, ^{

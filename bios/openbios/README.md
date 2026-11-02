@@ -1,6 +1,6 @@
 # OpenBIOS
 
-`openbios.bin` is OpenBIOS, the open-source PlayStation BIOS from [nugget](https://github.com/pcsx-redux/nugget) (MIT), built from source; it is not a dump of a console's BIOS. ps1native runs it as the console's BIOS ([plan.md](../../plan.md#2-architecture): OpenBIOS, bundled). Its default shell, shello, is embedded: a cube drawn with psyqo that checks the CD-ROM drive for a disc.
+`openbios.bin` is OpenBIOS, the open-source PlayStation BIOS from [nugget](https://github.com/pcsx-redux/nugget) (MIT), built from source; it is not a dump of a console's BIOS. muyiunative runs it as the console's BIOS ([plan.md](../../plan.md#2-architecture): OpenBIOS, bundled). Its default shell, shello, is embedded: a cube drawn with psyqo that checks the CD-ROM drive for a disc.
 
 | What       | Value                                                                                                                                                                      |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

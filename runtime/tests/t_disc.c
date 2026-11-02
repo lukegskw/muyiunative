@@ -19,7 +19,7 @@ static int bin(const char *path, int sectors, uint8_t marker) {
 static int cue(const char *path, const char *text) { FILE *f = fopen(path, "w"); if (!f) return -1; int bad = fputs(text, f) == EOF; return fclose(f) || bad ? -1 : 0; }
 
 int main(void) {
-    char dir[] = "/tmp/ps1native-disc-XXXXXX", a[128], b[128], c[128], partial[128]; uint8_t raw[DISC_SECTOR];
+    char dir[] = "/tmp/muyiunative-disc-XXXXXX", a[128], b[128], c[128], partial[128]; uint8_t raw[DISC_SECTOR];
     ps1 *m = ps1_new(), *other = ps1_new();
     if (!m || !other || !mkdtemp(dir)) { fputs("FAIL: cannot set up synthetic disc test\n", stderr); return 1; }
     snprintf(a, sizeof a, "%s/first track.bin", dir); snprintf(b, sizeof b, "%s/second.bin", dir);

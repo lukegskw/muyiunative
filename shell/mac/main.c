@@ -93,7 +93,7 @@ static const char *default_bios(char *buf, size_t cap) {   // in the app's Resou
 }
 
 static int usage(void) {
-    fputs("usage: ps1native [--bios <file>] [--disc <file.cue|file.bin>] [--exe <file.exe>] [--interpret] [--save-dir <directory>] "
+    fputs("usage: muyiunative [--bios <file>] [--disc <file.cue|file.bin>] [--exe <file.exe>] [--interpret] [--save-dir <directory>] "
           "[--renderer software|metal] [--scale 1|2|4] [--verify-renderer] [--shaders <offline.metallib>] "
           "[--headless [--frames <n>] [--input <frame>:<hex-buttons>] [--input-file <file>] [--png <file>] [--lockstep | --capture <out>]]\n", stderr);
     return 2;
@@ -188,7 +188,7 @@ int main(int argc, char **argv) {
     if (capture) ps1_capture_start(h.m, &cap);
     if (disc) LOG("host: external disc mounted read-only");
     LOG("host: BIOS %s%s%s", bios, interpret ? ", interpreted" : ", OpenBIOS as native code", lockstep ? ", in lockstep with the interpreter" : "");
-    if (!headless) { front_renderer_set(h.choice); front_run(bundled ? product.title : "ps1native", run, &h); return 0; }
+    if (!headless) { front_renderer_set(h.choice); front_run(bundled ? product.title : "muyiunative", run, &h); return 0; }
     long n = 0;
     while (n < frames && !h.m->exit_requested && !h.diverged && !h.graphics_failed) { frame(&h); n++; }
     printf("host: %ld frames, %dx%d, frame hash %016llx\n", n, h.w, h.h, (unsigned long long)ps1_frame_hash(h.px, h.w, h.h));

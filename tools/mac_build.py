@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Phase 5's Mac product build, called by scripts/ps1native: capture a route, compile its observed code, check it in lockstep, then pack a local game app. Disc files
+# Phase 5's Mac product build, called by scripts/muyiunative: capture a route, compile its observed code, check it in lockstep, then pack a local game app. Disc files
 # and generated code stay in ignored build folders or the user's output app. Every build has its own workspace, so two discs cannot reuse each other's native code.
 import argparse, hashlib, plistlib, re, shutil, subprocess, sys, tempfile, tomllib
 from pathlib import Path
@@ -74,7 +74,7 @@ def build(a):
     p = build_plan(source, a.profile, a.route, a.frames, a.input)
     out = (a.output or MAC / 'build/apps' / f'{p["title"]}.app').resolve()
     if out.suffix != '.app': raise SystemExit('build: --output must end in .app')
-    bundle_id = f'org.ps1native.game.{p["save_id"].lower()}'
+    bundle_id = f'org.muyiunative.game.{p["save_id"].lower()}'
     if out.exists() and packed_id(out) != bundle_id: raise SystemExit('build: the output exists and is not this game app; choose another --output')
     if out.is_relative_to(ROOT) and not out.is_relative_to(MAC / 'build'): raise SystemExit('build: game apps inside this repository must stay in shell/mac/build')
     # An app can be built outside the checkout, but may not replace its input disc or contain it while pack_app replaces an old bundle.
@@ -86,26 +86,26 @@ def build(a):
     run('building the capture host', ['make', f'B={b}', '-j3', 'host'])
     (gen / 'route.inputs').write_text('\n'.join(p['inputs']) + ('\n' if p['inputs'] else ''))
     route = ['--bios', ROOT / 'bios/openbios/openbios.bin', '--disc', source, '--headless', '--frames', p['frames'], '--input-file', gen / 'route.inputs']
-    captured = run('capturing interpreted game code', [work / 'ps1native', *route, '--capture', gen / 'game.cap'])
+    captured = run('capturing interpreted game code', [work / 'muyiunative', *route, '--capture', gen / 'game.cap'])
     command = [sys.executable, ROOT / 'tools/codegen.py', source, '--capture', gen / 'game.cap', '--name', 'game', '-o', gen / 'game.c', '--max-ops', '20000']
     if p['profile']: command += ['--profile', p['profile']]
     run('generating native code', command)
     parts = ' '.join(str(f.relative_to(MAC)) for f in sorted(gen.glob('game*.c')))
     run('compiling native game code', ['make', f'B={b}', '-j3', 'game', f'GAME_C={parts}'])
-    native = run('checking the route against the interpreter', [work / 'game/ps1native', *route, '--lockstep'])
+    native = run('checking the route against the interpreter', [work / 'game/muyiunative', *route, '--lockstep'])
     if 'the machines agree' not in native or frame_hash(native) != frame_hash(captured): raise SystemExit('build: native code differs from the interpreter; no app was packed')
     resources = work / 'resources'; resources.mkdir(); bundle_disc(source, resources / 'disc')
     manifest = {'Version': 1, 'Title': p['title'], 'Serial': p['serial'] or '', 'BootSHA256': p['boot_sha256'], 'SaveID': p['save_id'], 'Disc': 'disc/disc.cue',
                 'Renderer': a.renderer, 'RenderScale': a.scale}
     (resources / 'game.plist').write_bytes(plistlib.dumps(manifest))
-    run('packing and signing the game app', [sys.executable, ROOT / 'tools/pack_app.py', out, '--exe', work / 'game/ps1native', '--name', p['title'],
+    run('packing and signing the game app', [sys.executable, ROOT / 'tools/pack_app.py', out, '--exe', work / 'game/muyiunative', '--name', p['title'],
         '--bundle-id', bundle_id, '--resource', ROOT / 'bios/openbios', '--resource', resources / 'disc', '--resource', resources / 'game.plist', '--resource', gen / 'ps1gpu.metallib'])
     print(f'build: app ready: {out}\nbuild: open it in Finder to play; keep this app and its game data on your Mac', flush=True)
     return 0
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog='ps1native', description='Build a native Mac app from your own PS1 disc')
+    ap = argparse.ArgumentParser(prog='muyiunative', description='Build a native Mac app from your own PS1 disc')
     sub = ap.add_subparsers(dest='command', required=True); p = sub.add_parser('build', help='capture, compile, check and pack a game')
     p.add_argument('disc', type=Path); p.add_argument('--platform', choices=['mac-app'], default='mac-app')
     p.add_argument('--output', type=Path, help='output .app (default: shell/mac/build/apps/<game>.app)')

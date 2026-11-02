@@ -57,7 +57,7 @@ static void pause_read(ps1 *m) {
 }
 
 int main(void) {
-    char path[] = "/tmp/ps1native-cdread-XXXXXX.bin"; int fd = mkstemps(path, 4);
+    char path[] = "/tmp/muyiunative-cdread-XXXXXX.bin"; int fd = mkstemps(path, 4);
     FILE *f = fd < 0 ? NULL : fdopen(fd, "wb"); ps1 *m = ps1_new(), *other = ps1_new();
     if (!f || !m || !other) { fputs("FAIL: cannot create synthetic disc or machines\n", stderr); if (f) fclose(f); else if (fd >= 0) close(fd); unlink(path); ps1_free(m); ps1_free(other); return 1; }
     uint8_t s[2352], r[16]; int written = 1;
@@ -140,7 +140,7 @@ int main(void) {
     send(m, 0x19, (const uint8_t[]){0x05}, 1);
     CHECK(wait_int(m) == 3 && response(m, r) == 2 && r[0] == 1 && r[1] == 1, "Test 05h: one SCEx string read, and it matched"); ack(m);
 
-    char bare[] = "/tmp/ps1native-unlicensed-XXXXXX.bin"; fd = mkstemps(bare, 4); f = fd < 0 ? NULL : fdopen(fd, "wb");
+    char bare[] = "/tmp/muyiunative-unlicensed-XXXXXX.bin"; fd = mkstemps(bare, 4); f = fd < 0 ? NULL : fdopen(fd, "wb");
     int ready = f != NULL;
     for (int n = 0; ready && n < SECTORS; n++) { sector(s, n); if (n == 4) memset(s + 24, 0, 2048); ready = fwrite(s, 1, sizeof s, f) == sizeof s; }
     if (f && fclose(f)) ready = 0; else if (!f && fd >= 0) close(fd);
@@ -152,7 +152,7 @@ int main(void) {
     mode(other, 1); locate(other, 0); read_start(other, 0x06); request(other);
     CHECK(payload(other, 0), "with CDDA mode on, the unlicensed disc reads"); ack(other);
 
-    char mode1[] = "/tmp/ps1native-mode1-XXXXXX.bin"; fd = mkstemps(mode1, 4); f = fd < 0 ? NULL : fdopen(fd, "wb");
+    char mode1[] = "/tmp/muyiunative-mode1-XXXXXX.bin"; fd = mkstemps(mode1, 4); f = fd < 0 ? NULL : fdopen(fd, "wb");
     ready = f != NULL;
     for (int n = 0; ready && n < 5; n++) {
         sector(s, n); s[15] = 1;

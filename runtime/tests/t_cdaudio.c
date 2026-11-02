@@ -40,7 +40,7 @@ static void sector(uint8_t *s, int n) {
 }
 
 int main(void) {
-    char bin[] = "/tmp/ps1native-cdaudio-XXXXXX.bin", cue[sizeof bin + 4]; int fd = mkstemps(bin, 4); FILE *f = fd < 0 ? NULL : fdopen(fd, "wb");
+    char bin[] = "/tmp/muyiunative-cdaudio-XXXXXX.bin", cue[sizeof bin + 4]; int fd = mkstemps(bin, 4); FILE *f = fd < 0 ? NULL : fdopen(fd, "wb");
     uint8_t s[2352], r[16]; int ready = f != NULL;
     for (int n = 0; ready && n < SECTORS; n++) { sector(s, n); ready = fwrite(s, 1, sizeof s, f) == sizeof s; }
     if (f && fclose(f)) ready = 0; else if (!f && fd >= 0) close(fd);

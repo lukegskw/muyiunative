@@ -56,7 +56,7 @@ def main():
     r, _ = step('building the host, with OpenBIOS as native code', ['make', '-C', MAC])
     if r.returncode: raise SystemExit('native_game: the host does not build')
     r, t = step(f'running the route, {frames} frames, the game interpreted, capturing what it runs',
-                [MAC / 'build' / 'ps1native', *route, '--capture', GEN / 'game.cap', '--png', GEN / 'route.png'])
+                [MAC / 'build' / 'muyiunative', *route, '--capture', GEN / 'game.cap', '--png', GEN / 'route.png'])
     if r.returncode or not frame_hash(r): raise SystemExit('native_game: the interpreted route did not finish')
     route_hash = frame_hash(r)
     if a.frames is None and a.input is None and v.get('frame_hash_fnv1a64') and route_hash != v['frame_hash_fnv1a64']:
@@ -73,7 +73,7 @@ def main():
     parts = ' '.join(f'build/gen/{f.name}' for f in sorted(GEN.glob('game*.c')))
     r, _ = step('building the host with it', ['make', '-C', MAC, f'-j{os.cpu_count() or 4}', 'game', f'GAME_C={parts}'])
     if r.returncode: raise SystemExit('native_game: the game\'s host does not build')
-    game_host = MAC / 'build' / 'game' / 'ps1native'
+    game_host = MAC / 'build' / 'game' / 'muyiunative'
     r, _ = step('running the route in lockstep with an interpreting machine', [game_host, *route, '--lockstep'])
     if r.returncode or 'the machines agree' not in r.stdout or frame_hash(r) != route_hash:
         raise SystemExit('native_game: the native code and the interpreter differ on the route (the [RED] line above says where)' if r.returncode == 3 else

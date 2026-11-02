@@ -15,7 +15,7 @@ int main(void) {
     for (unsigned i = 0; i < sizeof bad / sizeof *bad; i++) CHECK(front_input_add(&events, &n, &cap, bad[i]) == -1 && n == 2, "malformed inputs do not append an event");
     CHECK(!front_input_add(&events, &n, &cap, "10:ffff\r\n") && front_input_add(&events, &n, &cap, "9:0") == -1, "CRLF is accepted, unordered events are refused");
     free(events); events = NULL; n = cap = 0;
-    char path[] = "/tmp/ps1native-input-XXXXXX"; int fd = mkstemp(path); FILE *f = fd >= 0 ? fdopen(fd, "w") : NULL;
+    char path[] = "/tmp/muyiunative-input-XXXXXX"; int fd = mkstemp(path); FILE *f = fd >= 0 ? fdopen(fd, "w") : NULL;
     CHECK(f, "temporary replay file");
     if (f) {
         for (unsigned i = 0; i < 3000; i++) fprintf(f, "%u:%x\n", i, i & 1 ? 0x8000 : 0x20);

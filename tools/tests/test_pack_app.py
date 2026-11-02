@@ -28,7 +28,7 @@ class PackApp(unittest.TestCase):
         r = self.pack(app, '--name', 'Empty Game'); self.assertEqual(r.returncode, 0, r.stderr)
         info = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
         self.assertEqual((info['CFBundleExecutable'], info['CFBundleIdentifier'], info['LSMinimumSystemVersion'], info['CFBundlePackageType']),
-                         ('Empty Game', 'org.ps1native.empty-game', '14.0', 'APPL'))
+                         ('Empty Game', 'org.muyiunative.empty-game', '14.0', 'APPL'))
         self.assertTrue(os.access(app / 'Contents/MacOS/Empty Game', os.X_OK))
         self.assertEqual((app / 'Contents/PkgInfo').read_text(), 'APPL????')
         v = subprocess.run(['codesign', '--verify', '--strict', '--verbose=2', app], capture_output=True, text=True)

@@ -5,7 +5,7 @@
 # it from phase 5 on. A resource, file or folder, is copied into Contents/Resources under its own name.
 # The app is written to a unique temporary directory beside <out.app>, then moved into place, so a failed pack leaves the previous app as it was. An existing <out.app> is replaced only when it carries
 # the same bundle ID: the script never deletes an app it did not pack.
-# Usage: pack_app.py <out.app> --exe <host> [--resource <path>]... [--name ps1native] [--bundle-id org.ps1native.<name>] [--version 0.0] [--sign -]
+# Usage: pack_app.py <out.app> --exe <host> [--resource <path>]... [--name muyiunative] [--bundle-id org.muyiunative.<name>] [--version 0.0] [--sign -]
 import argparse, plistlib, re, shutil, subprocess, sys, tempfile
 from pathlib import Path
 from xml.parsers.expat import ExpatError
@@ -23,7 +23,7 @@ def min_os(exe):   # the deployment target the host was linked for: Info.plist s
     return m.group(1)
 
 
-def bundle_id(a): return a.bundle_id or 'org.ps1native.' + (re.sub(r'[^a-z0-9]+', '-', a.name.lower()).strip('-') or 'app')
+def bundle_id(a): return a.bundle_id or 'org.muyiunative.' + (re.sub(r'[^a-z0-9]+', '-', a.name.lower()).strip('-') or 'app')
 
 
 def info_plist(a, minos):
@@ -69,10 +69,10 @@ def pack(a):
 def parse(argv):
     ap = argparse.ArgumentParser(prog='pack_app.py', description='Pack and sign a Mac app of the host')
     ap.add_argument('out', help='the app (<name>.app)')
-    ap.add_argument('--exe', required=True, help='the host (shell/mac/build/ps1native)')
+    ap.add_argument('--exe', required=True, help='the host (shell/mac/build/muyiunative)')
     ap.add_argument('--resource', action='append', default=[], help='a file or folder for Contents/Resources (repeatable)')
-    ap.add_argument('--name', default='ps1native', help="the app's name, also its executable's (default: ps1native)")
-    ap.add_argument('--bundle-id', help='default: org.ps1native.<name>')
+    ap.add_argument('--name', default='muyiunative', help="the app's name, also its executable's (default: muyiunative)")
+    ap.add_argument('--bundle-id', help='default: org.muyiunative.<name>')
     ap.add_argument('--version', default='0.0')
     ap.add_argument('--sign', default='-', help='codesign identity (default: - = ad-hoc)')
     return ap.parse_args(argv)

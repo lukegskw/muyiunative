@@ -1,5 +1,5 @@
 name: Feature request
-description: Ask for something ps1native does not do yet
+description: Ask for something muyiunative does not do yet
 body:
   - type: markdown
     attributes:
@@ -16,6 +16,6 @@ body:
     id: proposal
     attributes:
       label: What you propose
-      description: How it could work, and the parts of ps1native it touches, if you know them.
+      description: How it could work, and the parts of muyiunative it touches, if you know them.
     validations:
       required: false

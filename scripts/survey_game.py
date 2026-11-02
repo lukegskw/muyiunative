@@ -26,7 +26,7 @@ def main():
     except ValueError as e: raise SystemExit(f'survey_game: invalid input: {e}') from e
     (out / 'route.inputs').write_text('\n'.join(inputs) + ('\n' if inputs else ''))
     route = ['--disc', a.disc, '--headless', '--frames', a.frames, '--input-file', out / 'route.inputs']
-    r, seconds = step(f'surveying {serial}, {a.frames} frames', [MAC / 'build' / 'ps1native', *route, '--capture', out / 'capture', '--png', out / 'last.png'], part='survey_game')
+    r, seconds = step(f'surveying {serial}, {a.frames} frames', [MAC / 'build' / 'muyiunative', *route, '--capture', out / 'capture', '--png', out / 'last.png'], part='survey_game')
     h = frame_hash(r)
     if r.returncode or not h: raise SystemExit('survey_game: the route did not finish')
     report = overlays.report(overlays.read(out / 'capture.blocks'))

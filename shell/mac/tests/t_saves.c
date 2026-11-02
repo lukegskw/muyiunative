@@ -16,7 +16,7 @@ static int byte(const char *path, int at) {
 }
 
 int main(void) {
-    char temp[] = "/tmp/ps1native-saves-XXXXXX"; char *root = mkdtemp(temp);
+    char temp[] = "/tmp/muyiunative-saves-XXXXXX"; char *root = mkdtemp(temp);
     ps1 *m = ps1_new(), *other = ps1_new(); front_saves s = {-1, -1}, t = {-1, -1};
     if (!root || !m || !other) { fputs("FAIL: cannot create save test\n", stderr); ps1_free(m); ps1_free(other); return 1; }
     char dir[256], first[256], second[256], lock[256], moved[256];
