@@ -15,6 +15,44 @@ static int write_all(void *ctx, const char *p, size_t n) {
     while (n) { ssize_t w = write(fd, p, n); if (w < 0 && errno == EINTR) continue; if (w <= 0) return -1; p += w; n -= (size_t)w; }
     return 0;
 }
+static const char omitted[] = "host: earlier log output omitted (10 MiB limit)\n";
+static int write_at(int fd, const char *bytes, size_t n, off_t offset) {
+    while (n) {
+        ssize_t w = pwrite(fd, bytes, n, offset);
+        if (w < 0 && errno == EINTR) continue;
+        if (w <= 0) return -1;
+        bytes += w; n -= (size_t)w; offset += w;
+    }
+    return 0;
+}
+static int compact(front_log *s) {
+    // Five files did not bound a long run's disk use. The approved 10 MiB cap keeps the header and newest records; compact a quarter at once, not on every write.
+    // Move forward in the same file, so compaction needs no second on-disk copy. A cut prefers a newline and otherwise skips UTF-8 continuation bytes.
+    size_t marker = sizeof omitted - 1, keep = (FRONT_LOG_LIMIT - s->header - marker) * 3 / 4;
+    off_t src = (off_t)(s->size - keep), dst = (off_t)(s->header + marker), end = (off_t)s->size; char bytes[4096];
+    ssize_t n; do { n = pread(s->file, bytes, sizeof bytes, src); } while (n < 0 && errno == EINTR);
+    if (n <= 0) return -1;
+    const char *newline = memchr(bytes, '\n', (size_t)n);
+    size_t skip = newline ? (size_t)(newline - bytes + 1) : 0;
+    if (!newline) while (skip < (size_t)n && ((unsigned char)bytes[skip] & 0xc0) == 0x80) skip++;
+    src += (off_t)skip;
+    if (write_at(s->file, omitted, marker, (off_t)s->header)) return -1;
+    while (src < end) {
+        size_t want = end - src < (off_t)sizeof bytes ? (size_t)(end - src) : sizeof bytes;
+        n = pread(s->file, bytes, want, src);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) return -1;
+        if (write_at(s->file, bytes, (size_t)n, dst)) return -1;
+        src += n; dst += n;
+    }
+    if (ftruncate(s->file, dst) || lseek(s->file, dst, SEEK_SET) < 0) return -1;
+    s->size = (size_t)dst; s->truncated = 1; return 0;
+}
+static int write_bounded(void *ctx, const char *bytes, size_t n) {
+    front_log *s = ctx;
+    if (s->failed || (s->size + n > FRONT_LOG_LIMIT && compact(s)) || write_all(&s->file, bytes, n)) return -1;
+    s->size += n; return 0;
+}
 int front_log_filter_write(front_log_filter *f, const char *bytes, size_t n, int final, front_log_output output, void *ctx) {
     char out[4096]; size_t used = 0, home = strlen(f->home);
     if (home >= sizeof f->pending) return -1;
@@ -38,9 +76,9 @@ static void *read_log(void *arg) {
         ssize_t n = read(s->read, bytes, sizeof bytes);
         if (n < 0 && errno == EINTR) continue;
         if (n <= 0) { if (n < 0) s->failed = 1; break; }
-        if (front_log_filter_write(&f, bytes, (size_t)n, 0, write_all, &s->file)) s->failed = 1;
+        if (front_log_filter_write(&f, bytes, (size_t)n, 0, write_bounded, s)) s->failed = 1;
     }
-    if (front_log_filter_write(&f, NULL, 0, 1, write_all, &s->file)) s->failed = 1;
+    if (front_log_filter_write(&f, NULL, 0, 1, write_bounded, s)) s->failed = 1;
     return NULL;
 }
 static int log_name(const struct dirent *d) { size_t n = strlen(d->d_name); return !strncmp(d->d_name, "run-", 4) && n > 8 && !strcmp(d->d_name + n - 4, ".log"); }
@@ -55,7 +93,7 @@ static int rotate(const char *directory) {
 }
 int front_log_start(front_log *s, const char *directory, const char *home, const char *header) {
     *s = (front_log){.file = -1, .read = -1, .saved = {-1, -1}};
-    if (strlen(home) >= sizeof s->home) return -1;
+    if (strlen(home) >= sizeof s->home || strlen(header) > FRONT_LOG_LIMIT / 2) return -1;
     strcpy(s->home, home);
     struct timespec now; struct tm utc; char stamp[32];
     if (clock_gettime(CLOCK_REALTIME, &now) || !gmtime_r(&now.tv_sec, &utc) || !strftime(stamp, sizeof stamp, "%Y%m%dT%H%M%S", &utc)) return -1;
@@ -65,7 +103,9 @@ int front_log_start(front_log *s, const char *directory, const char *home, const
     if (s->file < 0) goto fail;
     fcntl(s->file, F_SETFD, FD_CLOEXEC);
     front_log_filter f = {.home = s->home};
-    if (front_log_filter_write(&f, header, strlen(header), 1, write_all, &s->file) || pipe(pipefd)) goto fail;
+    if (front_log_filter_write(&f, header, strlen(header), 1, write_all, &s->file)) goto fail;
+    off_t header_size = lseek(s->file, 0, SEEK_CUR); if (header_size < 0 || pipe(pipefd)) goto fail;
+    s->header = s->size = (size_t)header_size;
     s->read = pipefd[0]; fcntl(s->read, F_SETFD, FD_CLOEXEC); fcntl(pipefd[1], F_SETFD, FD_CLOEXEC);
     fflush(NULL);
     for (int i = 0; i < 2; i++) { s->saved[i] = dup(i + 1); if (s->saved[i] < 0) goto fail; fcntl(s->saved[i], F_SETFD, FD_CLOEXEC); }

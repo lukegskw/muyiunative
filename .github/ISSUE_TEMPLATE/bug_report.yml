@@ -70,7 +70,8 @@ body:
       label: Logs
       description: |
         Report a Problem reveals the current run's log in Finder; review it for personal information and game data before attaching. Logs from Finder launches are in
-        ~/Library/Logs/muyiunative/<bundle id>/ (last five runs; home paths are replaced with ~). From a terminal,
+        ~/Library/Logs/muyiunative/<bundle id>/ (last five runs, 10 MiB each; home paths are replaced with ~). A full log keeps its header and recent output.
+        Include Game Debug Output in the app menu enables guest debug text for this session when needed. From a terminal,
         `shell/mac/build/muyiunative.app/Contents/MacOS/muyiunative 2>&1 | tee run.log` keeps it in run.log. For a build failure, the build's full output.
     validations:
       required: true

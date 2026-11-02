@@ -6,6 +6,7 @@
 #include <string.h>
 #include "build.h"
 #include "product.h"
+#include "report.h"
 
 static NSString *tool_output(NSString *exe, NSArray<NSString *> *arguments) {
     NSTask *task = [NSTask new]; NSPipe *pipe = NSPipe.pipe;
@@ -44,6 +45,8 @@ static NSString *tool_output(NSString *exe, NSArray<NSString *> *arguments) {
     [w center]; return self;
 }
 - (void)appendLine:(NSData *)data {
+    // The headless child retains its normal stdout; only the Finder build window/reporting applies the session's guest-text choice.
+    if (data.length >= 5 && !memcmp(data.bytes, "tty: ", 5) && !front_reports_guest_output()) return;
     NSString *text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: [[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding];
     text = [text stringByReplacingOccurrencesOfString:NSHomeDirectory() withString:@"~"];
     // The visual check showed black default attributed text on a dark background. Give appended lines the view's font and the system's adaptive text color.

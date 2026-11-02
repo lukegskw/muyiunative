@@ -21,6 +21,38 @@ static int count_logs(const char *directory) {
     while ((entry = readdir(d))) if (!strncmp(entry->d_name, "run-", 4)) n++;
     closedir(d); return n;
 }
+static int utf8(const unsigned char *p, size_t n) {
+    for (size_t i = 0; i < n;) {
+        unsigned char c = p[i++]; int more = c < 0x80 ? 0 : c >= 0xc2 && c <= 0xdf ? 1 : c >= 0xe0 && c <= 0xef ? 2 : c >= 0xf0 && c <= 0xf4 ? 3 : -1;
+        if (more < 0 || i + (size_t)more > n) return 0;
+        while (more--) if ((p[i++] & 0xc0) != 0x80) return 0;
+    }
+    return 1;
+}
+static void bounded(const char *directory, int lines) {
+    const char *header = "host: synthetic log identity\n", *end = "NEWEST-END\n";
+    front_log s; int r = front_log_start(&s, directory, "/Users/Example", header);
+    CHECK(!r, "create bounded-log test run"); if (r) return;
+    char chunk[4095];
+    for (size_t i = 0; i < sizeof chunk; i += 3) memcpy(chunk + i, "猫", 3);
+    if (lines) chunk[sizeof chunk - 3] = chunk[sizeof chunk - 2] = chunk[sizeof chunk - 1] = '\n';
+    fputs("OLDEST-START\n", stdout);
+    int written = 1;
+    for (size_t n = 0; n < 2 * FRONT_LOG_LIMIT; n += sizeof chunk) if (fwrite(chunk, 1, sizeof chunk, stdout) != sizeof chunk) { written = 0; break; }
+    fputs(end, stdout); front_log_stop(&s);
+    CHECK(written && !s.failed && s.truncated, "repeated compaction drains the streams without a write failure");
+    struct stat st; r = stat(s.path, &st);
+    CHECK(!r && st.st_size <= FRONT_LOG_LIMIT, "one run never exceeds the approved 10 MiB bound");
+    size_t size = !r ? (size_t)st.st_size : 0; char *bytes = malloc(size + 1); FILE *f = fopen(s.path, "r");
+    size_t got = bytes && f ? fread(bytes, 1, size, f) : 0; if (f) fclose(f);
+    if (bytes) bytes[got] = 0;
+    CHECK(bytes && got == size && !strncmp(bytes, header, strlen(header)), "compaction preserves the identity header");
+    const char *marker = bytes ? strstr(bytes, "host: earlier log output omitted (10 MiB limit)\n") : NULL;
+    CHECK(marker && !strstr(marker + 1, "host: earlier log output omitted"), "one marker reports omitted output after repeated compaction");
+    CHECK(bytes && !strstr(bytes, "OLDEST-START") && got >= strlen(end) && !strcmp(bytes + got - strlen(end), end), "newest records replace the oldest output");
+    CHECK(bytes && utf8((const unsigned char *)bytes, got), lines ? "record-boundary cuts preserve UTF-8" : "cuts inside a very long line preserve UTF-8 codepoints");
+    free(bytes);
+}
 int main(void) {
     const char *home = "/Users/Ó Name", *input = "host: /Users/Ó Name/a /Users/Ó Name\n/Users/Ó Nam";
     const char *expected = "host: ~/a ~\n/Users/Ó Nam";
@@ -61,6 +93,8 @@ int main(void) {
     CHECK(front_log_start(&failed, "/nonexistent/muyiunative/logs", home, "header\n") == -1 && !failed.path[0], "creation failure leaves the output descriptors usable and no bogus log path");
     CHECK(fcntl(STDOUT_FILENO, F_GETFD) >= 0 && fcntl(STDERR_FILENO, F_GETFD) >= 0, "original output streams are restored after success and failure");
     front_log_stop(&failed);
+    bounded(directory, 1); bounded(directory, 0);
+    CHECK(count_logs(directory) == 5, "bounded runs still share the five-run retention policy");
     DIR *d = opendir(directory); struct dirent *entry;
     if (d) { while ((entry = readdir(d))) if (entry->d_name[0] != '.') { char path[PATH_MAX]; snprintf(path, sizeof path, "%s/%s", directory, entry->d_name); unlink(path); } closedir(d); }
     rmdir(directory);

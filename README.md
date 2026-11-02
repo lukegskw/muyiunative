@@ -12,7 +12,9 @@ The Mac preview is in preparation (phase 7 of [the plan](plan.md#4-phases-and-ex
 
 You need **Apple silicon and macOS 14 or later**. Intel Macs, iPhone and older macOS versions are not supported yet. Building a game app needs Apple's free Command Line Tools; playing a completed app needs no developer tools. Bring a `.cue`/`.bin` dump of your own PS1 disc. A CUE and all the track files it references must stay together; compressed formats such as CHD are not accepted.
 
-There is no published launcher download yet. Until one appears on [Releases](https://github.com/lukegskw/muyiunative/releases), use the [source build](#build-from-the-command-line). Download installation and macOS security prompts will be documented with the chosen release format. Keep generated game apps on your Mac: they contain a copy of your disc and cannot be redistributed.
+The 0.7.0 preview is being prepared as a Developer ID-signed, Apple-notarized ZIP. There is no published launcher download yet; until one appears on [Releases](https://github.com/lukegskw/muyiunative/releases), use the [source build](#build-from-the-command-line). The repository and initial download validation remain private until the player check succeeds.
+
+When the preview is available, download its Mac ZIP from Releases, double-click the ZIP in Finder, and move `muyiunative.app` to your Applications folder. Open it and accept macOS's normal first-launch confirmation. The download carries its notarization ticket; it does not require your own Apple Developer account. If macOS reports an invalid signature, damaged app or failed verification, report that failure before proceeding. Choose **Build Game App…** to use your own disc. Keep generated game apps on your Mac: they contain a copy of your disc and cannot be redistributed.
 
 ## Compatibility
 
@@ -74,7 +76,9 @@ Game apps connect two memory cards and save them in `~/Library/Application Suppo
 
 Choose **About muyiunative…** in the app menu to see its version, build number and commit. The preview version is 0.7.0; the build number counts commits in the complete Git history. Every packed app carries this information, including game apps.
 
-Apps opened from Finder save their output under `~/Library/Logs/muyiunative/<bundle id>/`, keeping the last five runs for that app. Logs start with the version and commit, and replace your home directory in paths with `~`. **Report a Problem…** reveals the current log in Finder and opens the bug form with the version, commit, Mac model, macOS version, game serial and current renderer filled in. Describe the problem and review the log for personal information and game data before attaching and submitting it yourself. Other paths and guest text can remain, and a single run's log has no size limit yet. Nothing is uploaded automatically. Never attach a disc, BIOS dump, memory card, save state, generated code or game app.
+Apps opened from Finder save their output under `~/Library/Logs/muyiunative/<bundle id>/`, keeping the last five runs for that app. Each run is limited to 10 MiB; when full, the log preserves its version/commit header and recent output, with a marker where earlier output was omitted. Logs replace your home directory in paths with `~`. Errors and host/build information are enabled by default. **Include Game Debug Output** in the app menu enables the game's `tty:` text for the current session, including in the launcher's build window; it starts disabled on the next Finder launch.
+
+**Report a Problem…** reveals the current log in Finder and opens the bug form with the version, commit, Mac model, macOS version, game serial and current renderer filled in. Describe the problem and review the log for personal information and game data before attaching and submitting it yourself. Other paths and enabled guest text can remain. Nothing is uploaded automatically. Never attach a disc, BIOS dump, memory card, save state, generated code or game app.
 
 Terminal sessions keep their normal output; copy it for a report. Headless build and validation runs also keep stdout/stderr and create no persistent logs. An app started from a terminal with both streams redirected uses a log instead. A developer host using an external disc leaves the serial field empty; bundled game apps fill it from their metadata.
 
