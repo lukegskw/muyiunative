@@ -61,3 +61,19 @@ Ask the user to complete this check on the Mac with their own disc:
 Only after this succeeds, record the date, source commit, game and checked behavior in [plan.md §4](../plan.md#4-phases-and-exit-criteria) and [Development's phase-7 section](development.md#phase-7-the-public-preview). The user's earlier source-built-launcher checks do not substitute for a downloaded candidate.
 
 Before repository publication, repeat the [history audit](public-preview-audit.md) for the latest refs and release content, including the explicitly approved gallery image. Obtain the user's go for public visibility, private vulnerability reporting and `main` protection requiring all four CI checks. The release workflow never changes those settings itself.
+
+## Validated candidate
+
+On 2026-11-02, the real local signing/notarization pipeline passed on the M4 Pro with macOS 26.6.2:
+
+| Field                    | Value                                                              |
+| ------------------------ | ------------------------------------------------------------------ |
+| Source commit            | `4813e3b79adb`                                                     |
+| App identity             | 0.7.0 (build 64)                                                   |
+| Apple submission         | `0d644f1d-448b-45e6-b713-8f89681d042a`, Accepted                   |
+| Final launcher archive   | `muyiunative-0.7.0-mac-arm64.zip`                                  |
+| Final ZIP SHA-256        | `8608cf6a84cca176f1bc98df8b1a0ed4a8c31ecc06c49fe643ea8e765cd08a2f` |
+| Extracted-copy checks    | Signature, stapled ticket, Gatekeeper, kit integrity, bundled boot |
+| OpenBIOS 60-frame hash   | `49d1a17d49708cb1`                                                 |
+
+This is a private candidate built from the release implementation commit, before merging the tooling. It has not been published to GitHub Releases and does not complete the downloaded-launcher player check. The final release must identify its actual reviewed source commit and repeat the same packaging/validation flow; merging a later documentation or implementation commit does not silently retarget an existing archive.
