@@ -6,6 +6,7 @@
 #include "product.h"
 #include "ps1.h"
 #include "report.h"
+#include "build.h"
 
 static BOOL copy_string(char *out, size_t cap, id value) {
     if (![value isKindOfClass:NSString.class]) return NO;
@@ -49,6 +50,8 @@ void front_error(const char *message) {
 @end
 @implementation Launcher
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)app { (void)app; return YES; }
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)app { (void)app; return front_build_terminate() ? NSTerminateLater : NSTerminateNow; }
+- (void)build:(id)sender { (void)sender; front_build_game_app(); }
 - (void)launch:(NSURL *)url {
     NSBundle *bundle = [NSBundle bundleWithURL:url];
     if (![bundle.bundleIdentifier hasPrefix:@"org.muyiunative.game."]) { front_error("Choose a game app created by muyiunative build."); return; }
@@ -74,12 +77,14 @@ void front_launcher(void) {
     Launcher *l = [Launcher new]; l.prefs = [[NSUserDefaults alloc] initWithSuiteName:@"org.muyiunative"]; app.delegate = l;
     NSMenu *bar = [NSMenu new], *menu = [NSMenu new]; NSMenuItem *item = [NSMenuItem new];
     front_reports_menu((__bridge void *)menu);
+    [menu addItemWithTitle:@"Build Game App…" action:@selector(build:) keyEquivalent:@"n"].target = l;
     [menu addItemWithTitle:@"Open Game App…" action:@selector(open:) keyEquivalent:@"o"].target = l;
     [menu addItemWithTitle:@"Quit muyiunative" action:@selector(terminate:) keyEquivalent:@"q"]; item.submenu = menu; [bar addItem:item]; app.mainMenu = bar;
-    l.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 520, 270) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable backing:NSBackingStoreBuffered defer:NO];
+    l.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 520, 310) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable backing:NSBackingStoreBuffered defer:NO];
     l.window.title = @"muyiunative"; l.window.releasedWhenClosed = NO;
-    NSTextField *title = [NSTextField labelWithString:@"Your PlayStation games on the Mac"]; title.font = [NSFont boldSystemFontOfSize:21]; title.frame = NSMakeRect(24, 210, 475, 32); [l.window.contentView addSubview:title];
-    NSTextField *note = [NSTextField wrappingLabelWithString:@"Open a game app you built from your disc. To build one, run:\nmuyiunative build disc.cue --platform mac-app"]; note.frame = NSMakeRect(24, 134, 472, 64); [l.window.contentView addSubview:note];
+    NSTextField *title = [NSTextField labelWithString:@"Your PlayStation games on the Mac"]; title.font = [NSFont boldSystemFontOfSize:21]; title.frame = NSMakeRect(24, 252, 475, 32); [l.window.contentView addSubview:title];
+    NSTextField *note = [NSTextField wrappingLabelWithString:@"Build a native app from a CUE or BIN dump of your disc. Apple's free Command Line Tools are needed only when building."]; note.frame = NSMakeRect(24, 185, 472, 58); [l.window.contentView addSubview:note];
+    NSButton *build = [NSButton buttonWithTitle:@"Build Game App…" target:l action:@selector(build:)]; build.frame = NSMakeRect(24, 142, 190, 32); [l.window.contentView addSubview:build];
     l.recent = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 88, 470, 30) pullsDown:NO];
     for (NSString *path in [l.prefs stringArrayForKey:@"RecentGames"]) if ([NSFileManager.defaultManager fileExistsAtPath:path]) {
         [l.recent addItemWithTitle:path.lastPathComponent.stringByDeletingPathExtension]; l.recent.lastItem.representedObject = path;

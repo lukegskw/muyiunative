@@ -7,7 +7,9 @@
 # Opcodes: the next instruction runs first), at SYSCALL, BREAK or a reserved instruction, or where another block starts. The return address of a call and the
 # address after SYSCALL/BREAK start blocks too: native code is entered there again after a callee or an exception handler ran elsewhere (the interpreter, the BIOS).
 # Usage: python3 tools/analyze.py <file.exe|disc.cue> [--profile profiles/<serial>/game.toml] [--list]
-import argparse, sys, tomllib
+from __future__ import annotations
+import argparse, sys
+from profile_toml import tomllib
 from dataclasses import dataclass, field
 
 import exe, mips

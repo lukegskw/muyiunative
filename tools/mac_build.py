@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 # Phase 5's Mac product build, called by scripts/muyiunative: capture a route, compile its observed code, check it in lockstep, then pack a local game app. Disc files
 # and generated code stay in ignored build folders or the user's output app. Every build has its own workspace, so two discs cannot reuse each other's native code.
-import argparse, hashlib, plistlib, re, shutil, subprocess, sys, tempfile, tomllib
+import argparse, hashlib, plistlib, re, shutil, subprocess, sys, tempfile
 from pathlib import Path
 
 import disc, replay
 from pack_app import packed_id
+from profile_toml import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 MAC = ROOT / 'shell/mac'
@@ -54,11 +55,14 @@ def bundle_disc(source, dest):
 
 def run(label, command):
     print(f'build: {label}', flush=True)
-    r = subprocess.run([str(x) for x in command], cwd=MAC, capture_output=True, text=True)
-    for line in (r.stdout + r.stderr).splitlines():
-        if line.startswith(('host:', 'codegen:', '[RED]')) or 'warning:' in line: print(f'  {line}', flush=True)
-    if r.returncode: raise SystemExit(f'build: {label} failed ({r.returncode}): {(r.stderr or r.stdout)[-2000:]}')
-    return r.stdout
+    lines = []
+    with subprocess.Popen([str(x) for x in command], cwd=MAC, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors='replace') as process:
+        assert process.stdout is not None
+        for line in process.stdout:
+            print(line, end='', flush=True); lines.append(line)
+        result = process.wait()
+    if result: raise SystemExit(f'build: {label} failed ({result})')
+    return ''.join(lines)
 
 
 def frame_hash(output):
@@ -83,7 +87,9 @@ def build(a):
     work = Path(tempfile.mkdtemp(prefix=f'{p["serial"] or "homebrew"}-', dir=products)); b = work.relative_to(MAC); gen = work / 'gen'; gen.mkdir()
     print(f'build: {p["title"]}; capture route {p["route"]}, {p["frames"]} frames', flush=True)
     print(f'build: local build files in {work}', flush=True)
-    run('building the capture host', ['make', f'B={b}', '-j3', 'host'])
+    make = ['make', f'B={b}', f'PYTHON={sys.executable}', '-j3']
+    if (ROOT / 'build-kit.json').is_file(): make += ['PREBUILT_METALLIB=../../gfx/metal/ps1gpu.metallib']
+    run('building the capture host', [*make, 'host'])
     (gen / 'route.inputs').write_text('\n'.join(p['inputs']) + ('\n' if p['inputs'] else ''))
     route = ['--bios', ROOT / 'bios/openbios/openbios.bin', '--disc', source, '--headless', '--frames', p['frames'], '--input-file', gen / 'route.inputs']
     captured = run('capturing interpreted game code', [work / 'muyiunative', *route, '--capture', gen / 'game.cap'])
@@ -91,7 +97,7 @@ def build(a):
     if p['profile']: command += ['--profile', p['profile']]
     run('generating native code', command)
     parts = ' '.join(str(f.relative_to(MAC)) for f in sorted(gen.glob('game*.c')))
-    run('compiling native game code', ['make', f'B={b}', '-j3', 'game', f'GAME_C={parts}'])
+    run('compiling native game code', [*make, 'game', f'GAME_C={parts}'])
     native = run('checking the route against the interpreter', [work / 'game/muyiunative', *route, '--lockstep'])
     if 'the machines agree' not in native or frame_hash(native) != frame_hash(captured): raise SystemExit('build: native code differs from the interpreter; no app was packed')
     resources = work / 'resources'; resources.mkdir(); bundle_disc(source, resources / 'disc')

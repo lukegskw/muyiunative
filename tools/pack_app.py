@@ -6,7 +6,7 @@
 # The app is written to a unique temporary directory beside <out.app>, then moved into place, so a failed pack leaves the previous app as it was. An existing <out.app> is replaced only when it carries
 # the same bundle ID: the script never deletes an app it did not pack.
 # Usage: pack_app.py <out.app> --exe <host> [--resource <path>]... [--name muyiunative] [--bundle-id org.muyiunative.<name>] [--version 0.7.0] [--sign -]
-import argparse, plistlib, re, shutil, subprocess, sys, tempfile
+import argparse, ctypes, os, plistlib, re, shutil, signal, subprocess, sys, tempfile
 from pathlib import Path
 from xml.parsers.expat import ExpatError
 from version import metadata
@@ -40,6 +40,15 @@ def packed_id(app):   # the bundle ID of an existing app; None when it is not on
     except (OSError, ValueError, ExpatError): return None
 
 
+def replace_directory(staged, out):
+    # The former rmtree(out) then rename(staged) left a cancellation window with no app at out. Darwin renamex_np(RENAME_SWAP) commits both names atomically.
+    if not out.exists(): staged.rename(out); return
+    libc = ctypes.CDLL(None, use_errno=True); rename = libc.renamex_np
+    rename.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]; rename.restype = ctypes.c_int
+    if rename(os.fsencode(staged), os.fsencode(out), 2):
+        error = ctypes.get_errno(); raise OSError(error, os.strerror(error))
+
+
 def pack(a):
     out, exe = Path(a.out).resolve(), Path(a.exe).resolve()
     if out.suffix != '.app': raise SystemExit(f'the output must end in .app: {out}')
@@ -63,8 +72,7 @@ def pack(a):
         (c / 'Info.plist').write_bytes(plistlib.dumps(info_plist(a, minos)))
         (c / 'PkgInfo').write_text('APPL????')
         run(['codesign', '--force', '--options', 'runtime', '--sign', a.sign, tmp])
-        if out.exists(): shutil.rmtree(out)
-        tmp.rename(out)
+        replace_directory(tmp, out)
     finally: shutil.rmtree(tmp, ignore_errors=True)
     print(f'app: {out}', flush=True)
 
@@ -82,4 +90,6 @@ def parse(argv):
 
 
 if __name__ == '__main__':
+    def cancelled(signum, frame): raise SystemExit('pack: cancelled')
+    signal.signal(signal.SIGTERM, cancelled)
     pack(parse(sys.argv[1:]))

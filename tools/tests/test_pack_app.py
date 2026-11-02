@@ -2,13 +2,13 @@
 that codesign verifies, resources (a file and a folder) inside the signed bundle, a second pack over the first, and its refusals: an output that is not an .app, a missing
 resource, and an existing app with another bundle ID, which stays as it was.
 Needs Xcode's command-line tools (clang, otool, codesign); no game files."""
-import os, plistlib, re, shutil, subprocess, sys, tempfile, unittest
+import argparse, os, plistlib, re, shutil, subprocess, sys, tempfile, unittest
 from pathlib import Path
 from unittest.mock import patch
 
 PACK = Path(__file__).resolve().parents[1] / 'pack_app.py'
 sys.path.insert(0, str(PACK.parent))
-import version
+import pack_app, version
 
 
 class Version(unittest.TestCase):
@@ -70,6 +70,21 @@ class PackApp(unittest.TestCase):
         app = self.tmp / 'Version.app'; r = self.pack(app, '--version', '1.2.3'); self.assertEqual(r.returncode, 0, r.stderr)
         info = plistlib.loads((app / 'Contents/Info.plist').read_bytes()); _, build, commit = version.metadata()
         self.assertEqual((info['CFBundleShortVersionString'], info['CFBundleVersion'], info['MuyiunativeCommit']), ('1.2.3', build, commit))
+
+    def test_cancelled_pack_preserves_the_previous_app(self):
+        app = self.tmp / 'Cancel.app'; r = self.pack(app, '--name', 'Cancel'); self.assertEqual(r.returncode, 0, r.stderr)
+        old = (app / 'Contents/Info.plist').read_bytes()
+        args = argparse.Namespace(out=app, exe=self.exe, name='Cancel', bundle_id=None, resource=[], version=None, sign='-')
+        with patch('pack_app.shutil.copyfile', side_effect=SystemExit('pack: cancelled')):
+            with self.assertRaisesRegex(SystemExit, 'cancelled'): pack_app.pack(args)
+        self.assertEqual((app / 'Contents/Info.plist').read_bytes(), old); self.assertFalse(list(self.tmp.glob('Cancel.app.partial-*')))
+        subprocess.run(['codesign', '--verify', '--strict', app], check=True, capture_output=True)
+
+    def test_directory_commit_swaps_both_names_atomically(self):
+        staged, out = self.tmp / 'new-directory', self.tmp / 'old-directory'; staged.mkdir(); out.mkdir()
+        (staged / 'new').write_text('new'); (out / 'old').write_text('old')
+        pack_app.replace_directory(staged, out)
+        self.assertEqual((out / 'new').read_text(), 'new'); self.assertEqual((staged / 'old').read_text(), 'old')
 
     def test_refuses_an_output_that_is_not_an_app(self):
         r = self.pack(self.tmp / 'Empty')

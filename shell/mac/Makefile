@@ -10,10 +10,12 @@ RT = ../../runtime
 GFX = ../../gfx/metal
 BIOS = ../../bios/openbios
 TOOLS = ../../tools
+PYTHON ?= python3
+PREBUILT_METALLIB ?=
 LIB = $(GEN)/ps1gpu.metallib
 RTSRC = $(sort $(wildcard $(RT)/*.c))
-SRC = main.c front_mac.m keyboard.m product.m reports.m log.c report.c saves.c $(GFX)/present.m $(GFX)/renderer.m $(RTSRC) $(GEN)/openbios.c
-HDR = front.h audio.h controllers.h input.h keys.h keyboard.h product.h log.h report.h saves.h $(GEN)/version.h $(GFX)/present.h $(GFX)/renderer.h $(wildcard $(RT)/*.h)
+SRC = main.c front_mac.m keyboard.m product.m build.m reports.m log.c report.c saves.c $(GFX)/present.m $(GFX)/renderer.m $(RTSRC) $(GEN)/openbios.c
+HDR = front.h audio.h build.h controllers.h input.h keys.h keyboard.h product.h log.h report.h saves.h $(GEN)/version.h $(GFX)/present.h $(GFX)/renderer.h $(wildcard $(RT)/*.h)
 CODEGEN = $(TOOLS)/codegen.py $(TOOLS)/analyze.py $(TOOLS)/mips.py $(TOOLS)/exe.py $(TOOLS)/overlays.py
 CFLAGS = -arch arm64 -mmacosx-version-min=$(MINOS) -O2 -g -Wall -Wextra -fobjc-arc -I$(RT) -I$(GFX) -I$(GEN)
 FRAMEWORKS = -framework AppKit -framework QuartzCore -framework Metal -framework CoreGraphics -framework ImageIO -framework AudioToolbox -framework UniformTypeIdentifiers -framework GameController
@@ -22,7 +24,7 @@ FRAMEWORKS = -framework AppKit -framework QuartzCore -framework Metal -framework
 host: $(B)/muyiunative
 
 $(GEN)/version.h: FORCE $(TOOLS)/version.py
-	python3 $(TOOLS)/version.py --header $@
+	"$(PYTHON)" $(TOOLS)/version.py --header $@
 
 FORCE:
 
@@ -39,7 +41,13 @@ $(GEN)/openbios.cap.txt: $(B)/capture $(BIOS)/openbios.bin
 	$(B)/capture $(BIOS)/openbios.bin 60 $(GEN)/openbios.cap
 
 $(GEN)/openbios.c: $(GEN)/openbios.cap.txt $(CODEGEN)
-	python3 $(TOOLS)/codegen.py $(BIOS)/openbios.bin --bios --capture $(GEN)/openbios.cap --name openbios -o $@
+	"$(PYTHON)" $(TOOLS)/codegen.py $(BIOS)/openbios.bin --bios --capture $(GEN)/openbios.cap --name openbios -o $@
+
+ifneq ($(PREBUILT_METALLIB),)
+$(LIB): $(PREBUILT_METALLIB)
+	@mkdir -p $(@D)
+	cp "$<" "$@"
+else
 
 $(GEN)/%.air: $(GFX)/%.metal $(RT)/render.h Makefile
 	@mkdir -p $(@D)
@@ -47,6 +55,7 @@ $(GEN)/%.air: $(GFX)/%.metal $(RT)/render.h Makefile
 
 $(LIB): $(GEN)/renderer.air $(GEN)/display.air
 	xcrun -sdk macosx metallib $^ -o $@
+endif
 
 # A game's host (scripts/native_game.py): GAME_C is the native code tools/codegen.py wrote for it, set native_game, in build/gen: one file, or the tables and the files of
 # functions it was split into, each compiled on its own (make -j). It goes to build/game, apart from the host above, and like the C it is built from it holds the game's
@@ -64,7 +73,8 @@ $(B)/game/muyiunative: $(SRC) $(HDR) $(GAME_O) Makefile | $(LIB)
 	clang $(CFLAGS) -DNATIVE_GAME -o $@ $(SRC) $(GAME_O) $(FRAMEWORKS)
 
 app: $(B)/muyiunative $(wildcard $(BIOS)/*)
-	python3 ../../tools/pack_app.py $(B)/muyiunative.app --exe $(B)/muyiunative --resource $(BIOS) --resource $(LIB)
+	"$(PYTHON)" $(TOOLS)/build_kit.py $(B)/BuildKit --metallib $(LIB)
+	"$(PYTHON)" $(TOOLS)/pack_app.py $(B)/muyiunative.app --exe $(B)/muyiunative --resource $(BIOS) --resource $(LIB) --resource $(B)/BuildKit
 
 clean:
 	rm -rf $(B)
