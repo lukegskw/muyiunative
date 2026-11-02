@@ -6,7 +6,7 @@ The aim is native code, not emulation: the game's MIPS code is translated to C a
 
 ## Status
 
-Phase 6 of [the plan](plan.md#4-phases-and-exit-criteria) adds independent Metal rendering at 1×, 2× and 4×. Native Metal VRAM and texture caches match the software renderer throughout Metal Slug X (USA)'s first mission. The software renderer remains the default and the console reference; higher-resolution Metal output retains that CPU work ([Development](docs/development.md#phase-6-the-metal-renderer)). Game apps include a launcher, persistent memory cards and keyboard remapping. Broader compatibility, audible game output and hardware-timing accuracy remain open.
+Phase 6 of [the plan](plan.md#4-phases-and-exit-criteria) adds independent Metal rendering at 1×, 2× and 4×. Native Metal VRAM and texture caches match the software renderer throughout Metal Slug X (USA)'s first mission. The software renderer remains the default and the console reference; higher-resolution Metal output retains that CPU work ([Development](docs/development.md#phase-6-the-metal-renderer)). Phase 7, the Mac public preview, is in progress: game apps now support two controllers, alongside the launcher, persistent memory cards and keyboard remapping. Building from the launcher, problem reports and a downloadable preview remain to come. Broader compatibility, audible game output and hardware-timing accuracy remain open.
 
 ## Build from the command line
 
@@ -49,6 +49,20 @@ scripts/muyiunative build /external/path/disc.cue --platform mac-app --renderer 
 ```
 
 The shader library is built and bundled with the app; playing needs no compiler. Headless runs default to software for reproducible validation. Developers can use `--renderer metal --scale 1 --verify-renderer` to compare native Metal VRAM and caches against software every frame ([Development](docs/development.md#phase-6-the-metal-renderer)).
+
+### Controllers
+
+Connect a macOS-supported extended gamepad over USB, or pair it in System Settings → Bluetooth. Game apps use Apple's GameController framework for wired and wireless input. The keyboard and first controller share port 1; a second controller uses port 2. Controllers can connect and disconnect during play. A remaining controller keeps its port; another controller fills the first vacant port. When the game window loses focus, both ports release their buttons until it regains focus.
+
+| Controller control             | PlayStation button                |
+| ------------------------------ | --------------------------------- |
+| South / East / West / North     | Cross / Circle / Square / Triangle |
+| Left / Right shoulder          | L1 / R1                           |
+| Left / Right trigger           | L2 / R2                           |
+| Menu / Options                 | Start / Select                    |
+| D-pad or left stick            | Up / Left / Down / Right          |
+
+Face buttons follow their positions rather than their printed letters. The left stick becomes digital at ±0.5 on each axis; triggers activate at 0.5. D-pad and stick directions combine. A controller without an Options button can use the keyboard's Select binding on port 1. Physical wired/wireless play and two-player hardware checks are still pending ([Development](docs/development.md#phase-7-the-public-preview)).
 
 ### Keyboard controls
 

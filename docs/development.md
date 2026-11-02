@@ -9,7 +9,7 @@
 | Runtime      | `runtime/` (C)                            | compiled into the host                                    | Interpreter, memory/COP0, interrupts, timers, DMA, software GPU, GTE, SPU, MDEC, external CUE/BIN discs with CD audio, digital pads and memory-card protocols |
 | BIOS         | `bios/openbios/`                          | built from nugget's source, then committed (its README)   | OpenBIOS with its shell, which boots in phase 1                                                                                                               |
 | Presentation | `gfx/metal/` (Objective-C, Metal)         | host plus offline `.metallib`                             | Independent integer Metal rendering at 1×/2×/4× and frame presentation; software VRAM remains the console reference                                           |
-| Mac host     | `shell/mac/` (C and Objective-C, AppKit)  | `make -C shell/mac` → `shell/mac/build/muyiunative`       | Machine thread, Metal presentation, remappable keyboard pad, persistent cards and stereo Audio Queue output; headless inputs and PNG capture                  |
+| Mac host     | `shell/mac/` (C and Objective-C, AppKit)  | `make -C shell/mac` → `shell/mac/build/muyiunative`       | Machine thread, Metal presentation, remappable keyboard and two gamepads, persistent cards and stereo Audio Queue output; headless inputs and PNG capture |
 | Mac app      | `tools/mac_build.py`, `tools/pack_app.py` | `scripts/muyiunative build disc.cue --platform mac-app`   | Native game app with a bundled local disc, or `make -C shell/mac app` for the launcher; ad-hoc signed with the hardened runtime                               |
 | Recompiler   | `tools/` (Python)                         | run on the Mac: `python3 tools/codegen.py`                | Reads PS-X EXEs, decodes MIPS I, finds functions and blocks, and writes them as C the runtime runs natively, including captured code versions (phases 3–4)    |
 
@@ -25,7 +25,7 @@ Default tests need no game files, retail BIOS or GPU: they build their inputs in
 | ------------------------------------------------------------------ | -------------------------------------------------------------------------- |
 | Runtime unit tests, and OpenBIOS booted to its shell (`t_boot`)    | `make -C runtime/tests run`                                                |
 | The same under ASan and UBSan, in a build folder of their own      | `make -C runtime/tests asan`                                               |
-| Mac host keyboard, replay, audio policy and saves                  | `make -C shell/mac/tests run`                                              |
+| Mac host keyboard, controllers, replay, audio policy and saves     | `make -C shell/mac/tests run`                                              |
 | The same Mac host tests under ASan and UBSan                       | `make -C shell/mac/tests asan`                                             |
 | Tool and script tests, the docs' links and AGENTS.md's length      | `python3 -m unittest discover -s tools/tests -v`                           |
 | The app                                                            | `make -C shell/mac app && open shell/mac/build/muyiunative.app`            |
@@ -214,6 +214,16 @@ An initial playback retry was blocked by AudioQueueStart failures even in the fr
 | Results [22700, 22820)  | 7.36 ms                      | 2                      |
 
 Warmup and measured playback both had no empty-queue observations, post-prime padding, dropped/reordered samples or source mismatches. Every returned buffer refilled before the next callback, within the roughly 23.22 ms covered by two queued buffers. All 480 per-frame audio hashes, all three window display hashes and all three native VRAM/cache comparisons match the baseline. The results window contains audible source data throughout. These checks cover the three warmed windows, rather than claiming whole-route live audio validation or broader SPU accuracy. Runtime tests pass normally and under ASan/UBSan, as do the 58 Python tests; the signed bundled app is also checked independently of the checkout's working directory.
+
+### Phase 7: the public preview
+
+The controller part uses GameController.framework for macOS-supported wired and wireless extended gamepads, including devices already connected at startup. Connection notifications retain at most two active devices, with a waiting device filling a vacancy without moving the remaining player. [controllers.h](../shell/mac/controllers.h) keeps the positional mapping, inclusive 0.5 stick/trigger thresholds, port assignment and focus policy in plain C. `t_controllers` checks each button, threshold boundaries, combined directions, independent states, keyboard/controller overlap, disconnect/reconnect and input suppression while unfocused, plain and under ASan/UBSan; it needs no Apple frameworks or physical devices.
+
+The main thread owns connection notifications and focus changes. A host-input lock protects retained devices and the C policy; no machine state crosses threads. At each machine-thread frame boundary, [front_mac.m](../shell/mac/front_mac.m) captures immutable extended-gamepad profiles ([Apple's capture API](https://developer.apple.com/documentation/gamecontroller/gcphysicalinputprofile/capture())). The keyboard and first controller combine on port 1; port 2 is disconnected without a second controller. `main.c` supplies the same pair to both machines when comparing them. Headless replay still drives only port 1 and leaves port 2 empty. Losing application focus or the game window's key status clears both ports, including while keyboard settings are open.
+
+On 2026-11-02, the M4 Pro on macOS 26.6.2 passes all 44 controller checks and the runtime and Mac host suites, plain and under ASan/UBSan. Sanitizer runs use the newer installed Command Line Tools (`DEVELOPER_DIR=/Library/Developer/CommandLineTools`, `B=build/clt`), because the selected Xcode's older ASan still deadlocks before `main`, as noted in phase 4. All 58 Python tests, pinned ruff/pyright, the signed arm64 app build and bundled 60-frame OpenBIOS boot pass. The app has the hardened runtime flag and builds without warnings.
+
+Physical wired/wireless checks, two-player play and the final phase-7 acceptance check are pending. A player must build a game app from a downloaded launcher without a terminal and play it with a controller; record the date, commit, game and checks here and in plan.md only after that check succeeds. No real disc is needed for the controller policy tests or the synthetic app tests.
 
 ## Continuous integration
 

@@ -4,6 +4,7 @@
 #import <ImageIO/ImageIO.h>
 #import <QuartzCore/CAMetalLayer.h>
 #import <AudioToolbox/AudioToolbox.h>
+#import <GameController/GameController.h>
 #include <os/lock.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -15,12 +16,17 @@
 #include "keyboard.h"
 #include "product.h"
 #include "audio.h"
+#include "controllers.h"
 
 static atomic_uint g_buttons;
 static atomic_bool g_stop, g_running;
 static atomic_int g_renderer;
 static NSMenu *g_graphics;
+static NSWindow *g_win;
 static BOOL g_quitting;
+static os_unfair_lock g_input_lock = OS_UNFAIR_LOCK_INIT;   // only host input; neither thread shares a ps1
+static front_controllers g_pads;
+static GCController *g_controllers[2];
 int front_stopping(void) { return atomic_load(&g_stop); }
 int front_renderer(void) { return atomic_load(&g_renderer); }
 static void graphics_state(void) {
@@ -37,7 +43,40 @@ static uint16_t key_event(NSEvent *e, int down) {
     return front_keyboard_event(e.keyCode, s.length ? [s characterAtIndex:0] : 0, down);
 }
 static void release_keys(void) { front_keyboard_reset(); atomic_store(&g_buttons, 0); }
-uint16_t front_buttons(void) { return (uint16_t)atomic_load(&g_buttons); }
+static void input_focus(int focused) {
+    release_keys(); os_unfair_lock_lock(&g_input_lock);
+    front_controllers_focus(&g_pads, focused); os_unfair_lock_unlock(&g_input_lock);
+}
+static uintptr_t controller_id(GCController *c) { return (uintptr_t)(__bridge void *)c; }
+static void controllers_changed(void) {
+    NSArray<GCController *> *available = GCController.controllers;
+    os_unfair_lock_lock(&g_input_lock);
+    for (int i = 0; i < 2; i++) if (g_controllers[i] && ![available containsObject:g_controllers[i]]) {
+        front_controller_disconnect(&g_pads, controller_id(g_controllers[i])); g_controllers[i] = nil;
+    }
+    for (GCController *c in available) if (c.extendedGamepad) {
+        int port = front_controller_connect(&g_pads, controller_id(c));
+        if (port >= 0) g_controllers[port] = c;
+    }
+    os_unfair_lock_unlock(&g_input_lock);
+}
+void front_buttons(front_pad pads[2]) {
+    @autoreleasepool {
+        os_unfair_lock_lock(&g_input_lock);
+        for (int i = 0; i < 2; i++) if (g_controllers[i]) {
+            // The old front_buttons() only returned keyboard port 1. Apple's GCPhysicalInputProfile.capture freezes a profile for multithreaded polling:
+            // capture here at the machine's frame boundary, rather than changing machine state from GameController callbacks on the main thread.
+            GCExtendedGamepad *g = [g_controllers[i].extendedGamepad capture];
+            front_controller_input in = {.south = g.buttonA.isPressed, .east = g.buttonB.isPressed, .west = g.buttonX.isPressed, .north = g.buttonY.isPressed,
+                .l1 = g.leftShoulder.isPressed, .r1 = g.rightShoulder.isPressed, .menu = g.buttonMenu.isPressed, .options = g.buttonOptions.isPressed,
+                .up = g.dpad.up.isPressed, .right = g.dpad.right.isPressed, .down = g.dpad.down.isPressed, .left = g.dpad.left.isPressed,
+                .l2 = g.leftTrigger.value, .r2 = g.rightTrigger.value, .x = g.leftThumbstick.xAxis.value, .y = g.leftThumbstick.yAxis.value};
+            front_controller_sample(&g_pads, controller_id(g_controllers[i]), in);
+        }
+        front_controllers_read(&g_pads, (uint16_t)atomic_load(&g_buttons), pads);
+        os_unfair_lock_unlock(&g_input_lock);
+    }
+}
 
 @interface FrontView : NSView
 @end
@@ -54,8 +93,13 @@ uint16_t front_buttons(void) { return (uint16_t)atomic_load(&g_buttons); }
 
 @implementation FrontApp
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)app { (void)app; return YES; }
-- (void)applicationDidResignActive:(NSNotification *)n { (void)n; release_keys(); }
-- (void)windowDidResignKey:(NSNotification *)n { (void)n; release_keys(); }
+- (void)applicationDidResignActive:(NSNotification *)n { (void)n; input_focus(0); }
+- (void)windowDidResignKey:(NSNotification *)n { (void)n; input_focus(0); }
+- (void)applicationDidBecomeActive:(NSNotification *)n { (void)n; input_focus(g_win.isKeyWindow); }
+- (void)windowDidBecomeKey:(NSNotification *)n { (void)n; input_focus(NSApp.isActive); }
+- (void)controllersChanged:(NSNotification *)n {
+    (void)n; if (NSThread.isMainThread) controllers_changed(); else dispatch_async(dispatch_get_main_queue(), ^{ controllers_changed(); });
+}
 - (BOOL)windowShouldClose:(NSWindow *)window { (void)window; [NSApp terminate:nil]; return NO; }
 - (void)keyboard:(id)sender { (void)sender; release_keys(); front_keyboard_settings(); }
 - (void)renderer:(NSMenuItem *)sender { release_keys(); front_renderer_set((int)sender.tag); }
@@ -77,7 +121,6 @@ typedef struct frame { uint32_t *px; size_t cap; int w, h; } frame;
 typedef struct job { void (*run)(void *); void *arg; } job;
 
 static FrontApp *g_app;   // NSApplication holds its delegate weakly
-static NSWindow *g_win;
 static os_unfair_lock g_lock = OS_UNFAIR_LOCK_INIT;   // guards g_new, g_fresh and the swap
 static frame g_new, g_shown;                          // the newest frame (the machine's thread writes it) and the one presented (main thread)
 static bool g_fresh;
@@ -186,6 +229,12 @@ void front_run(const char *title, void (*run)(void *arg), void *arg) {
     NSApplication *app = NSApplication.sharedApplication;
     front_keyboard_load(); atomic_store(&g_stop, false);
     g_app = [FrontApp new]; app.delegate = g_app;
+    // GCController.controllers includes already paired wired/wireless devices; connection notifications also promote a waiting third device into a vacant port.
+    GCController.shouldMonitorBackgroundEvents = NO;
+    NSNotificationCenter *nc = NSNotificationCenter.defaultCenter;
+    [nc addObserver:g_app selector:@selector(controllersChanged:) name:GCControllerDidConnectNotification object:nil];
+    [nc addObserver:g_app selector:@selector(controllersChanged:) name:GCControllerDidDisconnectNotification object:nil];
+    controllers_changed();
     app.activationPolicy = NSApplicationActivationPolicyRegular;   // a Dock icon and a menu bar, also when started from a terminal
     NSString *name = @(title);
     NSMenu *bar = [NSMenu new], *menu = [NSMenu new]; NSMenuItem *item = [NSMenuItem new];
