@@ -174,6 +174,7 @@ int main(int argc, char **argv) {
         free(h.input); free(h.px); ps1_free(h.m); ps1_free(h.ref); return 1;
     }
     if (h.ref) h.ref->tty_out = quiet;   // the native machine prints what both do
+    if (!headless) h.m->tty_out = front_reports_tty;   // host-only reporting policy; headless validation retains its exact output
     if (save_dir) {
         if (front_saves_open(&h.saves, h.m, save_dir)) {
             if (!headless) front_error("Cannot open the memory cards. Close any other copy of this game, and check that its save folder is writable and its cards are valid.");

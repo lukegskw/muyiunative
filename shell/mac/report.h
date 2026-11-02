@@ -6,3 +6,5 @@ int front_report_url(char *out, size_t cap, const front_report_info *info);
 void front_reports_start(int headless);
 void front_reports_game(const char *serial);
 void front_reports_menu(void *menu);   // NSMenu, on the main thread
+int front_reports_guest_output(void);   // thread-safe; Finder starts quiet, terminal/headless retain their output
+void front_reports_tty(void *ctx, const char *line);   // the interactive machine's debug-console sink

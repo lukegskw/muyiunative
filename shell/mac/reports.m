@@ -3,6 +3,7 @@
 #import <Cocoa/Cocoa.h>
 #include <sys/sysctl.h>
 #include <unistd.h>
+#include <stdatomic.h>
 #include "front.h"
 #include "product.h"
 #include "log.h"
@@ -12,6 +13,9 @@
 static front_log g_log;
 static NSString *g_version, *g_commit, *g_device, *g_game;
 static int g_playing;
+static atomic_int g_guest_output = 1;
+int front_reports_guest_output(void) { return atomic_load(&g_guest_output); }
+void front_reports_tty(void *ctx, const char *line) { (void)ctx; if (front_reports_guest_output()) fprintf(stderr, "tty: %s\n", line); }
 static NSString *bundle_string(NSString *key, const char *fallback) {
     id value = [NSBundle.mainBundle objectForInfoDictionaryKey:key]; return [value isKindOfClass:NSString.class] && [value length] ? value : @(fallback);
 }
@@ -26,6 +30,7 @@ void front_reports_start(int headless) {
         NSString *header = [NSString stringWithFormat:@"host: muyiunative %@, commit %@\nhost: %@\n", g_version, g_commit, g_device];
         // Headless stdout is a machine-readable build/lockstep result. Terminal sessions keep their streams; Finder's otherwise discarded output gets a file.
         if (!headless && !isatty(STDOUT_FILENO) && !isatty(STDERR_FILENO)) {
+            atomic_store(&g_guest_output, 0);   // user-approved Finder default; the session menu can enable guest text without changing the machine
             NSString *identifier = NSBundle.mainBundle.bundleIdentifier ?: @"org.muyiunative.developer";
             NSCharacterSet *safe = [NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-"];
             NSURL *library = [NSFileManager.defaultManager URLsForDirectory:NSLibraryDirectory inDomains:NSUserDomainMask].firstObject;
@@ -35,7 +40,7 @@ void front_reports_start(int headless) {
                 !folder || ![NSFileManager.defaultManager createDirectoryAtURL:folder withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions: @0700} error:&error] ||
                 front_log_start(&g_log, folder.path.fileSystemRepresentation, NSHomeDirectory().fileSystemRepresentation, header.UTF8String))
                 fprintf(stderr, "[RED] host: cannot create a run log\n");
-            else { atexit(stop_log); fprintf(stderr, "host: log %s\n", g_log.path); return; }
+            else { atexit(stop_log); fprintf(stderr, "host: log %s\nhost: game debug output disabled; run log limited to 10 MiB\n", g_log.path); return; }
         }
         fputs(header.UTF8String, stderr);
     }
@@ -45,8 +50,13 @@ void front_reports_game(const char *serial) { g_playing = 1; g_game = serial ? @
 @interface ReportMenu : NSObject
 - (void)about:(id)sender;
 - (void)report:(id)sender;
+- (void)guest:(NSMenuItem *)sender;
 @end
 @implementation ReportMenu
+- (void)guest:(NSMenuItem *)sender {
+    int enabled = !front_reports_guest_output(); atomic_store(&g_guest_output, enabled); sender.state = enabled ? NSControlStateValueOn : NSControlStateValueOff;
+    fprintf(stderr, "host: game debug output %s for this run\n", enabled ? "enabled" : "disabled");
+}
 - (void)about:(id)sender {
     (void)sender; NSAlert *a = [NSAlert new]; a.messageText = @"About muyiunative";
     a.informativeText = [NSString stringWithFormat:@"muyiunative %@\nCommit %@\n%@", g_version, g_commit, g_device]; [a runModal];
@@ -66,5 +76,7 @@ void front_reports_menu(void *menu) {
     static ReportMenu *actions; if (!actions) actions = [ReportMenu new]; NSMenu *m = (__bridge NSMenu *)menu;
     [m addItemWithTitle:@"About muyiunative…" action:@selector(about:) keyEquivalent:@""].target = actions;
     [m addItemWithTitle:@"Report a Problem…" action:@selector(report:) keyEquivalent:@""].target = actions;
+    NSMenuItem *guest = [m addItemWithTitle:@"Include Game Debug Output" action:@selector(guest:) keyEquivalent:@""]; guest.target = actions;
+    guest.state = front_reports_guest_output() ? NSControlStateValueOn : NSControlStateValueOff;
     [m addItem:NSMenuItem.separatorItem];
 }
