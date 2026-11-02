@@ -1,0 +1,104 @@
+name: Compatibility report
+description: How far your own game gets with a particular muyiunative build
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Report one game and disc revision per issue. Say exactly what you played; reaching a title screen does not mean the whole game works.
+        Never upload a disc image, BIOS dump, game app, generated code, memory card, save state or extracted game data. Hashes and serials identify a disc without sharing it.
+        For a security vulnerability, use the private reporting instructions in SECURITY.md instead of this form.
+  - type: input
+    id: game
+    attributes:
+      label: Game
+      description: The title and edition printed on your disc.
+    validations:
+      required: true
+  - type: input
+    id: serial
+    attributes:
+      label: Serial
+      description: The serial printed on the disc label; use unknown if you cannot find it.
+      placeholder: SLUS-01212
+    validations:
+      required: true
+  - type: input
+    id: region
+    attributes:
+      label: Region
+      description: The disc's region, such as USA, Europe or Japan; use unknown if necessary.
+    validations:
+      required: true
+  - type: input
+    id: boot-sha256
+    attributes:
+      label: Boot executable SHA-256
+      description: |
+        In Finder, right-click your built game app > Show Package Contents > Contents > Resources. Quick Look game.plist and copy BootSHA256.
+        This is the boot executable's hash, not the whole disc's. Enter unavailable if the build failed before making an app.
+      placeholder: 64 hexadecimal digits, or unavailable
+    validations:
+      required: true
+  - type: input
+    id: app-version
+    attributes:
+      label: App version and commit
+      description: From About muyiunative or the beginning of the log; include the build number and short commit.
+      placeholder: 0.7.0 (build 123), commit abc1234
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Mac and macOS version
+      description: Apple menu > About This Mac; include the chip.
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Furthest result
+      description: Choose the furthest point you personally verified with this app version, then describe any problems below.
+      options:
+        - Does not build
+        - Builds, does not reach the title screen
+        - Reaches the title screen or menu
+        - Playable, not finished
+        - Finished
+    validations:
+      required: true
+  - type: input
+    id: renderer
+    attributes:
+      label: Renderer and scale
+      description: Software or Metal at 1x, 2x or 4x from the Graphics menu; use not reached for a build failure.
+    validations:
+      required: true
+  - type: input
+    id: controller
+    attributes:
+      label: Controller
+      description: Model, USB or Bluetooth, and player ports tested; say keyboard only or not reached when applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: What was checked
+      description: Levels or modes reached, time played, graphics, sound, input and saving checked, and any crashes or incorrect behavior. Include steps to reproduce problems.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log
+      description: Report a Problem reveals the run log. Review it for personal information and game data before attaching; never attach the game app or disc.
+    validations:
+      required: false
+  - type: checkboxes
+    id: no-game-data
+    attributes:
+      label: No game data
+      options:
+        - label: Nothing attached contains a disc image, BIOS dump, game app, generated code, memory card, save state or extracted game data.
+          required: true

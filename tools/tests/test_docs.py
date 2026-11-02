@@ -1,5 +1,5 @@
-"""The repository's own Markdown stays navigable and its entry point short: every relative link and #anchor resolves (GitHub's heading anchors), and AGENTS.md stays at
-most 1,500 words (a finding goes into the docs it belongs to, not into it). Needs git, or walks the tree without it; no game files."""
+"""The repository's Markdown stays navigable and AGENTS.md stays at most 1,500 words. Required CI checks run on every PR, and compatibility reports identify the build,
+disc revision and verified scope. Needs git for tracked Markdown, or walks the tree without it; no game files or YAML dependency."""
 import re, subprocess, unittest
 from pathlib import Path
 from urllib.parse import unquote
@@ -31,13 +31,60 @@ def anchors(path):   # a repeated heading gets -1, -2, …
     return out
 
 
-def links(path):   # (line number, target) of each inline link outside code
+def links(path):   # (line number, target) of Markdown links and gallery HTML href/src outside code
     text = re.sub(r'```.*?```', lambda m: '\n' * m.group(0).count('\n'), path.read_text(), flags=re.S)
     for n, line in enumerate(text.splitlines(), 1):
-        for m in re.finditer(r'\]\(([^)\s]+)\)', re.sub(r'`[^`]*`', '', line)): yield n, m.group(1)
+        for m in re.finditer(r'''\]\(([^)\s]+)\)|<(?:a|img)\b[^>]*?\b(?:href|src)=["']([^"']+)["']''', re.sub(r'`[^`]*`', '', line), re.I):
+            yield n, m.group(1) or m.group(2)
 
 
 class Docs(unittest.TestCase):
+    def test_required_checks_report_on_every_pr(self):
+        # GitHub leaves a required workflow pending when a path/branch filter skips the PR. A docs-only change must still produce all four checks.
+        checks = set()
+        for name in ('tests.yml', 'lint-python.yml'):
+            workflow = (REPO / '.github/workflows' / name).read_text()
+            triggers = re.search(r'^on:\n(.*?)(?=^[^\s#])', workflow, re.M | re.S)
+            self.assertIsNotNone(triggers, name)
+            assert triggers is not None
+            events = triggers.group(1)
+            self.assertRegex(events, r'(?m)^  pull_request:\s*\n')
+            self.assertNotRegex(events, r'(?m)^\s+(?:paths(?:-ignore)?|branches-ignore):')
+            pr = re.search(r'^  pull_request:(.*?)(?=^  [a-z]|\Z)', events, re.M | re.S)
+            assert pr is not None
+            self.assertNotRegex(pr.group(1), r'(?m)^\s+\S+:')
+            checks.update(re.findall(r'^    name: (.+)$', workflow, re.M))
+        self.assertEqual(checks, {'Mac app', 'Runtime and Mac host tests (plain, then ASan and UBSan)', 'Tool tests', 'ruff and pyright'})
+
+    def test_compatibility_report_captures_revision_and_scope(self):
+        # Contract checks for the dependency-free form: GitHub validates the YAML schema. Revision identity and graded results keep "boots" distinct from "finished".
+        form = (REPO / '.github/ISSUE_TEMPLATE/compatibility_report.yml').read_text()
+        fields = {}
+        for block in re.split(r'^  - type: ', form, flags=re.M)[1:]:
+            if block.startswith('markdown\n'): continue
+            field = re.search(r'^    id: ([\w-]+)$', block, re.M)
+            self.assertIsNotNone(field)
+            assert field is not None
+            key = field.group(1)
+            self.assertNotIn(key, fields)
+            fields[key] = block
+        required = {'game', 'serial', 'region', 'boot-sha256', 'app-version', 'device', 'result', 'renderer', 'controller', 'notes'}
+        self.assertTrue(required <= fields.keys())
+        for key in required:
+            self.assertIn('    validations:\n      required: true', fields[key], key)
+        result = fields['result']
+        self.assertTrue(result.startswith('dropdown\n'))
+        options = re.findall(r'^        - (.+)$', result, re.M)
+        self.assertEqual(options[0], 'Does not build')
+        self.assertEqual(options[-1], 'Finished')
+        self.assertGreater(len(options), 2)
+        self.assertNotIn('      default:', result)
+        self.assertIn('BootSHA256', fields['boot-sha256'])
+        self.assertIn('unavailable', fields['boot-sha256'])
+        for forbidden in ('disc image', 'BIOS dump', 'game app', 'generated code', 'memory card', 'save state', 'extracted game data'):
+            self.assertIn(forbidden, fields['no-game-data'])
+        self.assertIn('          required: true', fields['no-game-data'])
+
     def test_relative_links_and_anchors_resolve(self):
         bad = []
         for p in md_files():

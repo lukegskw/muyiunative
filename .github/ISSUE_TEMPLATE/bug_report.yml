@@ -5,7 +5,8 @@ body:
     attributes:
       value: |
         Thanks for the report. The fields below are what a problem is traced with; without them the first reply is a request for them.
-        Never attach disc images, BIOS dumps, memory cards or anything extracted from a game. Logs and screenshots are fine.
+        Never attach disc images, BIOS dumps, memory cards, save states, game apps, generated code or anything extracted from a game. Review logs before sharing them.
+        For a security vulnerability, follow SECURITY.md's private reporting instructions instead of this form.
   - type: textarea
     id: what
     attributes:
@@ -60,7 +61,7 @@ body:
     id: how
     attributes:
       label: How it was built and run
-      description: The commands, for example `make -C shell/mac app`, and how the app was started.
+      description: Whether you used Build Game App in the launcher or a terminal command, the steps taken, and how the app was started.
     validations:
       required: true
   - type: textarea
@@ -68,7 +69,7 @@ body:
     attributes:
       label: Logs
       description: |
-        Report a Problem reveals the current run's log in Finder; drag that file here. Logs from Finder launches are in
+        Report a Problem reveals the current run's log in Finder; review it for personal information and game data before attaching. Logs from Finder launches are in
         ~/Library/Logs/muyiunative/<bundle id>/ (last five runs; home paths are replaced with ~). From a terminal,
         `shell/mac/build/muyiunative.app/Contents/MacOS/muyiunative 2>&1 | tee run.log` keeps it in run.log. For a build failure, the build's full output.
     validations:
@@ -78,5 +79,5 @@ body:
     attributes:
       label: No game data
       options:
-        - label: Nothing attached here contains disc images, BIOS dumps, memory cards or data extracted from a game.
+        - label: Nothing attached contains disc images, BIOS dumps, memory cards, save states, game apps, generated code or data extracted from a game.
           required: true
