@@ -30,7 +30,7 @@ static void save_keys(void) {
 }
 
 void front_keyboard_load(void) {
-    front_keys_defaults(&g_keys); g_prefs = [[NSUserDefaults alloc] initWithSuiteName:@"org.ps1native"];
+    front_keys_defaults(&g_keys); g_prefs = [[NSUserDefaults alloc] initWithSuiteName:@"org.muyiunative"];
     id saved = [g_prefs objectForKey:@"keyboard-v1"];
     if (![saved isKindOfClass:NSArray.class] || [saved count] != FRONT_KEY_COUNT) return;
     uint32_t values[FRONT_KEY_COUNT];

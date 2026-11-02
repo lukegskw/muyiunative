@@ -30,13 +30,13 @@ int front_product_load(front_product *p) {
 }
 int front_save_directory(char *out, size_t cap, const char *id) {
     NSURL *base = [NSFileManager.defaultManager URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject;
-    NSURL *url = [[base URLByAppendingPathComponent:@"ps1native/Saves" isDirectory:YES] URLByAppendingPathComponent:@(id) isDirectory:YES];
+    NSURL *url = [[base URLByAppendingPathComponent:@"muyiunative/Saves" isDirectory:YES] URLByAppendingPathComponent:@(id) isDirectory:YES];
     if (!url || !copy_string(out, cap, url.path)) { RED("host: cannot locate Application Support for memory cards"); return -1; }
     return 0;
 }
 void front_error(const char *message) {
     NSApplication.sharedApplication.activationPolicy = NSApplicationActivationPolicyRegular;
-    [NSApp activate]; NSAlert *a = [NSAlert new]; a.messageText = @"ps1native"; a.informativeText = @(message); [a runModal];
+    [NSApp activate]; NSAlert *a = [NSAlert new]; a.messageText = @"muyiunative"; a.informativeText = @(message); [a runModal];
 }
 
 @interface Launcher : NSObject <NSApplicationDelegate>
@@ -49,7 +49,7 @@ void front_error(const char *message) {
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)app { (void)app; return YES; }
 - (void)launch:(NSURL *)url {
     NSBundle *bundle = [NSBundle bundleWithURL:url];
-    if (![bundle.bundleIdentifier hasPrefix:@"org.ps1native.game."]) { front_error("Choose a game app created by ps1native build."); return; }
+    if (![bundle.bundleIdentifier hasPrefix:@"org.muyiunative.game."]) { front_error("Choose a game app created by muyiunative build."); return; }
     [NSWorkspace.sharedWorkspace openApplicationAtURL:url configuration:NSWorkspaceOpenConfiguration.configuration completionHandler:^(NSRunningApplication *app, NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
             if (error) { front_error(error.localizedDescription.UTF8String); return; }
@@ -61,7 +61,7 @@ void front_error(const char *message) {
 }
 - (void)open:(id)sender {
     (void)sender; NSOpenPanel *p = NSOpenPanel.openPanel; p.allowedContentTypes = @[UTTypeApplicationBundle]; p.canChooseDirectories = NO;
-    p.message = @"Choose a game app created by ps1native build.";
+    p.message = @"Choose a game app created by muyiunative build.";
     if ([p runModal] == NSModalResponseOK) [self launch:p.URL];
 }
 - (void)play:(id)sender { (void)sender; if (self.recent.selectedItem.representedObject) [self launch:[NSURL fileURLWithPath:self.recent.selectedItem.representedObject]]; }
@@ -69,14 +69,14 @@ void front_error(const char *message) {
 
 void front_launcher(void) {
     NSApplication *app = NSApplication.sharedApplication; app.activationPolicy = NSApplicationActivationPolicyRegular;
-    Launcher *l = [Launcher new]; l.prefs = [[NSUserDefaults alloc] initWithSuiteName:@"org.ps1native"]; app.delegate = l;
+    Launcher *l = [Launcher new]; l.prefs = [[NSUserDefaults alloc] initWithSuiteName:@"org.muyiunative"]; app.delegate = l;
     NSMenu *bar = [NSMenu new], *menu = [NSMenu new]; NSMenuItem *item = [NSMenuItem new];
     [menu addItemWithTitle:@"Open Game App…" action:@selector(open:) keyEquivalent:@"o"].target = l;
-    [menu addItemWithTitle:@"Quit ps1native" action:@selector(terminate:) keyEquivalent:@"q"]; item.submenu = menu; [bar addItem:item]; app.mainMenu = bar;
+    [menu addItemWithTitle:@"Quit muyiunative" action:@selector(terminate:) keyEquivalent:@"q"]; item.submenu = menu; [bar addItem:item]; app.mainMenu = bar;
     l.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 520, 270) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable backing:NSBackingStoreBuffered defer:NO];
-    l.window.title = @"ps1native"; l.window.releasedWhenClosed = NO;
+    l.window.title = @"muyiunative"; l.window.releasedWhenClosed = NO;
     NSTextField *title = [NSTextField labelWithString:@"Your PlayStation games on the Mac"]; title.font = [NSFont boldSystemFontOfSize:21]; title.frame = NSMakeRect(24, 210, 475, 32); [l.window.contentView addSubview:title];
-    NSTextField *note = [NSTextField wrappingLabelWithString:@"Open a game app you built from your disc. To build one, run:\nps1native build disc.cue --platform mac-app"]; note.frame = NSMakeRect(24, 134, 472, 64); [l.window.contentView addSubview:note];
+    NSTextField *note = [NSTextField wrappingLabelWithString:@"Open a game app you built from your disc. To build one, run:\nmuyiunative build disc.cue --platform mac-app"]; note.frame = NSMakeRect(24, 134, 472, 64); [l.window.contentView addSubview:note];
     l.recent = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(24, 88, 470, 30) pullsDown:NO];
     for (NSString *path in [l.prefs stringArrayForKey:@"RecentGames"]) if ([NSFileManager.defaultManager fileExistsAtPath:path]) {
         [l.recent addItemWithTitle:path.lastPathComponent.stringByDeletingPathExtension]; l.recent.lastItem.representedObject = path;

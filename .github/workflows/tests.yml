@@ -79,10 +79,10 @@ jobs:
         run: make -C shell/mac app
       - name: Check the app
         run: |
-          app=shell/mac/build/ps1native.app
+          app=shell/mac/build/muyiunative.app
           plutil -lint "$app/Contents/Info.plist"
           codesign --verify --strict --verbose=2 "$app"
           codesign --display --verbose=2 "$app" 2>&1 | grep -E 'flags=0x[0-9a-f]+\([^)]*runtime'   # the hardened runtime
-          test "$(lipo -archs "$app/Contents/MacOS/ps1native")" = arm64
+          test "$(lipo -archs "$app/Contents/MacOS/muyiunative")" = arm64
       - name: Boot OpenBIOS from the app's Resources, without a window
-        run: shell/mac/build/ps1native.app/Contents/MacOS/ps1native --headless --frames 60
+        run: shell/mac/build/muyiunative.app/Contents/MacOS/muyiunative --headless --frames 60

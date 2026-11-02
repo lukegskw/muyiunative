@@ -1,4 +1,4 @@
-// Mac front end (front_mac.m): one window, whose view is backed by the CAMetalLayer that gfx/metal presents to, and a thread for the machine. The iOS front end (phase 7)
+// Mac front end (front_mac.m): one window, whose view is backed by the CAMetalLayer that gfx/metal presents to, and a thread for the machine. The iOS front end (phase 8)
 // implements the same interface
 #pragma once
 #include <stdint.h>

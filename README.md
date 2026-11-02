@@ -1,8 +1,8 @@
-# ps1native
+# muyiunative
 
-Play your own PlayStation (PS1) discs natively on the Mac, and later on the iPhone. Bring your game (a `.cue`/`.bin` dump of your disc); ps1native turns it into an app.
+Play your own PlayStation (PS1) discs natively on the Mac, and later on the iPhone. Bring your game (a `.cue`/`.bin` dump of your disc); muyiunative turns it into an app.
 
-The aim is native code, not emulation: the game's MIPS code is translated to C and compiled ahead of time on your Mac, and runs as Apple-silicon code beside a runtime that models the console's hardware; an interpreter covers the code that could not be compiled ahead of time. Nothing from any game or from Sony's BIOS is in this repository: the BIOS ps1native runs is [OpenBIOS](bios/openbios/README.md), open source and built from source. The project is not affiliated with Sony Interactive Entertainment or any game publisher.
+The aim is native code, not emulation: the game's MIPS code is translated to C and compiled ahead of time on your Mac, and runs as Apple-silicon code beside a runtime that models the console's hardware; an interpreter covers the code that could not be compiled ahead of time. Nothing from any game or from Sony's BIOS is in this repository: the BIOS muyiunative runs is [OpenBIOS](bios/openbios/README.md), open source and built from source. The project is not affiliated with Sony Interactive Entertainment or any game publisher.
 
 ## Status
 
@@ -13,7 +13,7 @@ Phase 6 of [the plan](plan.md#4-phases-and-exit-criteria) adds independent Metal
 You need a Mac with Apple silicon, [Xcode](https://apps.apple.com/app/xcode/id497799835) 27.1 with its Metal Toolchain component, and Python 3.12 or newer. Install the component in Xcode Settings → Components, or run `xcodebuild -downloadComponent MetalToolchain` ([Apple's instructions](https://developer.apple.com/documentation/xcode/downloading-and-installing-additional-xcode-components)). In a clone of this repository:
 
 ```sh
-scripts/ps1native build /external/path/disc.cue --platform mac-app
+scripts/muyiunative build /external/path/disc.cue --platform mac-app
 ```
 
 The command captures the game's code, compiles it, checks the route against the interpreter and creates `shell/mac/build/apps/<game>.app`. Double-click that app to play on macOS 14 or later. Its signed bundle includes OpenBIOS, the native game code and a local copy of the disc's tracks; it works after moving the app or the original dump. Keep game apps and generated code on your Mac.
@@ -24,19 +24,19 @@ For the shorter command in the plan, add this checkout's scripts to your termina
 
 ```sh
 export PATH="$PWD/scripts:$PATH"
-ps1native build /external/path/disc.cue --platform mac-app
+muyiunative build /external/path/disc.cue --platform mac-app
 ```
 
 The optional launcher opens game apps and remembers recent ones:
 
 ```sh
 make -C shell/mac app
-open shell/mac/build/ps1native.app
+open shell/mac/build/muyiunative.app
 ```
 
 ### Memory cards
 
-Game apps connect two memory cards and save them in `~/Library/Application Support/ps1native/Saves/<serial>-<boot-sha256>/card1.mcr` and `card2.mcr`. They are raw 128 KB images, created only when missing, saved once per emulated second when dirty and again before quitting. Moving or rebuilding the same game app preserves its saves. Close the game before backing up or replacing its cards; a second copy cannot use the same save folder simultaneously. Invalid cards are reported and kept intact.
+Game apps connect two memory cards and save them in `~/Library/Application Support/muyiunative/Saves/<serial>-<boot-sha256>/card1.mcr` and `card2.mcr`. They are raw 128 KB images, created only when missing, saved once per emulated second when dirty and again before quitting. Moving or rebuilding the same game app preserves its saves. Close the game before backing up or replacing its cards; a second copy cannot use the same save folder simultaneously. Invalid cards are reported and kept intact.
 
 ### Graphics
 
@@ -45,7 +45,7 @@ Choose Software or Metal at 1×, 2× or 4× in the game app's Graphics menu. Swi
 To make an app open with Metal at 2×:
 
 ```sh
-scripts/ps1native build /external/path/disc.cue --platform mac-app --renderer metal --scale 2
+scripts/muyiunative build /external/path/disc.cue --platform mac-app --renderer metal --scale 2
 ```
 
 The shader library is built and bundled with the app; playing needs no compiler. Headless runs default to software for reproducible validation. Developers can use `--renderer metal --scale 1 --verify-renderer` to compare native Metal VRAM and caches against software every frame ([Development](docs/development.md#phase-6-the-metal-renderer)).
@@ -70,7 +70,7 @@ On a Mac keyboard, Backspace is the key labelled Delete (⌫). With Metal Slug X
 
 ### For developers
 
-`make -C shell/mac` builds the developer host. Run `shell/mac/build/ps1native --disc /external/path/disc.cue` to interpret an external disc, or add `--bios bios/openbios/openbios.bin` without a disc to open the BIOS shell. `--headless --lockstep` checks native execution against the interpreter. Headless runs leave card slots empty unless `--save-dir <directory>` is given, so existing validation routes remain reproducible.
+`make -C shell/mac` builds the developer host. Run `shell/mac/build/muyiunative --disc /external/path/disc.cue` to interpret an external disc, or add `--bios bios/openbios/openbios.bin` without a disc to open the BIOS shell. `--headless --lockstep` checks native execution against the interpreter. Headless runs leave card slots empty unless `--save-dir <directory>` is given, so existing validation routes remain reproducible.
 
 `scripts/native_game.py /external/path/disc.cue --route first_level` reproduces phase 4's acceptance checks and timings. `scripts/survey_game.py /external/path/disc.cue --frames 2400` captures an unknown game and writes a draft profile and local picture to inspect. Captures, game apps and generated C stay in ignored build folders ([Development](docs/development.md#phase-5-the-mac-product)).
 
@@ -78,7 +78,7 @@ On a Mac keyboard, Backspace is the key labelled Delete (⌫). With Metal Slug X
 
 ### Acknowledgements
 
-ps1native takes its build, its Mac front end and its rules for contributors and agents from **[nxnative](https://github.com/seedds/nxnative)** (MIT), which runs Switch games natively on Apple platforms. The console's hardware is modelled from **[psx-spx](https://psx-spx.consoledev.net/)**, the public PlayStation specifications. The BIOS is **OpenBIOS** from [nugget](https://github.com/pcsx-redux/nugget) (MIT), by the PCSX-Redux authors. The hardware test programs are **[ps1-tests](https://github.com/JaCzekanski/ps1-tests)** (MIT) by Jakub Czekański, built with [PSn00bSDK](https://github.com/Lameguy64/PSn00bSDK) (MPL-2.0).
+muyiunative takes its build, its Mac front end and its rules for contributors and agents from **[nxnative](https://github.com/seedds/nxnative)** (MIT), which runs Switch games natively on Apple platforms. The console's hardware is modelled from **[psx-spx](https://psx-spx.consoledev.net/)**, the public PlayStation specifications. The BIOS is **OpenBIOS** from [nugget](https://github.com/pcsx-redux/nugget) (MIT), by the PCSX-Redux authors. The hardware test programs are **[ps1-tests](https://github.com/JaCzekanski/ps1-tests)** (MIT) by Jakub Czekański, built with [PSn00bSDK](https://github.com/Lameguy64/PSn00bSDK) (MPL-2.0).
 
 ### License
 

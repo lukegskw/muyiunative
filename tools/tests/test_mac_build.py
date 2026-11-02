@@ -27,7 +27,7 @@ def create_iso(path, exe, serial='SLUS_000.01'):
     n = 22 + (len(exe) + 2047) // 2048; sectors = [b''] * max(n, 24)
     sectors[4] = bytes(0x20) + b'Sony Computer Entertainment Amer  ica '
     root = iso_record('\x00', 20, 2048, True)
-    pvd = bytearray(2048); pvd[:7] = b'\x01CD001\x01'; pvd[8:40] = b'PLAYSTATION'.ljust(32, b' '); pvd[40:72] = b'PS1NATIVE TEST'.ljust(32, b' ')
+    pvd = bytearray(2048); pvd[:7] = b'\x01CD001\x01'; pvd[8:40] = b'PLAYSTATION'.ljust(32, b' '); pvd[40:72] = b'MUYIUNATIVE TEST'.ljust(32, b' ')
     pvd[80:88] = both(len(sectors), 4); pvd[120:124] = both(1, 2); pvd[124:128] = both(1, 2); pvd[128:132] = both(2048, 2)
     pvd[132:140] = both(10, 4); struct.pack_into('<I', pvd, 140, 18); struct.pack_into('>I', pvd, 148, 19); pvd[156:156 + len(root)] = root
     sectors[16] = bytes(pvd); sectors[17] = b'\xffCD001\x01'; sectors[18] = b'\x01\x00' + struct.pack('<IH', 20, 1) + b'\x00\x00'
@@ -115,13 +115,13 @@ class MacBuild(unittest.TestCase):
 
     def test_build_refuses_an_unrelated_app_before_compilation(self):
         out = self.tmp / 'Other.app'; out.mkdir(); (out / 'keep').write_text('untouched')
-        result = subprocess.run([sys.executable, ROOT / 'scripts/ps1native', 'build', self.data, '--output', out], capture_output=True, text=True)
+        result = subprocess.run([sys.executable, ROOT / 'scripts/muyiunative', 'build', self.data, '--output', out], capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0); self.assertIn('not this game app', result.stderr)
         self.assertNotIn('building the capture host', result.stdout); self.assertEqual((out / 'keep').read_text(), 'untouched')
 
     def test_build_refuses_scaled_software_before_compilation(self):
         out = self.tmp / 'Scaled.app'
-        result = subprocess.run([sys.executable, ROOT / 'scripts/ps1native', 'build', self.data, '--scale', '2', '--output', out], capture_output=True, text=True)
+        result = subprocess.run([sys.executable, ROOT / 'scripts/muyiunative', 'build', self.data, '--scale', '2', '--output', out], capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0); self.assertIn('--scale 2 or 4 needs --renderer metal', result.stderr)
         self.assertNotIn('building the capture host', result.stdout); self.assertFalse(out.exists())
 
@@ -167,7 +167,7 @@ class MacBuild(unittest.TestCase):
 @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('codesign'), 'needs macOS and its codesign')
 class MacProduct(unittest.TestCase):
     def test_native_app_is_portable_and_cards_survive_restart(self):
-        with tempfile.TemporaryDirectory(prefix='ps1native-product-test-') as directory:
+        with tempfile.TemporaryDirectory(prefix='muyiunative-product-test-') as directory:
             tmp = Path(directory); executable = product_exe()
             source = create_iso(tmp / 'source disc.bin', executable); profile = tmp / 'game.toml'; digest = hashlib.sha256(executable).hexdigest()
             profile.write_text(f'name = "Synthetic Triangle"\n[disc]\nboot_sha256 = "{digest}"\n[validation]\nframes = 900\ninputs = []\n')
@@ -177,7 +177,7 @@ class MacProduct(unittest.TestCase):
                 result = subprocess.run([str(s) for s in command], cwd=tmp, capture_output=True, text=True, timeout=timeout)
                 self.assertEqual(result.returncode, 0, (result.stdout + result.stderr)[-5000:]); return result
 
-            run([sys.executable, ROOT / 'scripts/ps1native', 'build', source.name, '--platform', 'mac-app', '--profile', profile.name, '--output', app,
+            run([sys.executable, ROOT / 'scripts/muyiunative', 'build', source.name, '--platform', 'mac-app', '--profile', profile.name, '--output', app,
                  '--renderer', 'metal', '--scale', 2])
             run(['codesign', '--verify', '--strict', app])
             signature = run(['codesign', '--display', '--verbose=2', app]).stderr
@@ -188,7 +188,7 @@ class MacProduct(unittest.TestCase):
             shaders = app / 'Contents/Resources/ps1gpu.metallib'; self.assertTrue(shaders.is_file()); self.assertGreater(shaders.stat().st_size, 0)
             self.assertIn(digest, manifest['SaveID']); exe = app / 'Contents/MacOS' / info['CFBundleExecutable']
             source.rename(tmp / 'original moved away.bin')
-            default_cards = Path.home() / 'Library/Application Support/ps1native/Saves' / manifest['SaveID']; existed = default_cards.exists()
+            default_cards = Path.home() / 'Library/Application Support/muyiunative/Saves' / manifest['SaveID']; existed = default_cards.exists()
             playback = run([exe, '--headless', '--frames', 900, '--lockstep'])
             self.assertIn('frame hash a2fa0b6d358e04a3', playback.stdout); self.assertIn('the machines agree', playback.stdout)
             self.assertIn('900 frames, 320x240,', playback.stdout); self.assertNotIn('Metal renderer', playback.stdout)

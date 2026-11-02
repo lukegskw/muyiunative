@@ -27,7 +27,7 @@ int main(void) {
         CHECK(native_run(b), "a captured version runs natively, including the older version reloaded later");
         CHECK(!memcmp(&a->cpu, &b->cpu, sizeof a->cpu) && a->cycles == b->cycles, "each version agrees with the interpreter, registers, delay slots and cycles");
     }
-    char dir[] = "/tmp/ps1native-overlays-XXXXXX", path[256], prefix[256];
+    char dir[] = "/tmp/muyiunative-overlays-XXXXXX", path[256], prefix[256];
     CHECK(mkdtemp(dir), "temporary capture directory"); snprintf(prefix, sizeof prefix, "%s/cap", dir);
     CHECK(!ps1_capture_write(a, &c, prefix), "capture writes all observed versions");
     CHECK(!a->on_step && !a->step_ctx, "writing a capture detaches its callback before releasing the records");

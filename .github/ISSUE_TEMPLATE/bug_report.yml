@@ -22,7 +22,7 @@ body:
   - type: input
     id: commit
     attributes:
-      label: ps1native commit
+      label: muyiunative commit
       description: "`git rev-parse --short HEAD` in the checkout you built from."
     validations:
       required: true
@@ -54,7 +54,7 @@ body:
       label: Logs
       description: |
         The whole output of the run from its start, not excerpts (drag the file here). From a terminal,
-        `shell/mac/build/ps1native.app/Contents/MacOS/ps1native 2>&1 | tee run.log` keeps it in run.log. For a build failure, the build's full output.
+        `shell/mac/build/muyiunative.app/Contents/MacOS/muyiunative 2>&1 | tee run.log` keeps it in run.log. For a build failure, the build's full output.
     validations:
       required: true
   - type: checkboxes
