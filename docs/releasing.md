@@ -2,7 +2,7 @@
 
 The selected format is a **Developer ID-signed, notarized ZIP** of the generic launcher, with a SHA-256 checksum. The user's paid Apple Developer account supplies the certificate. Players need no developer account, signing key or separate Python. Their locally compiled game apps are ad-hoc signed on their own Mac; neither their discs nor their game apps are sent to Apple or GitHub by the build flow.
 
-The repository stays private through the downloaded-launcher player check. Merging release tooling does not authorize publishing a release or changing repository visibility. Both actions need the maintainer's explicit approval; repository publication and its security/branch settings follow the successful player check.
+The repository stayed private through the downloaded-launcher player check, which the user confirmed on 2026-11-02, then became public with explicit approval. Private vulnerability reporting and `main` protection are enabled. Merging release tooling does not authorize publishing a release or changing repository visibility; those actions need the maintainer's explicit approval.
 
 ## One-time maintainer setup
 
@@ -45,9 +45,9 @@ The app contains one Mach-O executable, system-framework dependencies, the preco
 
 The default tests simulate Apple signing/notary commands with synthetic host bytes. They verify accepted/rejected submissions, final-ticket packaging, extracted-copy checks, checksum correctness, source cleanliness and refusal to replace downloads or distribute game resources. Those tests do not claim a real notarization succeeded; record the real candidate's commit, SHA-256 and validation only after it does.
 
-## Private release and player acceptance
+## Initial private release and player acceptance
 
-After reviewing the candidate and obtaining explicit approval, attach **only the generic launcher ZIP and its checksum** to the private `v0.7.0` preview release, targeting the exact source commit in the app. Mark it as a pre-release. Never attach a game app, generated game code, disc, capture, memory card or save state. A public release and public repository remain separate approval steps.
+The initial `v0.7.0` preview was published privately after candidate review and explicit approval, targeting the exact source commit in the app and marked as a pre-release. For every release, attach **only the generic launcher ZIP and its checksum**. Never attach a game app, generated game code, disc, capture, memory card or save state. Release publication and repository visibility remain separate approval steps.
 
 Ask the user to complete this check on the Mac with their own disc:
 
@@ -60,7 +60,7 @@ Ask the user to complete this check on the Mac with their own disc:
 
 Only after this succeeds, record the date, source commit, game and checked behavior in [plan.md §4](../plan.md#4-phases-and-exit-criteria) and [Development's phase-7 section](development.md#phase-7-the-public-preview). The user's earlier source-built-launcher checks do not substitute for a downloaded candidate.
 
-Before repository publication, repeat the [history audit](public-preview-audit.md) for the latest refs and release content, including the explicitly approved gallery image. Obtain the user's go for public visibility, private vulnerability reporting and `main` protection requiring all four CI checks. The release workflow never changes those settings itself.
+Before repository publication, the [history audit](public-preview-audit.md) was repeated for the latest refs and release content, including the explicitly approved gallery image. The successful player check was followed by the user's public-visibility go, with private vulnerability reporting and `main` protection requiring all four CI checks. The release workflow never changes those settings itself.
 
 ## Validated candidate
 
@@ -77,3 +77,9 @@ On 2026-11-02, the real local signing/notarization pipeline passed on the M4 Pro
 | OpenBIOS 60-frame hash   | `49d1a17d49708cb1`                                                 |
 
 This is a private candidate built from the release implementation commit, before merging the tooling. It has not been published to GitHub Releases and does not complete the downloaded-launcher player check. The final release must identify its actual reviewed source commit and repeat the same packaging/validation flow; merging a later documentation or implementation commit does not silently retarget an existing archive.
+
+## Released preview and player acceptance
+
+[v0.7.0](https://github.com/lukegskw/muyiunative/releases/tag/v0.7.0) was published on 2026-11-02 from merged commit `a6c39675c4b3541b777efb0dde9aa3a5c0030b2d`, version 0.7.0 (build 66). The final archive is `muyiunative-0.7.0-mac-arm64.zip`, SHA-256 `584fa79917d932430df540586471d46cabafc7149f786569c07a780fa9d5ee39`. Apple accepted submission `12c59a63-89bb-455e-b518-014227e9874a`; the extracted archive passed signature, stapled-ticket, Gatekeeper, kit and bundled boot checks. The ZIP and adjacent checksum were downloaded back from GitHub and matched the local archive.
+
+On the same date, the user confirmed the requested downloaded-launcher test worked: build through the GUI without a terminal and controller play. The resulting Metal Slug X (USA), SLUS-01212 app identifies source `a6c39675c4b3`, 0.7.0 (build 66), in its metadata, matching the published launcher and build log. This completes the player acceptance criterion; it does not extend the previously verified gameplay route or establish whole-game, fresh-Mac, wired or two-player compatibility. The user then authorized making the repository public.
