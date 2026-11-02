@@ -144,7 +144,7 @@ int main(void) {
     GP0(0x01000000);
     GP0(0xe1000300,0x24808080,V(400,128),UV(0,0,0),V(404,128),UV(0,0,0x100),V(400,132),UV(0,0,0));
     CHECK(PX(400,128) == 0 && PX(401,128) == 0x421, "flat modulated polygons dither according to screen coordinates");
-    CHECK((m->gpu.texpage & 0x200) && !m->red, "a polygon's page keeps E1h's dithering, and no texture drawing met a gap of the runtime ([RED])");
+    CHECK((m->gpu.texpage & 0x200) && m->red == RED_GPU_TIMING, "a polygon's page keeps E1h's dithering, and only unmodelled drawing time reports a gap");
     caches();
     ps1_free(m); printf("texture: %d checks, %d failed\n", checks,fails); return fails != 0;
 }

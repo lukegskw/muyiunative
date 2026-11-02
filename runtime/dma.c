@@ -1,7 +1,8 @@
 // The DMA controller (psx-spx, DMA Channels): channels 0..6 (MDEC in, MDEC out, GPU, CD-ROM, SPU, PIO, OTC) move words between main RAM and the devices; DPCR enables
 // them, DICR collects their completions into IRQ 3. Sync mode 0 moves a block at once, mode 1 a number of blocks, mode 2 (GPU only) follows a linked list of packets.
-// GPU linked lists run a packet per scheduled event, releasing the CPU between packets (CPU Operation during DMA). Other transfers run whole when started; MDEC's
-// channels alternate as their FIFO requests allow. Synchronous transfers charge the CPU a cycle per word; linked-list words advance alongside it (device waits remain open).
+// GPU linked lists run a packet per scheduled event. CPU bus stalls during packets are not modelled: psx-spx, CPU Operation during DMA, stalls RAM/I/O reads and a full
+// write queue during transfer, releasing the CPU between entries. Other transfers run whole when started; MDEC's channels alternate as their FIFO requests allow.
+// Synchronous transfers charge the CPU a cycle per word; linked lists currently let the CPU run during those word cycles too (device waits remain open).
 // PIO has nothing connected. Public reference: https://psx-spx.consoledev.net/dmachannels/ and Macroblock Decoder, DMA
 #include "ps1.h"
 #include <string.h>
@@ -51,7 +52,7 @@ void dma_resume(ps1 *m) {
 
 static void mdec_begin(ps1 *m, int ch) {
     ps1_dma *d = &m->dma[ch]; uint32_t mode = d->chcr >> 9 & 3;
-    if (mode > 1 || (d->chcr & 1) != (uint32_t)!ch) { RED_ONCE(m, RED_DMA, "dma: unsupported MDEC channel direction or sync mode"); return; }
+    if (mode > 1 || (d->chcr & 1) != (uint32_t)!ch) { RED_ONCE(m, RED_DMA_MDEC, "dma: unsupported MDEC channel direction or sync mode"); return; }
     if (!d->active) {
         d->block_size = d->bcr & 0xffff ? d->bcr & 0xffff : 0x10000;
         d->blocks = mode ? (d->bcr >> 16 ? d->bcr >> 16 : 0x10000) : 1;
@@ -64,25 +65,26 @@ static void mdec_begin(ps1 *m, int ch) {
 static void to_device(ps1 *m, int ch, uint32_t w) {
     if (ch == 2) gpu_gp0(m, w);
     else if (ch == 4) spu_dma_write(m, w);
-    else RED_ONCE(m, RED_DMA, "dma: channel %d towards its device: nothing takes the words (PIO has nothing connected, the CD-ROM only sends)", ch);
+    else RED_ONCE(m, RED_DMA_TO_DEVICE, "dma: channel %d towards its device: nothing takes the words (PIO has nothing connected, the CD-ROM only sends)", ch);
 }
 
 static uint32_t from_device(ps1 *m, int ch) {
     if (ch == 2) return gpu_read(m);
     if (ch == 3) return cd_dma_read(m);
     if (ch == 4) return spu_dma_read(m);
-    RED_ONCE(m, RED_DMA, "dma: channel %d from its device: nothing sends, RAM gets 0 (PIO has nothing connected)", ch);
+    RED_ONCE(m, RED_DMA_FROM_DEVICE, "dma: channel %d from its device: nothing sends, RAM gets 0 (PIO has nothing connected)", ch);
     return 0;
 }
 
 // The phase-3 route spent 20 seconds inside one DMA store, drawing a three-packet loop 350,000 times with no guest time passing. This must not be a C loop:
 // psx-spx, CPU Operation during DMA, releases the CPU after each linked-list entry. Read each header when its event arrives, so the CPU can change or stop the list.
 // Transfer Rates gives one cycle per GPU word. Mode 2's request is GPUSTAT.28 (GP1 DMA Direction): a completed drawing command holds the next packet until ready.
-// A packet is still transferred whole; FIFO capacity and bus contention within a packet remain open. No packet limit invents a completion or drops data.
+// A packet is still transferred whole; FIFO/bus timing and CPU bus stalls within a packet remain open. No packet limit invents a completion or drops data.
+// t_dma's first GPU list hid every later DMA gap through RED_DMA; each independent gap now owns its report bit, including MDEC and both PIO directions.
 static void list_begin(ps1 *m) {
     ps1_dma *d = &m->dma[2];
     if (!d->active) { d->addr = d->madr & 0x1ffffc; d->active = 1; d->gpu_wait = 0; d->chcr &= ~0x10000000u; m->dma_next = m->cycles + 1; }
-    RED_ONCE(m, RED_DMA, "dma: GPU lists model flat-rectangle drawing time; other drawing costs, FIFO timing and bus contention within packets are not modelled");
+    RED_ONCE(m, RED_DMA_LIST, "dma: GPU lists do not model FIFO/bus timing or CPU bus stalls within packets");
     if (!d->left && m->gpu.dma_dir != 1 && m->gpu.dma_dir != 2) m->dma_next = NEVER;
     sched_update(m);
 }
@@ -119,7 +121,7 @@ static void run(ps1 *m, int ch) {
         uint32_t n = d->bcr & 0xffff ? d->bcr & 0xffff : 0x10000;
         for (uint32_t i = 0; i < n; i++, addr -= 4) { *ram32(m, addr) = i == n - 1 ? 0xffffff : (addr - 4) & 0x1fffff; if (m->native_active) native_written(m, addr & 0x1ffffc, 4); }
         words = n;
-    } else if (mode >= 2) { RED_ONCE(m, RED_DMA, "dma: linked-list mode is only supported on the GPU channel"); return;
+    } else if (mode >= 2) { RED_ONCE(m, RED_DMA_MODE, "dma: linked-list mode is only supported on the GPU channel"); return;
     } else {
         uint32_t n = mode == 0 ? (d->bcr & 0xffff ? d->bcr & 0xffff : 0x10000) : (d->bcr & 0xffff) * (d->bcr >> 16);
         for (uint32_t i = 0; i < n; i++, addr += step) { if (d->chcr & 1) to_device(m, ch, *ram32(m, addr)); else { *ram32(m, addr) = from_device(m, ch); if (m->native_active) native_written(m, addr & 0x1ffffc, 4); } }

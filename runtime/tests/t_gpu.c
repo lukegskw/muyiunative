@@ -12,10 +12,38 @@ static ps1 *m;
 static uint16_t px(int x, int y) { return m->gpu.vram[y * VRAM_W + x]; }
 static int drawn(int x0, int y0, int x1, int y1) { int n = 0; for (int y = y0; y <= y1; y++) for (int x = x0; x <= x1; x++) n += px(x, y) != 0; return n; }
 
+static void drawing_reports(void) {
+    ps1 *saved = m;
+    const struct { unsigned n; uint32_t w[4]; } commands[] = {
+        {3, {0x020000ff, 0, V(1, 1)}}, {4, {0x200000ff, 0, V(1, 0), V(0, 1)}},
+        {3, {0x400000ff, 0, V(1, 1)}}, {4, {0x480000ff, 0, V(1, 1), 0x50005000}},
+        {4, {0x640000ff, 0, 0, V(1, 1)}}, {4, {0x80000000, 0, V(1, 1), V(1, 1)}},
+        {3, {0xa0000000, 0, V(1, 1)}}, {3, {0xc0000000, 0, V(1, 1)}}
+    };
+    for (unsigned i = 0; i < sizeof commands / sizeof *commands; i++) for (int dma = 0; dma < 2; dma++) {
+        m = ps1_new(); CHECK(m, "fresh machine for each drawing report"); if (!m) { m = saved; return; }
+        if (dma) {
+            for (unsigned j = 0; j < commands[i].n; j++) mem_write32(m, 0x10000 + j * 4, commands[i].w[j]);
+            dma_write(m, 0x70, m->dpcr | 0x800); dma_write(m, 0x20, 0x10000); dma_write(m, 0x24, 0x10000 | commands[i].n);
+            dma_write(m, 0x28, 0x01000201);
+        } else {
+            for (unsigned j = 0; j < commands[i].n; j++) gpu_gp0(m, commands[i].w[j]);
+        }
+        CHECK(m->red & RED_GPU_TIMING, "each unmodelled primitive/transfer reports drawing time through CPU GP0 and block DMA");
+        CHECK(!(m->red & RED_DMA_LIST) && !m->gpu.draw_until, "the drawing gap needs no linked list and does not invent drawing occupancy");
+        ps1_free(m);
+    }
+    m = ps1_new(); CHECK(m, "fresh machine for measured drawing"); if (!m) { m = saved; return; }
+    GP0(0, 0xe1000000, 0x600000ff, 0, V(1, 1), 0x680000ff, 0, 0x700000ff, 0, 0x780000ff, 0);
+    CHECK(!(m->red & RED_GPU_TIMING) && m->gpu.draw_until, "settings, no-ops and measured untextured rectangles do not report a drawing gap");
+    ps1_free(m); m = saved;
+}
+
 int main(void) {
     static uint32_t pic[640 * 480];
     m = ps1_new();
     if (!m) { fputs("FAIL: no memory for the machine\n", stderr); return 1; }
+    drawing_reports();
     CHECK(gpu_stat(m) == 0x14802000, "GPUSTAT after reset is 14802000h");
     GP0(0xe1003fff);
     CHECK((gpu_stat(m) & 0x87ff) == 0x7ff, "GP0(E1h) bit 11 is ignored until GP1(09h) allows it (ps1-tests gpu/gp0-e1)");
