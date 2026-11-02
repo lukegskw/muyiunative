@@ -14,7 +14,7 @@ tracks = [
 # 8680bf2 and a0d26af both reach this frame; on the way the game twice draws a GPU list that comes back on itself (docs/development.md, phase 2). With the runtime of
 # commit 52cedd3, scripts/native_game.py made the boot executable 723 functions of native code, which agree with the interpreter in lockstep to this frame (phase 3)
 [validation]
-date = "2026-10-30"
+date = "2026-11-02"
 screen = "title/main menu"
 frames = 2400
 inputs = ["1800:8", "1806:0"]
@@ -24,7 +24,7 @@ frame_hash_fnv1a64 = "a3d45a4b667b9f54"
 
 # Boot latency regression: the OpenBIOS animation uses large untextured triangles, followed by the game's first startup screen.
 [startup]
-date = "2026-11-01"
+date = "2026-11-02"
 screen = "game startup after OpenBIOS animation"
 frames = 600
 inputs = []
@@ -44,7 +44,7 @@ native_vram_cache_match_every_frame = true
 
 # Hold soldier selection for a renderer performance regression: measure frames [4000, 4180), without confirming the character at frame 4200.
 [character_selection]
-date = "2026-10-31"
+date = "2026-11-02"
 screen = "soldier selection"
 frames = 4180
 inputs = ["1800:8", "1806:0", "2450:8", "2456:0", "2600:4000", "2606:0", "3400:4000", "3406:0"]
@@ -166,7 +166,7 @@ pulses = [
 
 # Phase 6: native Metal VRAM and texture/CLUT caches agree with software at every frame of the same first-level route. The scaled picture stays local.
 [first_level.metal_2x]
-date = "2026-10-31"
+date = "2026-11-02"
 scale = 2
 width = 640
 height = 480

@@ -192,8 +192,8 @@ void sio_reset(ps1 *m);
 #define LOG(...) do { fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } while (0)
 #define RED(...) do { fputs("[RED] ", stderr); LOG(__VA_ARGS__); } while (0)
 // A feature gap is reported once per machine, not on every use
-enum { RED_GTE = 1, RED_MDEC = 4, RED_SPU_VOICE = 8, RED_DMA = 32, RED_GPU = 64, RED_CD = 128, RED_COP0 = 256,
+enum { RED_GTE = 1, RED_DMA_LIST = 2, RED_MDEC = 4, RED_SPU_VOICE = 8, RED_DMA_MODE = 16, RED_DMA_MDEC = 32, RED_GPU = 64, RED_CD = 128, RED_COP0 = 256,
        RED_CD_TIMING = 512, RED_CD_AUDIO = 1024, RED_CD_ID = 2048, RED_CD_OVERRUN = 4096, RED_SPU_EFFECT = 8192, RED_GTE_TIMING = 16384, RED_TEX_DISABLE = 32768,
        RED_CD_SCAN = 1 << 16, RED_CD_SESSION = 1 << 17, RED_CD_GETQ = 1 << 18, RED_CD_SOUNDMAP = 1 << 19, RED_CD_IGNORE = 1 << 20, RED_CD_PEAK = 1 << 21,
-       RED_CD_XA = 1 << 22, RED_CD_UNLOCK = 1 << 23 };
+       RED_CD_XA = 1 << 22, RED_CD_UNLOCK = 1 << 23, RED_GPU_TIMING = 1 << 24, RED_DMA_TO_DEVICE = 1 << 25, RED_DMA_FROM_DEVICE = 1 << 26 };
 #define RED_ONCE(m, bit, ...) do { if (!((m)->red & (bit))) { (m)->red |= (bit); RED(__VA_ARGS__); } } while (0)

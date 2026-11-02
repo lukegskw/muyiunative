@@ -3,6 +3,7 @@
 // changes until acknowledged, and can reassert IRQ3 when master enable rises (psx-spx, DMA Channels, 1F8010F4h)
 #include "ps1.h"
 #include <string.h>
+#include <unistd.h>
 
 
 static int checks, fails;
@@ -16,6 +17,38 @@ static uint32_t chcr(int ch) { return mem_read32(m, 0x1f801088 + 16 * (uint32_t)
 static void advance(uint64_t cycles) { m->cycles += cycles; sched_run(m); }
 static uint16_t px(int x, int y) { return m->gpu.vram[y * VRAM_W + x]; }
 static void count_rectangles(void *ctx, const ps1_render_op *op) { if (op->type == RENDER_RECT) (*(unsigned *)ctx)++; }
+
+static void gap_reports(void) {
+    // The first GPU list used RED_DMA and hid MDEC/PIO gaps; MDEC and PIO also hid each other. Capture real stderr on a fresh machine, in encounter order.
+    FILE *log = tmpfile(); int saved = dup(STDERR_FILENO);
+    CHECK(log && saved >= 0, "temporary stderr capture");
+    if (!log || saved < 0) { if (log) fclose(log); if (saved >= 0) close(saved); return; }
+    fflush(stderr); int redirected = dup2(fileno(log), STDERR_FILENO);
+    CHECK(redirected >= 0, "redirect stderr for gap reports");
+    if (redirected >= 0) {
+        mem_write32(m, 0x1f8010f0, m->dpcr | 0x800888);
+        start(2, 0, 0, 0x01000401);
+        start(0, 0, 1, 0x01000401);
+        start(5, 0, 1, 0x11000001);
+        start(5, 0, 1, 0x11000000);
+        start(5, 0, 1, 0x01000401);
+        // Repeat each encounter: each distinct gap must appear once, without another feature consuming its report bit.
+        start(2, 0, 0, 0x01000401); start(0, 0, 1, 0x01000401);
+        start(5, 0, 1, 0x11000001); start(5, 0, 1, 0x11000000); start(5, 0, 1, 0x01000401);
+        fflush(stderr);
+        int restored = dup2(saved, STDERR_FILENO);
+        CHECK(restored >= 0, "restore stderr after gap reports");
+        rewind(log);
+        char out[4096]; size_t n = fread(out, 1, sizeof out - 1, log); out[n] = 0;
+        const char *messages[] = {"[RED] dma: GPU lists", "[RED] dma: unsupported MDEC", "[RED] dma: channel 5 towards its device:",
+                                 "[RED] dma: channel 5 from its device:", "[RED] dma: linked-list mode"};
+        for (unsigned i = 0; i < sizeof messages / sizeof *messages; i++) {
+            const char *p = strstr(out, messages[i]);
+            CHECK(p && !strstr(p + 1, messages[i]), "every DMA gap reports exactly once after a GPU list");
+        }
+    }
+    close(saved); fclose(log); ps1_reset(m);
+}
 
 static void drawing_waits(void) {
     gpu_reset(m); unsigned rectangles = 0; m->render_ctx = &rectangles; m->on_render = count_rectangles;
@@ -70,6 +103,7 @@ static void drawing_waits(void) {
 int main(void) {
     m = ps1_new();
     if (!m) { fputs("FAIL: no memory for the machine\n", stderr); return 1; }
+    gap_reports();
     enum { DPCR = 0x1f8010f0, DICR = 0x1f8010f4 };
     CHECK(mem_read32(m, DPCR) == 0x07654321, "DPCR after reset");
 

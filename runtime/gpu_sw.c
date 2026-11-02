@@ -15,6 +15,9 @@
 static int sext11(uint32_t v) { return (int32_t)(v << 21) >> 21; }
 static int clamp8(int v) { return v < 0 ? 0 : v > 255 ? 255 : v; }
 
+// The DMA-only report missed CPU GP0 writes and block DMA. psx-spx, Drawing Timings, assigns costs to primitives and transfers; only flat rectangles have a fit here.
+static void drawing_gap(ps1 *m) { RED_ONCE(m, RED_GPU_TIMING, "gpu: drawing time is not modelled for primitives and transfers other than untextured rectangles"); }
+
 // Phase 6 consumes decoded operations before the reference draws them. Snapshot the drawing registers: later GP0 words must not change queued commands.
 static void render(ps1 *m, ps1_render_op *op) {
     if (!m->on_render) return;
@@ -140,6 +143,7 @@ static void dot(ps1_gpu *g, int x, int y, int r, int gr, int b, int semi, int di
 // (and holding a mostly vertical one) at the halfway point; gouraud colours step like a polygon's (triangle). Only lines drawn rightwards and downwards show ties there,
 // so the other directions follow the same rule by symmetry
 static void line(ps1 *m, const ps1_vtx *a, const ps1_vtx *b, int gouraud, int semi) {
+    drawing_gap(m);   // polylines bypass execute(), so report when their first segment draws too
     ps1_gpu *g = &m->gpu;
     int dx = b->x - a->x, dy = b->y - a->y, n = MAX(abs(dx), abs(dy));
     if (abs(dx) > 1023 || abs(dy) > 511) return;
@@ -193,8 +197,9 @@ static void rectangle(ps1 *m, uint32_t c, uint64_t at) {
         int width = MAX(0, MIN(v.x + w - 1, g->ax2) - MAX(v.x, g->ax1) + 1);
         int rows = MAX(0, MIN(v.y + h - 1, g->ay2) - MAX(v.y, g->ay1) + 1), semi = c >> 1 & 1;
         // A live DMA cycle requested 70,774 subtractive 304x224 rectangles in one frame: 4.8 billion pixels while GPUSTAT always said ready. Drawing takes time.
-        // psx-spx, Drawing Timings, v2 GPU: setup + rows*per_row + pixels*per_pixel, measured in CPU cycles by nugget's hardware test. Use the documented flat and
-        // semi fits, counting clipped pixels; opaque rectangles draw pixel pairs. These are measured estimates, not cycle-exact FIFO or VRAM arbitration.
+        // psx-spx's development version, Drawing Timings, v2 GPU: setup + rows*per_row + pixels*per_pixel, measured in CPU cycles by nugget's gpu-timing test (MIT).
+        // Its banner warns most changes since April 2026 were AI-written and not all reviewed; recheck these fits against that test when revisiting timing.
+        // Use the flat and semi fits, counting clipped pixels; opaque rectangles draw pixel pairs. These are estimates, not cycle-exact FIFO or VRAM arbitration.
         // https://psx-spx.consoledev.net/dev/ps1/gpu/drawing-timings/
         uint64_t pixels = (uint64_t)(semi ? width : width & ~1) * (uint64_t)rows;
         uint64_t clocks = 50 + (uint64_t)rows * (semi ? 8u : width < 8 ? 5u : 2u) + (pixels * (semi ? 78u : 53u) + 99) / 100;
@@ -303,6 +308,7 @@ static int gp0_len(uint32_t c) {   // the words of a GP0 command, its first incl
 static void execute(ps1 *m, uint64_t at) {
     ps1_gpu *g = &m->gpu;
     uint32_t c = g->buf[0] >> 24;
+    if (c == 0x02 || (c >= 0x20 && c < 0xe0 && c >> 5 != 2 && (c >> 5 != 3 || c & 4))) drawing_gap(m);
     if (c >> 5 >= 1 && c >> 5 <= 3 && (g->dmode & 0x24) == 0x24)   // psx-spx, GP1(08h): "the Vertical Interlace flag DOES affect GP0 draw commands", without saying how
         RED_ONCE(m, RED_GPU, "gpu: drawing in 480-line interlaced mode draws every line; which lines interlace keeps it from drawing is not documented");
     switch (c >> 5) {

@@ -62,7 +62,7 @@ int main(void) {
     emit(ins(35, 8, 10, 0)); emit(0); store(10, 0x2200); finish();
     CHECK(run(m), "GPU program reaches its success exit port");
     CHECK(word(m, 0x2200) == 31 && m->gpu.vram[64 * VRAM_W + 64] == 31, "GPU program uploads a page, draws a textured sprite and reads the framebuffer back");
-    CHECK(!m->red, "and no program met a gap of the runtime ([RED])");
+    CHECK(m->red == RED_GPU_TIMING, "only the GPU program's unmodelled drawing time reports a runtime gap");
 
     printf("homebrew: %d checks, %d failed\n", checks, fails);
     ps1_free(m);
