@@ -41,10 +41,12 @@ static void frame(host *h) {
         if (h->choice && !h->renderer) { RED("host: Metal could not start; keeping the software renderer"); h->choice = 0; front_renderer_set(0); }
     }
     while (h->input_pos < h->ninput && h->input[h->input_pos].frame <= h->frame) h->buttons = h->input[h->input_pos++].buttons;
-    uint16_t b = h->interactive ? front_buttons() : h->buttons;
-    sio_set_pad(h->m, 0, 1, b); h->frame++;
+    front_pad pads[2] = {{1, h->buttons}, {0, 0}};
+    if (h->interactive) front_buttons(pads);
+    for (int port = 0; port < 2; port++) sio_set_pad(h->m, port, pads[port].connected, pads[port].buttons);
+    h->frame++;
     if (h->ref) {   // both machines take the same input and give up the same sound, so that they stay comparable
-        sio_set_pad(h->ref, 0, 1, b);
+        for (int port = 0; port < 2; port++) sio_set_pad(h->ref, port, pads[port].connected, pads[port].buttons);
         if (ps1_lockstep_frame(h->ref, h->m, &h->ls)) { RED("host: lockstep, frame %lu: %s", h->frame - 1, h->ls.report); h->diverged = 1; }
         drain(h->ref, 0);
     } else ps1_run_frame(h->m);

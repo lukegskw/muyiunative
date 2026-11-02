@@ -1,10 +1,10 @@
-# Mac host tests beside their code (plan.md, phases 4-6): replay, keyboard, playback policy and saves need no Apple frameworks, audio device, game, BIOS or GPU.
+# Mac host tests beside their code (plan.md, phases 4-7): replay, keyboard, controllers, playback policy and saves need no Apple frameworks, devices, game, BIOS or GPU.
 # make run checks them; make asan builds the same checks with ASan/UBSan in build/asan. Only persistence needs the runtime, built once into objects.
 B = build
 SAN ?=
 RT = ../../../runtime
 CFLAGS = -O1 -g -Wall -Wextra -I$(RT) $(SAN)
-TESTS = t_keyboard t_replay t_audio t_saves
+TESTS = t_keyboard t_controllers t_replay t_audio t_saves
 OBJ = $(patsubst $(RT)/%.c,$(B)/rt/%.o,$(sort $(wildcard $(RT)/*.c)))
 .DEFAULT_GOAL := run
 .SECONDARY: $(OBJ)
