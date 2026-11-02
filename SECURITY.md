@@ -6,7 +6,7 @@ muyiunative is an early Mac preview. Include the exact build information in a re
 
 Use GitHub's [Report a vulnerability](https://github.com/lukegskw/muyiunative/security/advisories/new) on the repository's Security tab. Include the app version and commit, Mac/macOS version, affected build or playback step, expected impact and reproduction steps using a synthetic input where possible. Do not open a public bug or compatibility report with vulnerability details.
 
-Private vulnerability reporting must be enabled by the maintainer when the repository becomes public. If GitHub does not offer the reporting button, open an ordinary issue asking for a private reporting channel, without including vulnerability details or sensitive files. Do not attach copyrighted game data, even to a private report.
+Private vulnerability reporting is enabled for this public repository. If GitHub does not offer the reporting button, open an ordinary issue asking for a private reporting channel, without including vulnerability details or sensitive files. Do not attach copyrighted game data, even to a private report.
 
 ## Main attack surface
 

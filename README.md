@@ -6,15 +6,15 @@ The aim is native code, not emulation: the game's MIPS code is translated to C a
 
 ## Status
 
-The Mac preview is in preparation (phase 7 of [the plan](plan.md#4-phases-and-exit-criteria)). The launcher builds game apps, with two controller ports, logs and problem reports, persistent memory cards and keyboard remapping. Software is the default renderer; Metal offers 1×, 2× and 4× geometry. Only the game and route in the [compatibility list](#compatibility) have been verified. Whole-game compatibility, whole-route live audio accuracy and hardware timing remain open; expect bugs. A downloadable preview and the final player acceptance check are still pending.
+The [0.7.0 Mac preview is available](https://github.com/lukegskw/muyiunative/releases/tag/v0.7.0). The launcher builds game apps, with two controller ports, logs and problem reports, persistent memory cards and keyboard remapping. The downloaded-launcher build/controller flow has passed its [player check](docs/development.md#phase-7-the-public-preview). Software is the default renderer; Metal offers 1×, 2× and 4× geometry. Only the game and route in the [compatibility list](#compatibility) have been verified. Whole-game compatibility, whole-route live audio accuracy and hardware timing remain open; expect bugs.
 
 ## Install
 
 You need **Apple silicon and macOS 14 or later**. Intel Macs, iPhone and older macOS versions are not supported yet. Building a game app needs Apple's free Command Line Tools; playing a completed app needs no developer tools. Bring a `.cue`/`.bin` dump of your own PS1 disc. A CUE and all the track files it references must stay together; compressed formats such as CHD are not accepted.
 
-The 0.7.0 preview is being prepared as a Developer ID-signed, Apple-notarized ZIP. There is no published launcher download yet; until one appears on [Releases](https://github.com/lukegskw/muyiunative/releases), use the [source build](#build-from-the-command-line). The repository and initial download validation remain private until the player check succeeds.
+Download [muyiunative-0.7.0-mac-arm64.zip](https://github.com/lukegskw/muyiunative/releases/download/v0.7.0/muyiunative-0.7.0-mac-arm64.zip) from the [0.7.0 release](https://github.com/lukegskw/muyiunative/releases/tag/v0.7.0), double-click the ZIP in Finder, and move `muyiunative.app` to your Applications folder. The launcher is Developer ID-signed and notarized by Apple, with its notarization ticket attached; players need no Apple Developer account. Open it and accept macOS's normal first-launch confirmation. If macOS reports an invalid signature, damaged app or failed verification, report that failure before proceeding.
 
-When the preview is available, download its Mac ZIP from Releases, double-click the ZIP in Finder, and move `muyiunative.app` to your Applications folder. Open it and accept macOS's normal first-launch confirmation. The download carries its notarization ticket; it does not require your own Apple Developer account. If macOS reports an invalid signature, damaged app or failed verification, report that failure before proceeding. Choose **Build Game App…** to use your own disc. Keep generated game apps on your Mac: they contain a copy of your disc and cannot be redistributed.
+Choose **Build Game App…** to use your own disc. Keep generated game apps on your Mac: they contain a copy of your disc and cannot be redistributed. The release also provides a SHA-256 checksum; building from source remains available [below](#build-from-the-command-line).
 
 ## Compatibility
 
@@ -40,7 +40,7 @@ Open muyiunative and choose **Build Game App…** (⌘N). Choose a `.cue` or `.b
 
 Player builds need only Apple's free Command Line Tools. If they are missing, the launcher offers **Install Tools**; finish Apple's installation, then choose Build Game App again. The launcher carries its sources, tools, profiles, OpenBIOS and precompiled Metal library. It uses the CLT's Python 3.9 or newer, with the MIT-licensed Tomli backport included; no separate Python, full Xcode or Metal compiler is needed for player builds. Temporary files go in `~/Library/Caches/muyiunative/Builds/` and are removed after success, failure or cancellation. Finder runs keep the build output in the [run log](#version-and-problem-reports).
 
-The downloadable launcher is not released yet. To try this flow from source, build and open it with the commands below. Playing a completed game app needs no developer tools.
+The [downloaded launcher](#install) carries everything except Apple's Command Line Tools. To build the launcher from source instead, use the commands below. Playing a completed game app needs no developer tools.
 
 ## Build from the command line
 
