@@ -10,6 +10,8 @@ Reviewed all historical paths, binary signatures and object sizes. Scanned every
 
 This was a local standard-library pattern scan and manual review, not a proof that unknown or encoded secrets cannot exist. Unreachable local objects, ignored working files, issue attachments and GitHub's internal storage are outside the Git-history count. Repeat the review for new content before publication; a history rewrite was neither necessary nor performed.
 
+After this baseline review, the user approved a narrow compatibility-gallery exception on 2026-11-02: selected actual gameplay screenshots with [capture provenance](images/README.md). The follow-up presentation change adds one unmodified 108,991-byte PNG, `docs/images/metal-slug-x.png`, SHA-256 `0dbc03530cc4f5fe7f5fd1416ea7d03085b1a84be740fa1e38e3ffefb58932c2`. It is an approved gallery image, not an unexplained binary or a test input. The baseline counts and findings below describe 64ed085 before that change; they do not claim the later gallery is image-free.
+
 A supplemental read-only check of all 22 issue/pull-request bodies available on that date found no candidates from the same credential patterns and no attachment or gist links. There were no issue comments or pull-request review comments returned by their repository endpoints. This does not turn the Git audit into a guarantee about GitHub's internal storage.
 
 ## Findings

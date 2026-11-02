@@ -31,10 +31,11 @@ def anchors(path):   # a repeated heading gets -1, -2, …
     return out
 
 
-def links(path):   # (line number, target) of each inline link outside code
+def links(path):   # (line number, target) of Markdown links and gallery HTML href/src outside code
     text = re.sub(r'```.*?```', lambda m: '\n' * m.group(0).count('\n'), path.read_text(), flags=re.S)
     for n, line in enumerate(text.splitlines(), 1):
-        for m in re.finditer(r'\]\(([^)\s]+)\)', re.sub(r'`[^`]*`', '', line)): yield n, m.group(1)
+        for m in re.finditer(r'''\]\(([^)\s]+)\)|<(?:a|img)\b[^>]*?\b(?:href|src)=["']([^"']+)["']''', re.sub(r'`[^`]*`', '', line), re.I):
+            yield n, m.group(1) or m.group(2)
 
 
 class Docs(unittest.TestCase):

@@ -2,7 +2,7 @@
 
 Play your own PlayStation (PS1) discs natively on the Mac, and later on the iPhone. Bring your game (a `.cue`/`.bin` dump of your disc); muyiunative turns it into an app.
 
-The aim is native code, not emulation: the game's MIPS code is translated to C and compiled ahead of time on your Mac, and runs as Apple-silicon code beside a runtime that models the console's hardware; an interpreter covers the code that could not be compiled ahead of time. Nothing from any game or from Sony's BIOS is in this repository: the BIOS muyiunative runs is [OpenBIOS](bios/openbios/README.md), open source and built from source. The project is not affiliated with Sony Interactive Entertainment or any game publisher.
+The aim is native code, not emulation: the game's MIPS code is translated to C and compiled ahead of time on your Mac, and runs as Apple-silicon code beside a runtime that models the console's hardware; an interpreter covers the code that could not be compiled ahead of time. No game files or Sony BIOS dumps are included: the BIOS muyiunative runs is [OpenBIOS](bios/openbios/README.md), open source and built from source. The gallery shows selected screenshots of games running in muyiunative. The project is not affiliated with Sony Interactive Entertainment or any game publisher.
 
 ## Status
 
@@ -16,11 +16,19 @@ There is no published launcher download yet. Until one appears on [Releases](htt
 
 ## Compatibility
 
-| Game                  | Serial     | Verified                                                                                                                                  | Not verified                                                     |
-| --------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| Metal Slug X (USA)    | SLUS-01212 | Boot, title/menu and Mission 1 through its results screen; native/interpreter lockstep; Software and Metal 1×/2×/4×; Xbox Bluetooth input | Rest of the game; wired/two-player input; whole-route live audio |
+Games tested on the Mac. Open a game's image or title for its tested revision, progress and known issues; the [game notes](profiles/README.md) collect the compatibility details. The gallery follows [nxnative's presentation](https://github.com/seedds/nxnative#games).
 
-The first-mission route uses five continues and does not establish that the full game works. [Development](docs/development.md#phase-6-the-metal-renderer) records hashes, timings and the separate live audio checks; the [profile](profiles/SLUS-01212/game.toml) identifies the boot revision and reproducible inputs. No other game is confirmed. Unseen code falls back to the interpreter, which does not guarantee compatibility with an unknown game.
+<table>
+<tr>
+<td align="center" valign="top" width="33%">
+<a href="profiles/SLUS-01212/README.md"><img src="docs/images/metal-slug-x.png" width="256" alt="Metal Slug X (USA), Mission 1 running in muyiunative"></a><br>
+<b><a href="profiles/SLUS-01212/README.md">Metal Slug X (USA)</a></b><br>
+<sub>SLUS-01212 · Mac<br>Mission 1 verified · Xbox Bluetooth</sub>
+</td>
+</tr>
+</table>
+
+The first-mission route uses five continues and does not establish that the full game works. No other game is confirmed. Unseen code falls back to the interpreter, which does not guarantee compatibility with an unknown game. Screenshots show actual muyiunative output; [capture details](docs/images/README.md) identify their build and renderer.
 
 To add evidence, open a [compatibility report](https://github.com/lukegskw/muyiunative/issues/new?template=compatibility_report.yml) with the title, serial, region, boot executable SHA-256, app version, renderer, controller and exactly how far you played. The form explains how to find the hash without a terminal. Report build failures too. Share hashes and observations, never disc data or game apps. For a vulnerability, use [private security reporting](SECURITY.md).
 
