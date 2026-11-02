@@ -25,13 +25,15 @@ Default tests need no game files, retail BIOS or GPU: they build their inputs in
 | ------------------------------------------------------------------ | ------------------------------------------------------------------------ |
 | Runtime unit tests, and OpenBIOS booted to its shell (`t_boot`)    | `make -C runtime/tests run`                                              |
 | The same under ASan and UBSan, in a build folder of their own      | `make -C runtime/tests asan`                                             |
+| Mac host keyboard, replay, audio policy and saves                  | `make -C shell/mac/tests run`                                            |
+| The same Mac host tests under ASan and UBSan                       | `make -C shell/mac/tests asan`                                           |
 | Tool and script tests, the docs' links and AGENTS.md's length      | `python3 -m unittest discover -s tools/tests -v`                         |
 | The app                                                            | `make -C shell/mac app && open shell/mac/build/ps1native.app`            |
 | The host without a window: 300 frames, the last one's hash and PNG | `shell/mac/build/ps1native --headless --frames 300 --png /tmp/frame.png` |
 | The same beside an interpreting machine, compared at block ends    | `shell/mac/build/ps1native --headless --frames 300 --lockstep`           |
 | Metal reference comparison and higher-resolution geometry (GPU)    | `make -C gfx/metal/tests -j3 run`                                        |
 
-A C test (`runtime/tests/t_<what>.c`) includes `ps1.h` and links the whole runtime, built once into objects; it counts its checks with `CHECK`, prints `<what>: N checks, M failed` and exits non-zero on a failure; add it to `TESTS` in `runtime/tests/Makefile`. A Python test is a `unittest` file, `tools/tests/test_<what>.py`, whose docstring says what it checks. A `[RED]` line in a test's output is the runtime reporting what it does not model yet, not a failure. A PNG of a frame stays outside the repository; a frame is compared by its hash (`ps1_frame_hash`).
+A runtime C test (`runtime/tests/t_<what>.c`) includes `ps1.h` and links the whole runtime, built once into objects; it counts its checks with `CHECK`, prints `<what>: N checks, M failed` and exits non-zero on a failure; add it to `TESTS` in `runtime/tests/Makefile`. Mac host C tests live in `shell/mac/tests`, with the same check and summary conventions and their own Makefile; only `t_saves` needs to link the runtime. A Python test is a `unittest` file, `tools/tests/test_<what>.py`, whose docstring says what it checks. A `[RED]` line in a test's output is the runtime reporting what it does not model yet, not a failure. A PNG of a frame stays outside the repository; a frame is compared by its hash (`ps1_frame_hash`).
 
 ### Phase 2: hardware breadth
 
@@ -215,7 +217,7 @@ Warmup and measured playback both had no empty-queue observations, post-prime pa
 
 ## Continuous integration
 
-`.github/workflows/tests.yml` runs on every pull request and push to `main`, on GitHub's `xcode-27` macOS image with Xcode 27.1 named by path in `DEVELOPER_DIR` (a new default Xcode on the image does not move CI): the runtime's unit tests, plain and under ASan and UBSan; the tool tests; and the Mac app, built, packed and checked (`plutil -lint`, `codesign --verify --strict`, the hardened runtime flag, `lipo -archs`), then run without a window from inside the bundle, which boots the OpenBIOS in its Resources.
+`.github/workflows/tests.yml` runs on every pull request and push to `main`, on GitHub's `xcode-27` macOS image with Xcode 27.1 named by path in `DEVELOPER_DIR` (a new default Xcode on the image does not move CI): the runtime's and Mac host's unit tests, plain and under ASan and UBSan; the tool tests; and the Mac app, built, packed and checked (`plutil -lint`, `codesign --verify --strict`, the hardened runtime flag, `lipo -archs`), then run without a window from inside the bundle, which boots the OpenBIOS in its Resources.
 
 `.github/workflows/lint-python.yml` runs ruff and pyright over the tools and scripts (configured in `pyproject.toml`), at the versions pinned in `.github/requirements/lint.txt`. Every finding fails the job: fix it, or silence it on its line (`# noqa: <rule>`, `# pyright: ignore[<rule>]`) with a reason. With the same versions locally, in a venv outside the repository:
 

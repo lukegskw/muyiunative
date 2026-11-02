@@ -1,7 +1,7 @@
 // Phase 5 persistence uses only synthetic cards and temporary directories: fresh formatting, separate slots, durable reopening, collision locks, malformed-file
 // refusal and a failed atomic replacement retaining the previous image. Card protocol and formatting are covered independently by t_sio; no game, BIOS or GPU.
 #include "ps1.h"
-#include "../../shell/mac/saves.h"
+#include "../saves.h"
 #include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>

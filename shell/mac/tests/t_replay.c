@@ -1,6 +1,6 @@
 // Host replays for phase 4 (plan.md): thousands of edges, same-frame changes, malformed masks and ordering. The parser has no Apple-framework dependency, so gameplay
-// input handling is checked alongside the runtime in CI without a GPU. Button masks are passed unchanged to each machine's digital pad (psx-spx, Controllers).
-#include "../../shell/mac/input.h"
+// input handling is checked in CI without a GPU. Button masks are passed unchanged to each machine's digital pad (psx-spx, Controllers).
+#include "../input.h"
 #include <string.h>
 #include <unistd.h>
 

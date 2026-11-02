@@ -59,7 +59,7 @@ ps1native/            (working name)
   shell/mac/  shell/ios/
   bios/openbios/      MIT, bundled
   profiles/<serial>/  game.toml: hash, overlays, function hints, patches
-  tests/              homebrew test programs (no game data); unit tests sit beside their code (runtime/tests, tools/tests)
+  tests/              homebrew test programs (no game data); unit tests sit beside their code (runtime/tests, shell/mac/tests, tools/tests)
   docs/               development: building, tests, CI, house style
 ```
 
@@ -136,3 +136,4 @@ Dump it with an accurate ripping tool (e.g. redumper) to `.cue`/`.bin`.
 | Interrupts taken at the end of a block of code, in the interpreter and in native code       | Between any two instructions            | Both sides see each interrupt at the same point, so the lockstep comparison is exact           |
 | Generated C only in build folders, never in the repository, OpenBIOS's included             | Commit OpenBIOS's generated C           | A game's code is disc data; OpenBIOS's is rebuilt from its committed binary in each build      |
 | Keyboard: WASD + IJKL, Q/E, 1/3, Enter and Backspace; remapping in phase 5                  | Arrows + Z/X/A/S; a numeric keypad      | User's choice for a two-hand keyboard layout without a numeric keypad                          |
+| Mac host tests in `shell/mac/tests`, plain and under ASan/UBSan in CI                       | Keep them in `runtime/tests`            | Tests beside their code; keyboard, replay, audio and saves need no GPU or Apple frameworks     |

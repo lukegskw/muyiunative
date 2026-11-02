@@ -1,7 +1,7 @@
 // The Mac keyboard contract (plan.md, Mac product; README, Keyboard controls): WASD + IJKL separates movement and face buttons. Shifted releases must resolve to
 // the same pad bit as unshifted presses, and Mac Delete must act as Backspace/Select. Remapping must reject malformed preferences and release the original button
 // after a layout change. This uses synthetic characters only, with no AppKit window, game data or GPU.
-#include "../../shell/mac/keys.h"
+#include "../keys.h"
 #include <stdio.h>
 
 static int checks, fails;
