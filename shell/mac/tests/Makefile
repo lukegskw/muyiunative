@@ -4,7 +4,7 @@ B = build
 SAN ?=
 RT = ../../../runtime
 CFLAGS = -O1 -g -Wall -Wextra -I$(RT) $(SAN)
-TESTS = t_keyboard t_controllers t_replay t_audio t_saves
+TESTS = t_keyboard t_controllers t_replay t_audio t_saves t_log t_report
 OBJ = $(patsubst $(RT)/%.c,$(B)/rt/%.o,$(sort $(wildcard $(RT)/*.c)))
 .DEFAULT_GOAL := run
 .SECONDARY: $(OBJ)
@@ -23,6 +23,14 @@ $(B)/rt/%.o: $(RT)/%.c $(wildcard $(RT)/*.h) Makefile
 $(B)/t_saves: t_saves.c ../saves.c ../saves.h $(OBJ) Makefile
 	@mkdir -p $(@D)
 	clang $(CFLAGS) -o $@ t_saves.c ../saves.c $(OBJ)
+
+$(B)/t_log: t_log.c ../log.c ../log.h Makefile
+	@mkdir -p $(@D)
+	clang $(CFLAGS) -pthread -o $@ t_log.c ../log.c
+
+$(B)/t_report: t_report.c ../report.c ../report.h Makefile
+	@mkdir -p $(@D)
+	clang $(CFLAGS) -o $@ t_report.c ../report.c
 
 asan:
 	ASAN_OPTIONS=halt_on_error=1:detect_stack_use_after_return=1 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \

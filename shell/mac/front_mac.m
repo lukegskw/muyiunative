@@ -17,6 +17,7 @@
 #include "product.h"
 #include "audio.h"
 #include "controllers.h"
+#include "report.h"
 
 static atomic_uint g_buttons;
 static atomic_bool g_stop, g_running;
@@ -238,6 +239,7 @@ void front_run(const char *title, void (*run)(void *arg), void *arg) {
     app.activationPolicy = NSApplicationActivationPolicyRegular;   // a Dock icon and a menu bar, also when started from a terminal
     NSString *name = @(title);
     NSMenu *bar = [NSMenu new], *menu = [NSMenu new]; NSMenuItem *item = [NSMenuItem new];
+    front_reports_menu((__bridge void *)menu);
     [menu addItemWithTitle:@"Keyboard Controls…" action:@selector(keyboard:) keyEquivalent:@","].target = g_app;
     [menu addItemWithTitle:[@"Quit " stringByAppendingString:name] action:@selector(terminate:) keyEquivalent:@"q"];
     item.submenu = menu; [bar addItem:item]; app.mainMenu = bar;

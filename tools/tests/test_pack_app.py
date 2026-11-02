@@ -2,10 +2,36 @@
 that codesign verifies, resources (a file and a folder) inside the signed bundle, a second pack over the first, and its refusals: an output that is not an .app, a missing
 resource, and an existing app with another bundle ID, which stays as it was.
 Needs Xcode's command-line tools (clang, otool, codesign); no game files."""
-import os, plistlib, shutil, subprocess, sys, tempfile, unittest
+import os, plistlib, re, shutil, subprocess, sys, tempfile, unittest
 from pathlib import Path
+from unittest.mock import patch
 
 PACK = Path(__file__).resolve().parents[1] / 'pack_app.py'
+sys.path.insert(0, str(PACK.parent))
+import version
+
+
+class Version(unittest.TestCase):
+    def test_report_fields_exist_in_the_issue_form(self):
+        form = (PACK.parents[1] / '.github/ISSUE_TEMPLATE/bug_report.yml').read_text()
+        ids = re.findall(r'^    id: (\S+)$', form, re.M)
+        self.assertEqual(len(ids), len(set(ids)), 'issue form IDs must be unique')
+        self.assertTrue({'app-version', 'commit', 'device', 'game', 'renderer'} <= set(ids))
+
+    def test_shared_version_and_full_history(self):
+        release, build, commit = version.metadata()
+        self.assertEqual(release, '0.7.0'); self.assertRegex(build, r'^[1-9][0-9]*$'); self.assertRegex(commit, r'^[0-9a-f]{12,40}$')
+        self.assertEqual(build, subprocess.check_output(['git', '-C', version.ROOT, 'rev-list', '--count', 'HEAD'], text=True).strip())
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'generated/version.h'; version.header(path); original = path.stat().st_mtime_ns
+            version.header(path); self.assertEqual(path.stat().st_mtime_ns, original, 'unchanged metadata must not rebuild every host')
+            self.assertIn(f'#define FRONT_COMMIT "{commit}"', path.read_text())
+
+    def test_shallow_and_missing_history_fail_clearly(self):
+        with patch('version.subprocess.run', return_value=subprocess.CompletedProcess([], 0, 'true\n', '')):
+            with self.assertRaisesRegex(SystemExit, 'shallow history'): version.metadata()
+        with patch('version.subprocess.run', return_value=subprocess.CompletedProcess([], 128, '', 'not a repository')):
+            with self.assertRaisesRegex(SystemExit, 'cannot read Git history'): version.metadata()
 
 
 @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('codesign'), 'needs macOS and its codesign')
@@ -29,6 +55,8 @@ class PackApp(unittest.TestCase):
         info = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
         self.assertEqual((info['CFBundleExecutable'], info['CFBundleIdentifier'], info['LSMinimumSystemVersion'], info['CFBundlePackageType']),
                          ('Empty Game', 'org.muyiunative.empty-game', '14.0', 'APPL'))
+        release, build, commit = version.metadata()
+        self.assertEqual((info['CFBundleShortVersionString'], info['CFBundleVersion'], info['MuyiunativeCommit']), (release, build, commit))
         self.assertTrue(os.access(app / 'Contents/MacOS/Empty Game', os.X_OK))
         self.assertEqual((app / 'Contents/PkgInfo').read_text(), 'APPL????')
         v = subprocess.run(['codesign', '--verify', '--strict', '--verbose=2', app], capture_output=True, text=True)
@@ -37,6 +65,11 @@ class PackApp(unittest.TestCase):
         self.assertRegex(shown, r'flags=0x[0-9a-f]+\([^)]*runtime', 'signed without the hardened runtime')
         self.assertFalse(app.with_name(app.name + '.partial').exists())
         r = self.pack(app, '--name', 'Empty Game'); self.assertEqual(r.returncode, 0, f'a second pack over its own app: {r.stderr}')
+
+    def test_version_override_keeps_the_build_identity(self):
+        app = self.tmp / 'Version.app'; r = self.pack(app, '--version', '1.2.3'); self.assertEqual(r.returncode, 0, r.stderr)
+        info = plistlib.loads((app / 'Contents/Info.plist').read_bytes()); _, build, commit = version.metadata()
+        self.assertEqual((info['CFBundleShortVersionString'], info['CFBundleVersion'], info['MuyiunativeCommit']), ('1.2.3', build, commit))
 
     def test_refuses_an_output_that_is_not_an_app(self):
         r = self.pack(self.tmp / 'Empty')

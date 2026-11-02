@@ -5,6 +5,7 @@
 #include <string.h>
 #include "product.h"
 #include "ps1.h"
+#include "report.h"
 
 static BOOL copy_string(char *out, size_t cap, id value) {
     if (![value isKindOfClass:NSString.class]) return NO;
@@ -26,6 +27,7 @@ int front_product_load(front_product *p) {
     if ((renderer && ![renderer isEqual:@"software"] && ![renderer isEqual:@"metal"]) ||
         (scale && ![scale isEqual:@1] && ![scale isEqual:@2] && ![scale isEqual:@4])) { RED("host: invalid bundled renderer settings"); return -1; }
     p->render_scale = [renderer isEqual:@"metal"] ? (scale ? [scale intValue] : 1) : 0;
+    if (d[@"Serial"] && !copy_string(p->serial, sizeof p->serial, d[@"Serial"])) { RED("host: invalid bundled game serial"); return -1; }
     return 1;
 }
 int front_save_directory(char *out, size_t cap, const char *id) {
@@ -71,6 +73,7 @@ void front_launcher(void) {
     NSApplication *app = NSApplication.sharedApplication; app.activationPolicy = NSApplicationActivationPolicyRegular;
     Launcher *l = [Launcher new]; l.prefs = [[NSUserDefaults alloc] initWithSuiteName:@"org.muyiunative"]; app.delegate = l;
     NSMenu *bar = [NSMenu new], *menu = [NSMenu new]; NSMenuItem *item = [NSMenuItem new];
+    front_reports_menu((__bridge void *)menu);
     [menu addItemWithTitle:@"Open Game App…" action:@selector(open:) keyEquivalent:@"o"].target = l;
     [menu addItemWithTitle:@"Quit muyiunative" action:@selector(terminate:) keyEquivalent:@"q"]; item.submenu = menu; [bar addItem:item]; app.mainMenu = bar;
     l.window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 520, 270) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable backing:NSBackingStoreBuffered defer:NO];

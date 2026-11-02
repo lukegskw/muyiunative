@@ -17,6 +17,7 @@
 #include "saves.h"
 #include "ps1.h"
 #include "renderer.h"
+#include "report.h"
 
 enum { MAX_W = 640, MAX_H = 576 };   // the largest picture: 640 pixels by 2 x 288 lines (PAL, 480-line mode)
 
@@ -148,10 +149,12 @@ int main(int argc, char **argv) {
     }
     if ((ninput || lockstep || capture) && !headless) return usage();
     if (lockstep && (interpret || capture)) return usage();
+    front_reports_start(headless);
     front_product product = {0}; int bundled = front_product_load(&product);
     if (bundled < 0) { if (!headless) front_error("This game app is incomplete. Build it again from your disc."); return 1; }
     if (disc || exe) bundled = 0; else if (bundled) disc = product.disc;
     if (!headless && !disc && !exe && !bios) { free(inputs); front_launcher(); return 0; }
+    front_reports_game(bundled ? product.serial : "");
     if (renderer < 0) renderer = !headless && bundled && product.render_scale;
     if (!scale) scale = renderer && !headless && bundled && product.render_scale ? product.render_scale : 1;
     if (!renderer && (scale != 1 || verify_renderer)) return usage();
