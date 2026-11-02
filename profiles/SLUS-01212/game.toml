@@ -22,16 +22,50 @@ width = 320
 height = 240
 frame_hash_fnv1a64 = "a3d45a4b667b9f54"
 
-# Checked by scripts/native_game.py: 6,553,245,179 native instructions, none interpreted, and 162,034,340 lockstep stops.
+# Boot latency regression: the OpenBIOS animation uses large untextured triangles, followed by the game's first startup screen.
+[startup]
+date = "2026-11-01"
+screen = "game startup after OpenBIOS animation"
+frames = 600
+inputs = []
+width = 320
+height = 240
+frame_hash_fnv1a64 = "bda8e9ffe2f2ca8f"
+measure_start = 0
+measure_frames = 600
+
+[startup.metal_4x]
+date = "2026-11-01"
+scale = 4
+width = 1280
+height = 960
+frame_hash_fnv1a64 = "ab7eaea5274d1de5"
+native_vram_cache_match_every_frame = true
+
+# Hold soldier selection for a renderer performance regression: measure frames [4000, 4180), without confirming the character at frame 4200.
+[character_selection]
+date = "2026-10-31"
+screen = "soldier selection"
+frames = 4180
+inputs = ["1800:8", "1806:0", "2450:8", "2456:0", "2600:4000", "2606:0", "3400:4000", "3406:0"]
+width = 320
+height = 240
+frame_hash_fnv1a64 = "5067f1ee7f0ce044"
+measure_start = 4000
+measure_frames = 180
+
+# Revalidated after drawing waits: 6,553,267,283 native instructions, none interpreted, and 161,859,326 lockstep stops.
 # Phase 4 acceptance route, from reset through Mission 1 to its prisoner-recapture results. Normal pad inputs only, including five continues; no save state or patch.
 [first_level]
-date = "2026-10-30"
+date = "2026-11-01"
 screen = "Mission 1 clear / recaptured prisoner"
 frames = 22985
 width = 320
 height = 240
 frame_hash_fnv1a64 = "a3d22ce034bdb516"
 continues = 5
+native_instructions = 6553267283
+lockstep_stops = 161859326
 inputs = [
   "1800:8", "1806:0", "2450:8", "2456:0", "2600:4000", "2606:0",
   "3400:4000", "3406:0", "4200:4000", "4206:0", "5300:20", "6050:80",
@@ -138,3 +172,18 @@ width = 640
 height = 480
 frame_hash_fnv1a64 = "3a397f1616c14095"
 native_vram_cache_match_every_frame = true
+
+# Rechecked after shared textured rasterization and measured flat-rectangle DMA waits, across the complete first-level route.
+[first_level.metal_4x]
+date = "2026-11-01"
+scale = 4
+width = 1280
+height = 960
+frame_hash_fnv1a64 = "d5498cb34b5b0245"
+native_vram_cache_match_every_frame = true
+timing_machine = "Apple M4 Pro"
+timing_mode = "headless, reference checks outside timed sections"
+mean_frame_ms = 3.043
+p95_frame_ms = 5.954
+max_frame_ms = 11.460
+frames_above_16_7_ms = 0

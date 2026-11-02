@@ -14,6 +14,7 @@
 #include "ps1.h"
 #include "keyboard.h"
 #include "product.h"
+#include "audio.h"
 
 static atomic_uint g_buttons;
 static atomic_bool g_stop, g_running;
@@ -82,47 +83,72 @@ static frame g_new, g_shown;                          // the newest frame (the m
 static bool g_fresh;
 static atomic_bool g_queued;                          // a present is queued on the main thread
 
-// Audio Queue Services owns its playback thread; only the front end's bounded ring is shared. The runtime's audio ring is drained on its machine thread
-enum { AUDIO_CAP = 8192, AUDIO_CHUNK = 512 };
+// The machine writes the bounded sample ring; one serial delivery queue owns returned buffers and every enqueue, preserving sample order without blocking a callback.
+enum { AUDIO_CHUNK = FRONT_AUDIO_CHUNK, AUDIO_BUFFERS = FRONT_AUDIO_BUFFERS };
 static os_unfair_lock g_audio_lock = OS_UNFAIR_LOCK_INIT;
-static int16_t g_audio[AUDIO_CAP * 2]; static unsigned g_audio_read, g_audio_count;
+static front_audio_state g_audio_state;
 static AudioQueueRef g_audio_queue;
+static AudioQueueBufferRef g_audio_buffers[AUDIO_BUFFERS];
+static dispatch_queue_t g_audio_delivery;
 static atomic_bool g_audio_failed;
+static void audio_service(void) {
+    if (!g_audio_queue) return;
+    for (;;) {
+        unsigned id; int16_t samples[AUDIO_CHUNK * 2];
+        os_unfair_lock_lock(&g_audio_lock);
+        int ready = front_audio_take(&g_audio_state, &id, samples);
+        os_unfair_lock_unlock(&g_audio_lock);
+        if (!ready) return;
+        AudioQueueBufferRef b = g_audio_buffers[id];
+        memcpy(b->mAudioData, samples, sizeof samples); b->mAudioDataByteSize = sizeof samples;
+        OSStatus err = AudioQueueEnqueueBuffer(g_audio_queue, b, 0, NULL);
+        if (err) { if (!atomic_exchange(&g_audio_failed, true)) RED("front end: cannot enqueue audio (%d)", (int)err); return; }
+    }
+}
 void front_audio(const int16_t *samples, int frames) {
+    if (!g_audio_delivery || frames <= 0) return;
     os_unfair_lock_lock(&g_audio_lock);
-    for (int i = 0; i < frames; i++) {
-        if (g_audio_count == AUDIO_CAP) { g_audio_read = (g_audio_read + 1) % AUDIO_CAP; g_audio_count--; }
-        unsigned at = (g_audio_read + g_audio_count++) % AUDIO_CAP;
-        g_audio[at * 2] = samples[i * 2]; g_audio[at * 2 + 1] = samples[i * 2 + 1];
-    }
+    front_audio_push(&g_audio_state, samples, (unsigned)frames);
     os_unfair_lock_unlock(&g_audio_lock);
+    dispatch_async(g_audio_delivery, ^{ audio_service(); });
 }
-static OSStatus audio_fill(AudioQueueRef q, AudioQueueBufferRef b) {
-    int16_t *out = b->mAudioData;
-    memset(out, 0, AUDIO_CHUNK * 4);
+static void audio_buffer(AudioQueueRef q, AudioQueueBufferRef b) {
+    if (!g_audio_queue || q != g_audio_queue) return;
+    // The results callback padded 144 zero samples although real data arrived 1.68 ms later and two buffers were still queued. A returned buffer belongs to us
+    // (Apple, AudioQueueOutputCallbackBlock); retain it until a complete real block is available, then enqueue from this same serial queue without blocking callbacks.
     os_unfair_lock_lock(&g_audio_lock);
-    for (unsigned i = 0; i < AUDIO_CHUNK && g_audio_count; i++, g_audio_count--) {
-        out[i * 2] = g_audio[g_audio_read * 2]; out[i * 2 + 1] = g_audio[g_audio_read * 2 + 1]; g_audio_read = (g_audio_read + 1) % AUDIO_CAP;
-    }
+    int err = front_audio_return(&g_audio_state, (unsigned)(uintptr_t)b->mUserData);
     os_unfair_lock_unlock(&g_audio_lock);
-    b->mAudioDataByteSize = AUDIO_CHUNK * 4;
-    return AudioQueueEnqueueBuffer(q, b, 0, NULL);
-}
-static void audio_buffer(void *arg, AudioQueueRef q, AudioQueueBufferRef b) {
-    (void)arg; OSStatus err = audio_fill(q, b);
-    if (err && !atomic_exchange(&g_audio_failed, true)) RED("front end: cannot enqueue audio (%d)", (int)err);
+    if (err) { if (!atomic_exchange(&g_audio_failed, true)) RED("front end: invalid returned audio buffer"); return; }
+    audio_service();
 }
 static void audio_start(void) {
-    AudioStreamBasicDescription format = {.mSampleRate = 44100, .mFormatID = kAudioFormatLinearPCM,
-        .mFormatFlags = kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked, .mBytesPerPacket = 4, .mFramesPerPacket = 1,
-        .mBytesPerFrame = 4, .mChannelsPerFrame = 2, .mBitsPerChannel = 16};
-    OSStatus err = AudioQueueNewOutput(&format, audio_buffer, NULL, NULL, NULL, 0, &g_audio_queue);
-    for (int i = 0; !err && i < 3; i++) {
-        AudioQueueBufferRef b; err = AudioQueueAllocateBuffer(g_audio_queue, AUDIO_CHUNK * 4, &b);
-        if (!err) err = audio_fill(g_audio_queue, b);
-    }
+    dispatch_queue_attr_t attr = dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INTERACTIVE, 0);
+    g_audio_delivery = dispatch_queue_create("org.ps1native.audio", attr);
+    if (!g_audio_delivery) { RED("front end: cannot create audio delivery queue"); return; }
+    __block OSStatus err = 0;
+    dispatch_sync(g_audio_delivery, ^{
+        AudioStreamBasicDescription format = {.mSampleRate = 44100, .mFormatID = kAudioFormatLinearPCM,
+            .mFormatFlags = kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked, .mBytesPerPacket = 4, .mFramesPerPacket = 1,
+            .mBytesPerFrame = 4, .mChannelsPerFrame = 2, .mBitsPerChannel = 16};
+        err = AudioQueueNewOutputWithDispatchQueue(&g_audio_queue, &format, 0, g_audio_delivery,
+            ^(AudioQueueRef q, AudioQueueBufferRef b) { audio_buffer(q, b); });
+        for (unsigned i = 0; !err && i < AUDIO_BUFFERS; i++) {
+            AudioQueueBufferRef b; err = AudioQueueAllocateBuffer(g_audio_queue, AUDIO_CHUNK * 4, &b);
+            if (!err) {
+                g_audio_buffers[i] = b; b->mUserData = (void *)(uintptr_t)i;
+                memset(b->mAudioData, 0, AUDIO_CHUNK * 4); b->mAudioDataByteSize = AUDIO_CHUNK * 4;
+                err = AudioQueueEnqueueBuffer(g_audio_queue, b, 0, NULL);   // the same three silent startup buffers, before the machine begins
+            }
+        }
+    });
     if (!err) err = AudioQueueStart(g_audio_queue, NULL);
-    if (err) { RED("front end: cannot start audio (%d)", (int)err); if (g_audio_queue) AudioQueueDispose(g_audio_queue, true); g_audio_queue = NULL; }
+    if (err) {
+        RED("front end: cannot start audio (%d)", (int)err);
+        __block AudioQueueRef failed;
+        dispatch_sync(g_audio_delivery, ^{ failed = g_audio_queue; g_audio_queue = NULL; });
+        if (failed) AudioQueueDispose(failed, true);   // let the callback queue drain while disposal waits for outstanding callbacks
+    }
 }
 
 static int fit(frame *f, size_t n) {

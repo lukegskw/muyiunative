@@ -18,7 +18,7 @@ static void dicr_update(ps1 *m) {   // bit 31 is the master flag; IRQ 3 is raise
 }
 
 static void complete(ps1 *m, int ch) {
-    m->dma[ch].active = 0; m->dma[ch].chcr &= ~0x11000000u;
+    m->dma[ch].active = m->dma[ch].gpu_wait = 0; m->dma[ch].chcr &= ~0x11000000u;
     // t_dma: a completion with master disabled wrongly latched a flag; disabling a channel mask also wrongly hid an existing flag. psx-spx, DICR: both enables gate
     // generation; once latched, flags contribute to the master output independently of the current channel mask, until acknowledged
     if ((m->dicr & 0x800000) && (m->dicr & 1u << (16 + ch))) m->dicr |= 1u << (24 + ch);
@@ -77,11 +77,24 @@ static uint32_t from_device(ps1 *m, int ch) {
 
 // The phase-3 route spent 20 seconds inside one DMA store, drawing a three-packet loop 350,000 times with no guest time passing. This must not be a C loop:
 // psx-spx, CPU Operation during DMA, releases the CPU after each linked-list entry. Read each header when its event arrives, so the CPU can change or stop the list.
-// Transfer Rates gives one cycle per GPU word. GPU drawing time and bus contention within a packet remain open; no packet limit invents a completion or drops data.
+// Transfer Rates gives one cycle per GPU word. Mode 2's request is GPUSTAT.28 (GP1 DMA Direction): a completed drawing command holds the next packet until ready.
+// A packet is still transferred whole; FIFO capacity and bus contention within a packet remain open. No packet limit invents a completion or drops data.
 static void list_begin(ps1 *m) {
     ps1_dma *d = &m->dma[2];
-    if (!d->active) { d->addr = d->madr & 0x1ffffc; d->active = 1; d->chcr &= ~0x10000000u; m->dma_next = m->cycles + 1; }
-    RED_ONCE(m, RED_DMA, "dma: GPU list packets take word-transfer time; GPU drawing waits and bus contention within a packet are not modelled");
+    if (!d->active) { d->addr = d->madr & 0x1ffffc; d->active = 1; d->gpu_wait = 0; d->chcr &= ~0x10000000u; m->dma_next = m->cycles + 1; }
+    RED_ONCE(m, RED_DMA, "dma: GPU lists model flat-rectangle drawing time; other drawing costs, FIFO timing and bus contention within packets are not modelled");
+    if (!d->left && m->gpu.dma_dir != 1 && m->gpu.dma_dir != 2) m->dma_next = NEVER;
+    sched_update(m);
+}
+
+void dma_gpu_resume(ps1 *m) {
+    ps1_dma *d = &m->dma[2];
+    if (!d->active || !(m->dpcr & 0x800) || d->left) return;
+    if (m->gpu.dma_dir != 1 && m->gpu.dma_dir != 2) { m->dma_next = NEVER; d->gpu_wait = 0; }
+    else if (m->dma_next == NEVER || d->gpu_wait) {
+        m->dma_next = m->cycles + 1; d->gpu_wait = 0;
+        if (m->gpu.dma_dir == 2 && m->gpu.draw_until > m->dma_next) { m->dma_next = m->gpu.draw_until; d->gpu_wait = 1; }
+    }
     sched_update(m);
 }
 
@@ -89,8 +102,11 @@ void dma_event(ps1 *m) {
     ps1_dma *d = &m->dma[2];
     if (!d->active || !(m->dpcr & 0x800)) { m->dma_next = NEVER; return; }
     if (d->left) { complete(m, 2); m->dma_next = NEVER; return; }
+    d->gpu_wait = 0;
+    if (m->gpu.dma_dir != 1 && m->gpu.dma_dir != 2) { m->dma_next = NEVER; return; }
+    if (m->gpu.dma_dir == 2 && m->dma_next < m->gpu.draw_until) { m->dma_next = m->gpu.draw_until; d->gpu_wait = 1; return; }
     uint32_t h = *ram32(m, d->addr), n = h >> 24;
-    for (uint32_t i = 1; i <= n; i++) gpu_gp0(m, *ram32(m, d->addr + 4 * i));
+    for (uint32_t i = 1; i <= n; i++) gpu_gp0_at(m, *ram32(m, d->addr + 4 * i), m->dma_next + i);
     d->madr = h & 0xffffff; d->addr = h & 0x1ffffc;
     d->left = (h & 0x800000) != 0;   // finish only after the final packet's words have taken their time
     m->dma_next += n + 1;
@@ -141,6 +157,6 @@ void dma_write(ps1 *m, uint32_t off, uint32_t v) {
     switch (off & 0xf) {
     case 0: d->madr = v & 0xffffff; break;
     case 4: d->bcr = v; break;
-    case 8: d->active = 0; d->left = 0; if (ch == 2) m->dma_next = NEVER; d->chcr = ch == 6 ? (v & 0x51000000) | 2 : v & 0x71770703; maybe_run(m, ch); sched_update(m); break;   // OTC always runs backwards, to RAM
+    case 8: d->active = d->gpu_wait = 0; d->left = 0; if (ch == 2) m->dma_next = NEVER; d->chcr = ch == 6 ? (v & 0x51000000) | 2 : v & 0x71770703; maybe_run(m, ch); sched_update(m); break;   // OTC always runs backwards, to RAM
     }
 }

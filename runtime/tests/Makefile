@@ -3,7 +3,7 @@
 B = build
 SAN ?=
 CFLAGS = -O1 -g -Wall -Wextra -I.. $(SAN)
-TESTS = t_mem t_cpu t_cycles t_native t_overlays t_replay t_keyboard t_saves t_render t_lockstep t_dma t_timers t_gpu t_texture t_gte t_spu t_sio t_mdec t_cdrom t_disc t_cdread t_cdaudio t_homebrew t_boot t_ps1tests
+TESTS = t_mem t_cpu t_cycles t_native t_overlays t_replay t_keyboard t_audio t_saves t_render t_lockstep t_dma t_timers t_gpu t_texture t_gte t_spu t_sio t_mdec t_cdrom t_disc t_cdread t_cdaudio t_homebrew t_boot t_ps1tests
 RT = $(sort $(wildcard ../*.c))
 OBJ = $(patsubst ../%.c,$(B)/rt/%.o,$(RT))
 BIOS = $(abspath ../../bios/openbios/openbios.bin)
@@ -25,6 +25,7 @@ $(B)/t_%: t_%.c $(OBJ) Makefile
 
 $(B)/t_replay: ../../shell/mac/input.h
 $(B)/t_keyboard: ../../shell/mac/keys.h ../../runtime/sio.h
+$(B)/t_audio: ../../shell/mac/audio.h
 
 $(B)/t_saves: t_saves.c ../../shell/mac/saves.c ../../shell/mac/saves.h $(OBJ) Makefile
 	clang $(CFLAGS) -o $@ t_saves.c ../../shell/mac/saves.c $(OBJ)
