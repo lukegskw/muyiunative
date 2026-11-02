@@ -4,7 +4,7 @@ Issues and pull requests are welcome. This page says how a change gets in; what 
 
 ## Reporting a problem
 
-Open an issue with the bug report form. It asks for what a problem is traced with: the muyiunative commit, the Mac and its macOS version, how it was built and run, the game's serial if a game was involved, and the whole output of the run.
+Choose Report a Problem in the app menu to reveal the current Finder run's log and open the bug form with its app version, commit, Mac/macOS, game serial and renderer filled in. Describe what happened, how it was built and run, and attach the whole log. About muyiunative also shows the version and commit. For a terminal run, copy its whole output; headless checks keep their output in the terminal or calling build tool.
 
 ## Never game data
 

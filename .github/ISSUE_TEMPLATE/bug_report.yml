@@ -20,10 +20,18 @@ body:
     validations:
       required: false
   - type: input
+    id: app-version
+    attributes:
+      label: App version
+      description: "From About muyiunative or the first log line, including the build number. Report a Problem fills this in."
+      placeholder: 0.7.0 (build 123)
+    validations:
+      required: true
+  - type: input
     id: commit
     attributes:
       label: muyiunative commit
-      description: "`git rev-parse --short HEAD` in the checkout you built from."
+      description: "From About muyiunative, the first log line, or `git rev-parse --short HEAD` in the checkout."
     validations:
       required: true
   - type: input
@@ -41,6 +49,13 @@ body:
       placeholder: MacBook Pro M2 Max, macOS 26.1
     validations:
       required: true
+  - type: input
+    id: renderer
+    attributes:
+      label: Renderer
+      description: Software or Metal and its scale, as shown in the Graphics menu. Report a Problem fills this in.
+    validations:
+      required: true
   - type: textarea
     id: how
     attributes:
@@ -53,7 +68,8 @@ body:
     attributes:
       label: Logs
       description: |
-        The whole output of the run from its start, not excerpts (drag the file here). From a terminal,
+        Report a Problem reveals the current run's log in Finder; drag that file here. Logs from Finder launches are in
+        ~/Library/Logs/muyiunative/<bundle id>/ (last five runs; home paths are replaced with ~). From a terminal,
         `shell/mac/build/muyiunative.app/Contents/MacOS/muyiunative 2>&1 | tee run.log` keeps it in run.log. For a build failure, the build's full output.
     validations:
       required: true

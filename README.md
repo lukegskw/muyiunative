@@ -6,7 +6,7 @@ The aim is native code, not emulation: the game's MIPS code is translated to C a
 
 ## Status
 
-Phase 6 of [the plan](plan.md#4-phases-and-exit-criteria) adds independent Metal rendering at 1×, 2× and 4×. Native Metal VRAM and texture caches match the software renderer throughout Metal Slug X (USA)'s first mission. The software renderer remains the default and the console reference; higher-resolution Metal output retains that CPU work ([Development](docs/development.md#phase-6-the-metal-renderer)). Phase 7, the Mac public preview, is in progress: game apps now support two controllers, alongside the launcher, persistent memory cards and keyboard remapping. Building from the launcher, problem reports and a downloadable preview remain to come. Broader compatibility, audible game output and hardware-timing accuracy remain open.
+Phase 6 of [the plan](plan.md#4-phases-and-exit-criteria) adds independent Metal rendering at 1×, 2× and 4×. Native Metal VRAM and texture caches match the software renderer throughout Metal Slug X (USA)'s first mission. The software renderer remains the default and the console reference; higher-resolution Metal output retains that CPU work ([Development](docs/development.md#phase-6-the-metal-renderer)). Phase 7, the Mac public preview, is in progress: game apps now support two controllers, logs and problem reports, alongside the launcher, persistent memory cards and keyboard remapping. Building from the launcher and a downloadable preview remain to come. Broader compatibility, audible game output and hardware-timing accuracy remain open.
 
 ## Build from the command line
 
@@ -38,6 +38,14 @@ open shell/mac/build/muyiunative.app
 
 Game apps connect two memory cards and save them in `~/Library/Application Support/muyiunative/Saves/<serial>-<boot-sha256>/card1.mcr` and `card2.mcr`. They are raw 128 KB images, created only when missing, saved once per emulated second when dirty and again before quitting. Moving or rebuilding the same game app preserves its saves. Close the game before backing up or replacing its cards; a second copy cannot use the same save folder simultaneously. Invalid cards are reported and kept intact.
 
+### Version and problem reports
+
+Choose **About muyiunative…** in the app menu to see its version, build number and commit. The preview version is 0.7.0; the build number counts commits in the complete Git history. Every packed app carries this information, including game apps.
+
+Apps opened from Finder save their output under `~/Library/Logs/muyiunative/<bundle id>/`, keeping the last five runs for that app. Logs start with the version and commit, and replace your home directory in paths with `~`. **Report a Problem…** reveals the current log in Finder and opens the bug form with the version, commit, Mac model, macOS version, game serial and current renderer filled in. Describe the problem and attach the log before submitting the form yourself. Never attach a disc, BIOS dump, memory card, save state or extracted game data.
+
+Terminal sessions keep their normal output; copy it for a report. Headless build and validation runs also keep stdout/stderr and create no persistent logs. An app started from a terminal with both streams redirected uses a log instead. A developer host using an external disc leaves the serial field empty; bundled game apps fill it from their metadata.
+
 ### Graphics
 
 Choose Software or Metal at 1×, 2× or 4× in the game app's Graphics menu. Switching keeps the game running. Software remains the default. Metal draws the PS1 commands independently on the GPU; 2× and 4× add geometry samples, while textures retain their source resolution. Native-width lines, 24-bit video and texture-feedback regions retain native pixel detail. The software GPU still maintains the console's reference VRAM, so this version prioritizes higher-resolution output and exact native rendering over a CPU speed-up.
@@ -62,7 +70,7 @@ Connect a macOS-supported extended gamepad over USB, or pair it in System Settin
 | Menu / Options                 | Start / Select                    |
 | D-pad or left stick            | Up / Left / Down / Right          |
 
-Face buttons follow their positions rather than their printed letters. The left stick becomes digital at ±0.5 on each axis; triggers activate at 0.5. D-pad and stick directions combine. A controller without an Options button can use the keyboard's Select binding on port 1. Physical wired/wireless play and two-player hardware checks are still pending ([Development](docs/development.md#phase-7-the-public-preview)).
+Face buttons follow their positions rather than their printed letters. The left stick becomes digital at ±0.5 on each axis; triggers activate at 0.5. D-pad and stick directions combine. A controller without an Options button can use the keyboard's Select binding on port 1. Xbox Bluetooth input has been checked in Metal Slug X (USA); wired and two-player hardware checks are still pending ([Development](docs/development.md#phase-7-the-public-preview)).
 
 ### Keyboard controls
 

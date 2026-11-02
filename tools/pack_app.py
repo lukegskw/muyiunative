@@ -5,10 +5,11 @@
 # it from phase 5 on. A resource, file or folder, is copied into Contents/Resources under its own name.
 # The app is written to a unique temporary directory beside <out.app>, then moved into place, so a failed pack leaves the previous app as it was. An existing <out.app> is replaced only when it carries
 # the same bundle ID: the script never deletes an app it did not pack.
-# Usage: pack_app.py <out.app> --exe <host> [--resource <path>]... [--name muyiunative] [--bundle-id org.muyiunative.<name>] [--version 0.0] [--sign -]
+# Usage: pack_app.py <out.app> --exe <host> [--resource <path>]... [--name muyiunative] [--bundle-id org.muyiunative.<name>] [--version 0.7.0] [--sign -]
 import argparse, plistlib, re, shutil, subprocess, sys, tempfile
 from pathlib import Path
 from xml.parsers.expat import ExpatError
+from version import metadata
 
 
 def run(cmd):
@@ -27,7 +28,9 @@ def bundle_id(a): return a.bundle_id or 'org.muyiunative.' + (re.sub(r'[^a-z0-9]
 
 
 def info_plist(a, minos):
-    return {'CFBundleName': a.name, 'CFBundleDisplayName': a.name, 'CFBundleIdentifier': bundle_id(a), 'CFBundleVersion': a.version, 'CFBundleShortVersionString': a.version,
+    version, build, commit = metadata()
+    return {'CFBundleName': a.name, 'CFBundleDisplayName': a.name, 'CFBundleIdentifier': bundle_id(a), 'CFBundleVersion': build, 'CFBundleShortVersionString': a.version or version,
+            'MuyiunativeCommit': commit,
             'CFBundlePackageType': 'APPL', 'CFBundleExecutable': a.name, 'CFBundleInfoDictionaryVersion': '6.0', 'LSMinimumSystemVersion': minos,
             'LSArchitecturePriority': ['arm64'], 'NSHighResolutionCapable': True, 'LSApplicationCategoryType': 'public.app-category.games'}
 
@@ -73,7 +76,7 @@ def parse(argv):
     ap.add_argument('--resource', action='append', default=[], help='a file or folder for Contents/Resources (repeatable)')
     ap.add_argument('--name', default='muyiunative', help="the app's name, also its executable's (default: muyiunative)")
     ap.add_argument('--bundle-id', help='default: org.muyiunative.<name>')
-    ap.add_argument('--version', default='0.0')
+    ap.add_argument('--version', help='release version (default: the version in tools/version.py)')
     ap.add_argument('--sign', default='-', help='codesign identity (default: - = ad-hoc)')
     return ap.parse_args(argv)
 

@@ -12,14 +12,19 @@ BIOS = ../../bios/openbios
 TOOLS = ../../tools
 LIB = $(GEN)/ps1gpu.metallib
 RTSRC = $(sort $(wildcard $(RT)/*.c))
-SRC = main.c front_mac.m keyboard.m product.m saves.c $(GFX)/present.m $(GFX)/renderer.m $(RTSRC) $(GEN)/openbios.c
-HDR = front.h audio.h controllers.h input.h keys.h keyboard.h product.h saves.h $(GFX)/present.h $(GFX)/renderer.h $(wildcard $(RT)/*.h)
+SRC = main.c front_mac.m keyboard.m product.m reports.m log.c report.c saves.c $(GFX)/present.m $(GFX)/renderer.m $(RTSRC) $(GEN)/openbios.c
+HDR = front.h audio.h controllers.h input.h keys.h keyboard.h product.h log.h report.h saves.h $(GEN)/version.h $(GFX)/present.h $(GFX)/renderer.h $(wildcard $(RT)/*.h)
 CODEGEN = $(TOOLS)/codegen.py $(TOOLS)/analyze.py $(TOOLS)/mips.py $(TOOLS)/exe.py $(TOOLS)/overlays.py
-CFLAGS = -arch arm64 -mmacosx-version-min=$(MINOS) -O2 -g -Wall -Wextra -fobjc-arc -I$(RT) -I$(GFX)
+CFLAGS = -arch arm64 -mmacosx-version-min=$(MINOS) -O2 -g -Wall -Wextra -fobjc-arc -I$(RT) -I$(GFX) -I$(GEN)
 FRAMEWORKS = -framework AppKit -framework QuartzCore -framework Metal -framework CoreGraphics -framework ImageIO -framework AudioToolbox -framework UniformTypeIdentifiers -framework GameController
 .DEFAULT_GOAL := host
 
 host: $(B)/muyiunative
+
+$(GEN)/version.h: FORCE $(TOOLS)/version.py
+	python3 $(TOOLS)/version.py --header $@
+
+FORCE:
 
 $(B)/muyiunative: $(SRC) $(HDR) Makefile | $(LIB)
 	@mkdir -p $(B)
@@ -64,4 +69,4 @@ app: $(B)/muyiunative $(wildcard $(BIOS)/*)
 clean:
 	rm -rf $(B)
 
-.PHONY: host app game clean
+.PHONY: host app game clean FORCE
