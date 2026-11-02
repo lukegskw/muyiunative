@@ -13,7 +13,7 @@
 | Mac app      | `tools/mac_build.py`, `tools/pack_app.py` | `scripts/ps1native build disc.cue --platform mac-app`     | Native game app with a bundled local disc, or `make -C shell/mac app` for the launcher; ad-hoc signed with the hardened runtime                               |
 | Recompiler   | `tools/` (Python)                         | run on the Mac: `python3 tools/codegen.py`                | Reads PS-X EXEs, decodes MIPS I, finds functions and blocks, and writes them as C the runtime runs natively, including captured code versions (phases 3–4)    |
 
-There is no Xcode project for the Mac, and nothing to install beyond Xcode and Python: plain Makefiles drive clang (`make -C <folder>`), and Python scripts pack what clang built, as in nxnative. The iOS app (phase 7) will get its Xcode project generated (XcodeGen). Build outputs go to `build/` beside each Makefile, which git ignores.
+There is no Xcode project for the Mac: plain Makefiles drive clang (`make -C <folder>`), and Python scripts pack what clang built, as in nxnative. Every host build also requires Xcode's Metal Toolchain (`xcodebuild -downloadComponent MetalToolchain` if missing), even with software rendering, to compile the offline metallib; no shader source is compiled on the device ([decision log](../plan.md#8-decision-log)). Beyond Xcode, that toolchain download and Python, nothing is installed. The iOS app (phase 7) will get its Xcode project generated (XcodeGen). Build outputs go to `build/` beside each Makefile, which git ignores.
 
 The host is built for Apple silicon (`arm64`) and macOS 14 or later (`MINOS` in `shell/mac/Makefile`). `pack_app.py` reads the deployment target back from the host (`LC_BUILD_VERSION`) for `LSMinimumSystemVersion`, so the two cannot disagree, and signs the app with the hardened runtime: nothing is generated or mapped executable at run time ([plan.md](../plan.md#2-architecture), core rule). It replaces only an app it packed itself (the same bundle ID).
 
@@ -171,8 +171,8 @@ On 2026-11-01, a follow-up report found audible gaps during the OpenBIOS animati
 
 Separate fresh-boot runs measured CPU simulation plus rendering, with verification outside timing:
 
-| Renderer | Before mean / p95 / max | After mean / p95 / max |
-| -------- | ----------------------- | ---------------------- |
+| Renderer | Before mean / p95 / max  | After mean / p95 / max |
+| -------- | ------------------------ | ---------------------- |
 | Metal 1× | 10.45 / 42.88 / 66.49 ms | 1.78 / 3.34 / 5.63 ms  |
 | Metal 2× | 10.57 / 42.80 / 62.97 ms | 2.00 / 3.77 / 6.35 ms  |
 | Metal 4× | 11.07 / 43.79 / 58.14 ms | 2.51 / 5.03 / 7.49 ms  |
@@ -191,13 +191,13 @@ Independent textured triangles now use the same first-miss/final-tag algorithm a
 
 After both corrections, the same 22,985-frame first-level route at Metal 4× has the following CPU-plus-render timings, including GPU waits and readback but excluding reference checks:
 
-| Full first-level route | Before | After |
-| ---------------------- | ------ | ----- |
-| Mean                   | 6.50 ms | 3.04 ms |
-| p95                    | 13.80 ms | 5.95 ms |
-| p99                    | 22.16 ms | 6.66 ms |
+| Full first-level route | Before       | After    |
+| ---------------------- | ------------ | -------- |
+| Mean                   | 6.50 ms      | 3.04 ms  |
+| p95                    | 13.80 ms     | 5.95 ms  |
+| p99                    | 22.16 ms     | 6.66 ms  |
 | Maximum                | 11,322.65 ms | 11.46 ms |
-| Frames above 16.7 ms   | 616 | 0 |
+| Frames above 16.7 ms   | 616          | 0        |
 
 All 95,015 textured triangles on this route use the independent path. The 341 formerly slow textured-triangle frames now take at most 8.38 ms overall; active results frames fall from 46.13 to 7.98 ms on average. Every native VRAM/cache comparison passes, the five shared local snapshots are byte-identical, and the native/fine final hashes remain `a3d22ce034bdb516` and `d5498cb34b5b0245`, respectively. The CPU executes 6,553,267,283 instructions natively with none interpreted; changed readiness polling accounts for the instruction-count change. Performance measurements cover this route on the local M4 Pro, rather than asserting bounded latency for every game or scheduling condition.
 
@@ -207,11 +207,11 @@ Publishing earlier reduced the audio gap, but a live callback still inserted 144
 
 An initial playback retry was blocked by AudioQueueStart failures even in the frozen baseline; a subsequent retry on the default output succeeded. The final exact-production adapter was then tested in three fresh processes, each with 40 warmup frames followed by a 120-frame measured window:
 
-| Window | Maximum measured refill wait | Minimum queued buffers |
-| ------ | ---------------------------- | ---------------------- |
-| Title [1600, 1720) | 4.41 ms | 2 |
-| Transition [4420, 4540) | 5.09 ms | 2 |
-| Results [22700, 22820) | 7.36 ms | 2 |
+| Window                  | Maximum measured refill wait | Minimum queued buffers |
+| ----------------------- | ---------------------------- | ---------------------- |
+| Title [1600, 1720)      | 4.41 ms                      | 2                      |
+| Transition [4420, 4540) | 5.09 ms                      | 2                      |
+| Results [22700, 22820)  | 7.36 ms                      | 2                      |
 
 Warmup and measured playback both had no empty-queue observations, post-prime padding, dropped/reordered samples or source mismatches. Every returned buffer refilled before the next callback, within the roughly 23.22 ms covered by two queued buffers. All 480 per-frame audio hashes, all three window display hashes and all three native VRAM/cache comparisons match the baseline. The results window contains audible source data throughout. These checks cover the three warmed windows, rather than claiming whole-route live audio validation or broader SPU accuracy. Runtime tests pass normally and under ASan/UBSan, as do the 58 Python tests; the signed bundled app is also checked independently of the checkout's working directory.
 
