@@ -6,7 +6,15 @@ The aim is native code, not emulation: the game's MIPS code is translated to C a
 
 ## Status
 
-Phase 6 of [the plan](plan.md#4-phases-and-exit-criteria) adds independent Metal rendering at 1×, 2× and 4×. Native Metal VRAM and texture caches match the software renderer throughout Metal Slug X (USA)'s first mission. The software renderer remains the default and the console reference; higher-resolution Metal output retains that CPU work ([Development](docs/development.md#phase-6-the-metal-renderer)). Phase 7, the Mac public preview, is in progress: game apps now support two controllers, logs and problem reports, alongside the launcher, persistent memory cards and keyboard remapping. Building from the launcher and a downloadable preview remain to come. Broader compatibility, audible game output and hardware-timing accuracy remain open.
+Phase 6 of [the plan](plan.md#4-phases-and-exit-criteria) adds independent Metal rendering at 1×, 2× and 4×. Native Metal VRAM and texture caches match the software renderer throughout Metal Slug X (USA)'s first mission. The software renderer remains the default and the console reference; higher-resolution Metal output retains that CPU work ([Development](docs/development.md#phase-6-the-metal-renderer)). Phase 7, the Mac public preview, is in progress: the launcher builds game apps, which support two controllers, logs and problem reports, persistent memory cards and keyboard remapping. A downloadable preview and the final player acceptance check remain to come. Broader compatibility, audible game output and hardware-timing accuracy remain open.
+
+## Build from the launcher
+
+Open muyiunative and choose **Build Game App…** (⌘N). Choose a `.cue` or `.bin` dump of your own disc, then choose where to save the app. The Save dialog starts in `~/Applications/muyiunative/`. Follow the current build step and live output in the build window; **Cancel Build** stops the build and removes its temporary files. On success, Finder reveals the app, and **Open Game App** starts it.
+
+Player builds need only Apple's free Command Line Tools. If they are missing, the launcher offers **Install Tools**; finish Apple's installation, then choose Build Game App again. The launcher carries its sources, tools, profiles, OpenBIOS and precompiled Metal library. It uses the CLT's Python 3.9 or newer, with the MIT-licensed Tomli backport included; no separate Python, full Xcode or Metal compiler is needed for player builds. Temporary files go in `~/Library/Caches/muyiunative/Builds/` and are removed after success, failure or cancellation. Finder runs keep the build output in the [run log](#version-and-problem-reports).
+
+The downloadable launcher is not released yet. To try this flow from source, build and open it with the commands below. Playing a completed game app needs no developer tools.
 
 ## Build from the command line
 
@@ -27,7 +35,7 @@ export PATH="$PWD/scripts:$PATH"
 muyiunative build /external/path/disc.cue --platform mac-app
 ```
 
-The optional launcher opens game apps and remembers recent ones:
+Build the launcher, including its signed source kit, and open it:
 
 ```sh
 make -C shell/mac app
@@ -100,7 +108,7 @@ On a Mac keyboard, Backspace is the key labelled Delete (⌫). With Metal Slug X
 
 ### Acknowledgements
 
-muyiunative takes its build, its Mac front end and its rules for contributors and agents from **[nxnative](https://github.com/seedds/nxnative)** (MIT), which runs Switch games natively on Apple platforms. The console's hardware is modelled from **[psx-spx](https://psx-spx.consoledev.net/)**, the public PlayStation specifications. The BIOS is **OpenBIOS** from [nugget](https://github.com/pcsx-redux/nugget) (MIT), by the PCSX-Redux authors. The hardware test programs are **[ps1-tests](https://github.com/JaCzekanski/ps1-tests)** (MIT) by Jakub Czekański, built with [PSn00bSDK](https://github.com/Lameguy64/PSn00bSDK) (MPL-2.0).
+muyiunative takes its build, its Mac front end and its rules for contributors and agents from **[nxnative](https://github.com/seedds/nxnative)** (MIT), which runs Switch games natively on Apple platforms. The console's hardware is modelled from **[psx-spx](https://psx-spx.consoledev.net/)**, the public PlayStation specifications. The BIOS is **OpenBIOS** from [nugget](https://github.com/pcsx-redux/nugget) (MIT), by the PCSX-Redux authors. The hardware test programs are **[ps1-tests](https://github.com/JaCzekanski/ps1-tests)** (MIT) by Jakub Czekański, built with [PSn00bSDK](https://github.com/Lameguy64/PSn00bSDK) (MPL-2.0). Player builds use [Tomli 2.2.1](tools/vendor/README.md) (MIT) for TOML parsing on Python 3.9.
 
 ### License
 

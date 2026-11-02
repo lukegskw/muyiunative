@@ -2,6 +2,7 @@
 # SHA-256 of the exact instruction bytes identifies each version; the address also matters to compilation (branches and PC-relative instructions).
 # No overlay boundaries or disc filenames are guessed. Blocks absent from the final RAM image remain compilable, and all versions share the runtime's byte guard.
 # Captures contain game code and stay in local build folders; a survey report contains only addresses, counts and hashes.
+from __future__ import annotations
 import hashlib, struct
 from dataclasses import dataclass
 from pathlib import Path

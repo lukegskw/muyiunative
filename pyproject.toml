@@ -7,10 +7,12 @@ extraPaths = ["tools"]
 typeCheckingMode = "basic"
 pythonVersion = "3.12"   # the oldest Python README supports
 pythonPlatform = "Darwin"
+exclude = ["tools/vendor"] # unmodified third-party sources retain their own typing and style
 
 [tool.ruff]
 target-version = "py312"
 include = ["tools/**/*.py", "scripts/**/*.py"]
+extend-exclude = ["tools/vendor"] # unmodified Tomli; our compatibility adapter and tests remain checked
 
 # Rules that find bugs (pyflakes, syntax, bugbear, pylint's errors and warnings, a few of ruff's own), not style: the dense layout (several statements on a line, short names)
 # is the house style, so those rules are off, and `ruff format` is not used. nxnative's rules
