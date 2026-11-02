@@ -5,23 +5,12 @@ name: lint-python
 
 on:
   pull_request:
-    paths:
-      [
-        "**.py",
-        pyproject.toml,
-        .github/requirements/lint.txt,
-        .github/workflows/lint-python.yml,
-      ]
   push:
     branches: [main]
-    paths:
-      [
-        "**.py",
-        pyproject.toml,
-        .github/requirements/lint.txt,
-        .github/workflows/lint-python.yml,
-      ]
   workflow_dispatch:
+
+# A required check must run even on a docs-only PR. GitHub leaves checks from path-filtered workflows pending, blocking the merge.
+# https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/troubleshooting-required-status-checks
 
 permissions:
   contents: read

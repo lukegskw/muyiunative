@@ -6,7 +6,23 @@ The aim is native code, not emulation: the game's MIPS code is translated to C a
 
 ## Status
 
-Phase 6 of [the plan](plan.md#4-phases-and-exit-criteria) adds independent Metal rendering at 1×, 2× and 4×. Native Metal VRAM and texture caches match the software renderer throughout Metal Slug X (USA)'s first mission. The software renderer remains the default and the console reference; higher-resolution Metal output retains that CPU work ([Development](docs/development.md#phase-6-the-metal-renderer)). Phase 7, the Mac public preview, is in progress: the launcher builds game apps, which support two controllers, logs and problem reports, persistent memory cards and keyboard remapping. A downloadable preview and the final player acceptance check remain to come. Broader compatibility, audible game output and hardware-timing accuracy remain open.
+The Mac preview is in preparation (phase 7 of [the plan](plan.md#4-phases-and-exit-criteria)). The launcher builds game apps, with two controller ports, logs and problem reports, persistent memory cards and keyboard remapping. Software is the default renderer; Metal offers 1×, 2× and 4× geometry. Only the game and route in the [compatibility list](#compatibility) have been verified. Whole-game compatibility, whole-route live audio accuracy and hardware timing remain open; expect bugs. A downloadable preview and the final player acceptance check are still pending.
+
+## Install
+
+You need **Apple silicon and macOS 14 or later**. Intel Macs, iPhone and older macOS versions are not supported yet. Building a game app needs Apple's free Command Line Tools; playing a completed app needs no developer tools. Bring a `.cue`/`.bin` dump of your own PS1 disc. A CUE and all the track files it references must stay together; compressed formats such as CHD are not accepted.
+
+There is no published launcher download yet. Until one appears on [Releases](https://github.com/lukegskw/muyiunative/releases), use the [source build](#build-from-the-command-line). Download installation and macOS security prompts will be documented with the chosen release format. Keep generated game apps on your Mac: they contain a copy of your disc and cannot be redistributed.
+
+## Compatibility
+
+| Game                  | Serial     | Verified                                                                                                                                  | Not verified                                                     |
+| --------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Metal Slug X (USA)    | SLUS-01212 | Boot, title/menu and Mission 1 through its results screen; native/interpreter lockstep; Software and Metal 1×/2×/4×; Xbox Bluetooth input | Rest of the game; wired/two-player input; whole-route live audio |
+
+The first-mission route uses five continues and does not establish that the full game works. [Development](docs/development.md#phase-6-the-metal-renderer) records hashes, timings and the separate live audio checks; the [profile](profiles/SLUS-01212/game.toml) identifies the boot revision and reproducible inputs. No other game is confirmed. Unseen code falls back to the interpreter, which does not guarantee compatibility with an unknown game.
+
+To add evidence, open a [compatibility report](https://github.com/lukegskw/muyiunative/issues/new?template=compatibility_report.yml) with the title, serial, region, boot executable SHA-256, app version, renderer, controller and exactly how far you played. The form explains how to find the hash without a terminal. Report build failures too. Share hashes and observations, never disc data or game apps. For a vulnerability, use [private security reporting](SECURITY.md).
 
 ## Build from the launcher
 
@@ -50,7 +66,7 @@ Game apps connect two memory cards and save them in `~/Library/Application Suppo
 
 Choose **About muyiunative…** in the app menu to see its version, build number and commit. The preview version is 0.7.0; the build number counts commits in the complete Git history. Every packed app carries this information, including game apps.
 
-Apps opened from Finder save their output under `~/Library/Logs/muyiunative/<bundle id>/`, keeping the last five runs for that app. Logs start with the version and commit, and replace your home directory in paths with `~`. **Report a Problem…** reveals the current log in Finder and opens the bug form with the version, commit, Mac model, macOS version, game serial and current renderer filled in. Describe the problem and attach the log before submitting the form yourself. Never attach a disc, BIOS dump, memory card, save state or extracted game data.
+Apps opened from Finder save their output under `~/Library/Logs/muyiunative/<bundle id>/`, keeping the last five runs for that app. Logs start with the version and commit, and replace your home directory in paths with `~`. **Report a Problem…** reveals the current log in Finder and opens the bug form with the version, commit, Mac model, macOS version, game serial and current renderer filled in. Describe the problem and review the log for personal information and game data before attaching and submitting it yourself. Other paths and guest text can remain, and a single run's log has no size limit yet. Nothing is uploaded automatically. Never attach a disc, BIOS dump, memory card, save state, generated code or game app.
 
 Terminal sessions keep their normal output; copy it for a report. Headless build and validation runs also keep stdout/stderr and create no persistent logs. An app started from a terminal with both streams redirected uses a log instead. A developer host using an external disc leaves the serial field empty; bundled game apps fill it from their metadata.
 
@@ -104,7 +120,7 @@ On a Mac keyboard, Backspace is the key labelled Delete (⌫). With Metal Slug X
 
 `scripts/native_game.py /external/path/disc.cue --route first_level` reproduces phase 4's acceptance checks and timings. `scripts/survey_game.py /external/path/disc.cue --frames 2400` captures an unknown game and writes a draft profile and local picture to inspect. Captures, game apps and generated C stay in ignored build folders ([Development](docs/development.md#phase-5-the-mac-product)).
 
-[Plan](plan.md) · [Development](docs/development.md) · [Contributing](CONTRIBUTING.md) · [Notes for agents](AGENTS.md)
+[Plan](plan.md) · [Development](docs/development.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Notes for agents](AGENTS.md)
 
 ### Acknowledgements
 

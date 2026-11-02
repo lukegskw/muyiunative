@@ -4,11 +4,11 @@ Issues and pull requests are welcome. This page says how a change gets in; what 
 
 ## Reporting a problem
 
-Choose Report a Problem in the app menu to reveal the current Finder run's log and open the bug form with its app version, commit, Mac/macOS, game serial and renderer filled in. Describe what happened, how it was built and run, and attach the whole log. About muyiunative also shows the version and commit. For a terminal run, copy its whole output; headless checks keep their output in the terminal or calling build tool.
+Choose Report a Problem in the app menu to reveal the current Finder run's log and open the bug form with its app version, commit, Mac/macOS, game serial and renderer filled in. Describe what happened and how it was built and run. Review the log for personal information and game data before attaching it. About muyiunative also shows the version and commit. For a terminal run, review and copy its output; headless checks keep their output in the terminal or calling build tool. General game results belong in the [compatibility form](https://github.com/lukegskw/muyiunative/issues/new?template=compatibility_report.yml), with exactly what was checked. Vulnerabilities use [private reporting](SECURITY.md).
 
 ## Never game data
 
-Never commit or attach disc images, BIOS dumps, memory cards, save states or anything extracted from a game or a BIOS. Logs, screenshots, serials, hashes and addresses are fine.
+Never commit or attach disc images, BIOS dumps, memory cards, save states, generated game code, game apps or anything extracted from a game or a BIOS. Reviewed logs, screenshots, serials, hashes and addresses can describe a result without sharing those files.
 
 ## Clean room
 
@@ -30,7 +30,7 @@ muyiunative is MIT-licensed and written from public documentation of the hardwar
 ## Large changes and other platforms
 
 - **Agree on the scope first.** Open an issue before a change that adds a platform, adds a second implementation of an existing path, or runs to more than about 1,000 lines.
-- **Supported** are Macs with Apple silicon and macOS 14 or later; the iPhone comes in phase 7. Intel Macs or older systems would add paths that every later change has to keep working: ask in an issue first.
+- **Supported** are Macs with Apple silicon and macOS 14 or later; the iPhone comes in phase 8. Intel Macs or older systems would add paths that every later change has to keep working: ask in an issue first.
 
 ## How changes get in
 
