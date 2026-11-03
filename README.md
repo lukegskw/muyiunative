@@ -88,6 +88,8 @@ Game apps connect two memory cards and save them in `~/Library/Application Suppo
 
 In a built game app, choose **Game → Save State** (⌘S) to keep the current point, and **Game → Load State** (⌘L) to resume it, including after closing and reopening the app. There is one quick state per game; saving replaces it. The window title briefly confirms success. Load State becomes available once a state exists.
 
+The game and audio pause during the state operation, then resume automatically.
+
 The file is `quick.ps1state` beside that game's memory cards in Application Support. Loading keeps the current memory-card contents and graphics choice. A busy card transaction, damaged file, different game/BIOS/disc or incompatible runtime format is reported without loading it. State compatibility across future runtime changes is not guaranteed; ordinary in-game saves remain separate. States stay outside the app and repository.
 
 ### Version and problem reports

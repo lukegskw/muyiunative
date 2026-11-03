@@ -14,7 +14,7 @@ PYTHON ?= python3
 PREBUILT_METALLIB ?=
 LIB = $(GEN)/ps1gpu.metallib
 RTSRC = $(sort $(wildcard $(RT)/*.c))
-SRC = main.c front_mac.m keyboard.m product.m build.m reports.m log.c report.c saves.c state.c $(GFX)/present.m $(GFX)/renderer.m $(RTSRC) $(GEN)/openbios.c
+SRC = main.c front_mac.m audio_mac.m keyboard.m product.m build.m reports.m log.c report.c saves.c state.c $(GFX)/present.m $(GFX)/renderer.m $(RTSRC) $(GEN)/openbios.c
 HDR = front.h audio.h build.h controllers.h input.h keys.h keyboard.h product.h log.h report.h saves.h state.h $(GEN)/version.h $(GFX)/present.h $(GFX)/renderer.h $(wildcard $(RT)/*.h)
 CODEGEN = $(TOOLS)/codegen.py $(TOOLS)/analyze.py $(TOOLS)/mips.py $(TOOLS)/exe.py $(TOOLS)/overlays.py
 CFLAGS = -arch arm64 -mmacosx-version-min=$(MINOS) -O2 -g -Wall -Wextra -fobjc-arc -I$(RT) -I$(GFX) -I$(GEN)

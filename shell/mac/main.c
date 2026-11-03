@@ -36,7 +36,7 @@ extern const ps1_native_set native_game;
 
 static void drain(ps1 *m, int play) { int16_t samples[2048]; int n; while ((n = spu_audio_read(m, samples, 1024))) if (play) front_audio(samples, n); }
 
-static int quick_state(host *h, int action, char error[FRONT_STATE_ERROR]) {
+static int quick_state_data(host *h, int action, char error[FRONT_STATE_ERROR]) {
     if (action == FRONT_STATE_SAVE) {
         int scale = h->renderer && h->choice > 1 ? h->choice : 0;
         size_t words = (size_t)VRAM_W * VRAM_H * scale * scale;
@@ -64,6 +64,18 @@ static int quick_state(host *h, int action, char error[FRONT_STATE_ERROR]) {
     } else ps1_display(h->m, h->px, MAX_W, MAX_H, &h->w, &h->h);
     if (h->interactive) { front_audio_reset(); front_present(h->px, h->w, h->h); }
     return 0;
+}
+
+static int quick_state(host *h, int action, char error[FRONT_STATE_ERROR]) {
+    if (h->interactive && front_audio_pause(1)) {
+        snprintf(error, FRONT_STATE_ERROR, "Could not pause audio for this state operation."); return -1;
+    }
+    int result = quick_state_data(h, action, error);
+    // Saving and failed loads keep the same playback timeline. Successful loads replace it while paused. Resume on every path, including file/GPU errors.
+    if (h->interactive && front_audio_pause(0) && !result) {
+        snprintf(error, FRONT_STATE_ERROR, "The state operation finished, but audio could not resume."); return -1;
+    }
+    return result;
 }
 
 static void frame(host *h) {

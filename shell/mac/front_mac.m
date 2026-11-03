@@ -3,7 +3,6 @@
 #import <Cocoa/Cocoa.h>
 #import <ImageIO/ImageIO.h>
 #import <QuartzCore/CAMetalLayer.h>
-#import <AudioToolbox/AudioToolbox.h>
 #import <GameController/GameController.h>
 #include <os/lock.h>
 #include <pthread.h>
@@ -15,7 +14,6 @@
 #include "ps1.h"
 #include "keyboard.h"
 #include "product.h"
-#include "audio.h"
 #include "controllers.h"
 #include "report.h"
 
@@ -157,86 +155,6 @@ static frame g_new, g_shown;                          // the newest frame (the m
 static bool g_fresh;
 static atomic_bool g_queued;                          // a present is queued on the main thread
 
-// The machine writes the bounded sample ring; one serial delivery queue owns returned buffers and every enqueue, preserving sample order without blocking a callback.
-enum { AUDIO_CHUNK = FRONT_AUDIO_CHUNK, AUDIO_BUFFERS = FRONT_AUDIO_BUFFERS };
-static os_unfair_lock g_audio_lock = OS_UNFAIR_LOCK_INIT;
-static front_audio_state g_audio_state;
-static AudioQueueRef g_audio_queue;
-static AudioQueueBufferRef g_audio_buffers[AUDIO_BUFFERS];
-static dispatch_queue_t g_audio_delivery;
-static atomic_bool g_audio_failed;
-static void audio_service(void) {
-    if (!g_audio_queue) return;
-    for (;;) {
-        unsigned id; int16_t samples[AUDIO_CHUNK * 2];
-        os_unfair_lock_lock(&g_audio_lock);
-        int ready = front_audio_take(&g_audio_state, &id, samples);
-        os_unfair_lock_unlock(&g_audio_lock);
-        if (!ready) return;
-        AudioQueueBufferRef b = g_audio_buffers[id];
-        memcpy(b->mAudioData, samples, sizeof samples); b->mAudioDataByteSize = sizeof samples;
-        OSStatus err = AudioQueueEnqueueBuffer(g_audio_queue, b, 0, NULL);
-        if (err) { if (!atomic_exchange(&g_audio_failed, true)) RED("front end: cannot enqueue audio (%d)", (int)err); return; }
-    }
-}
-void front_audio(const int16_t *samples, int frames) {
-    if (!g_audio_delivery || frames <= 0) return;
-    os_unfair_lock_lock(&g_audio_lock);
-    front_audio_push(&g_audio_state, samples, (unsigned)frames);
-    os_unfair_lock_unlock(&g_audio_lock);
-    dispatch_async(g_audio_delivery, ^{ audio_service(); });
-}
-static void audio_buffer(AudioQueueRef q, AudioQueueBufferRef b) {
-    if (!g_audio_queue || q != g_audio_queue) return;
-    // The results callback padded 144 zero samples although real data arrived 1.68 ms later and two buffers were still queued. A returned buffer belongs to us
-    // (Apple, AudioQueueOutputCallbackBlock); retain it until a complete real block is available, then enqueue from this same serial queue without blocking callbacks.
-    os_unfair_lock_lock(&g_audio_lock);
-    int err = front_audio_return(&g_audio_state, (unsigned)(uintptr_t)b->mUserData);
-    os_unfair_lock_unlock(&g_audio_lock);
-    if (err) { if (!atomic_exchange(&g_audio_failed, true)) RED("front end: invalid returned audio buffer"); return; }
-    audio_service();
-}
-static void audio_start(void) {
-    dispatch_queue_attr_t attr = dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INTERACTIVE, 0);
-    g_audio_delivery = dispatch_queue_create("org.muyiunative.audio", attr);
-    if (!g_audio_delivery) { RED("front end: cannot create audio delivery queue"); return; }
-    __block OSStatus err = 0;
-    dispatch_sync(g_audio_delivery, ^{
-        AudioStreamBasicDescription format = {.mSampleRate = 44100, .mFormatID = kAudioFormatLinearPCM,
-            .mFormatFlags = kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked, .mBytesPerPacket = 4, .mFramesPerPacket = 1,
-            .mBytesPerFrame = 4, .mChannelsPerFrame = 2, .mBitsPerChannel = 16};
-        err = AudioQueueNewOutputWithDispatchQueue(&g_audio_queue, &format, 0, g_audio_delivery,
-            ^(AudioQueueRef q, AudioQueueBufferRef b) { audio_buffer(q, b); });
-        for (unsigned i = 0; !err && i < AUDIO_BUFFERS; i++) {
-            AudioQueueBufferRef b; err = AudioQueueAllocateBuffer(g_audio_queue, AUDIO_CHUNK * 4, &b);
-            if (!err) {
-                g_audio_buffers[i] = b; b->mUserData = (void *)(uintptr_t)i;
-                memset(b->mAudioData, 0, AUDIO_CHUNK * 4); b->mAudioDataByteSize = AUDIO_CHUNK * 4;
-                err = AudioQueueEnqueueBuffer(g_audio_queue, b, 0, NULL);   // the same three silent startup buffers, before the machine begins
-            }
-        }
-    });
-    if (!err) err = AudioQueueStart(g_audio_queue, NULL);
-    if (err) {
-        RED("front end: cannot start audio (%d)", (int)err);
-        __block AudioQueueRef failed;
-        dispatch_sync(g_audio_delivery, ^{ failed = g_audio_queue; g_audio_queue = NULL; });
-        if (failed) AudioQueueDispose(failed, true);   // let the callback queue drain while disposal waits for outstanding callbacks
-    }
-}
-
-void front_audio_reset(void) {
-    // Old callbacks must finish before their buffer IDs or queue can be reused. Disposing outside the delivery queue avoids waiting for a callback on itself.
-    __block AudioQueueRef previous = NULL;
-    if (g_audio_delivery) dispatch_sync(g_audio_delivery, ^{ previous = g_audio_queue; g_audio_queue = NULL; });
-    if (previous) {
-        OSStatus err = AudioQueueDispose(previous, true);
-        if (err) { RED("front end: cannot dispose playback before state load (%d)", (int)err); return; }
-    }
-    os_unfair_lock_lock(&g_audio_lock); memset(&g_audio_state, 0, sizeof g_audio_state); os_unfair_lock_unlock(&g_audio_lock);
-    memset(g_audio_buffers, 0, sizeof g_audio_buffers); atomic_store(&g_audio_failed, false); audio_start();
-}
-
 static int fit(frame *f, size_t n) {
     if (n <= f->cap) return 1;
     uint32_t *p = realloc(f->px, n * sizeof *p);
@@ -307,7 +225,7 @@ void front_run(const char *title, void (*run)(void *arg), void *arg) {
     g_win.contentView = v;
     if (!present_init((__bridge void *)v.layer)) RED("front end: no Metal device, the window stays empty");
     [g_win center]; [g_win makeKeyAndOrderFront:nil];
-    [g_win makeFirstResponder:v]; audio_start();
+    [g_win makeFirstResponder:v]; front_audio_start();
     job *j = malloc(sizeof *j);
     pthread_attr_t at; pthread_t t;
     pthread_attr_init(&at); pthread_attr_setstacksize(&at, 8 << 20); pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
