@@ -24,6 +24,10 @@ static atomic_bool g_stop, g_running;
 static atomic_int g_renderer;
 static NSMenu *g_graphics;
 static NSWindow *g_win;
+static NSMenuItem *g_save_state, *g_load_state;
+static atomic_int g_state_request;
+static atomic_bool g_state_enabled, g_state_available, g_state_busy;
+static NSString *g_title;
 static BOOL g_quitting;
 static os_unfair_lock g_input_lock = OS_UNFAIR_LOCK_INIT;   // only host input; neither thread shares a ps1
 static front_controllers g_pads;
@@ -44,6 +48,28 @@ static uint16_t key_event(NSEvent *e, int down) {
     return front_keyboard_event(e.keyCode, s.length ? [s characterAtIndex:0] : 0, down);
 }
 static void release_keys(void) { front_keyboard_reset(); atomic_store(&g_buttons, 0); }
+static void state_menu_update(void) {
+    BOOL enabled = atomic_load(&g_state_enabled) && !atomic_load(&g_state_busy);
+    g_save_state.enabled = enabled; g_load_state.enabled = enabled && atomic_load(&g_state_available);
+}
+void front_state_menu(int enabled, int available) {
+    atomic_store(&g_state_enabled, enabled != 0); atomic_store(&g_state_available, available != 0);
+}
+int front_state_request(void) { return atomic_exchange(&g_state_request, FRONT_STATE_NONE); }
+void front_state_complete(int action, const char *error) { @autoreleasepool {
+    NSString *message = error ? @(error) : nil;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        atomic_store(&g_state_busy, false);
+        if (!message && action == FRONT_STATE_SAVE) atomic_store(&g_state_available, true);
+        state_menu_update();
+        if (message) front_error(message.UTF8String);
+        else {
+            g_win.title = [NSString stringWithFormat:@"%@ — State %@", g_title, action == FRONT_STATE_SAVE ? @"saved" : @"loaded"];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ g_win.title = g_title; });
+        }
+        if (g_quitting) atomic_store(&g_stop, true);
+    });
+} }
 static void input_focus(int focused) {
     release_keys(); os_unfair_lock_lock(&g_input_lock);
     front_controllers_focus(&g_pads, focused); os_unfair_lock_unlock(&g_input_lock);
@@ -104,10 +130,14 @@ void front_buttons(front_pad pads[2]) {
 - (BOOL)windowShouldClose:(NSWindow *)window { (void)window; [NSApp terminate:nil]; return NO; }
 - (void)keyboard:(id)sender { (void)sender; release_keys(); front_keyboard_settings(); }
 - (void)renderer:(NSMenuItem *)sender { release_keys(); front_renderer_set((int)sender.tag); }
+- (void)state:(NSMenuItem *)sender {
+    if (!atomic_load(&g_state_enabled) || atomic_exchange(&g_state_busy, true)) return;
+    release_keys(); atomic_store(&g_state_request, (int)sender.tag); state_menu_update();
+}
 // AppKit's applicationShouldTerminate: contract: NSTerminateLater keeps its event loop alive while the machine thread finishes a save, then replies on the main queue.
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)app {
     (void)app; if (!atomic_load(&g_running)) return NSTerminateNow;
-    g_quitting = YES; atomic_store(&g_stop, true); return NSTerminateLater;
+    g_quitting = YES; if (!atomic_load(&g_state_busy)) atomic_store(&g_stop, true); return NSTerminateLater;
 }
 @end
 
@@ -195,6 +225,18 @@ static void audio_start(void) {
     }
 }
 
+void front_audio_reset(void) {
+    // Old callbacks must finish before their buffer IDs or queue can be reused. Disposing outside the delivery queue avoids waiting for a callback on itself.
+    __block AudioQueueRef previous = NULL;
+    if (g_audio_delivery) dispatch_sync(g_audio_delivery, ^{ previous = g_audio_queue; g_audio_queue = NULL; });
+    if (previous) {
+        OSStatus err = AudioQueueDispose(previous, true);
+        if (err) { RED("front end: cannot dispose playback before state load (%d)", (int)err); return; }
+    }
+    os_unfair_lock_lock(&g_audio_lock); memset(&g_audio_state, 0, sizeof g_audio_state); os_unfair_lock_unlock(&g_audio_lock);
+    memset(g_audio_buffers, 0, sizeof g_audio_buffers); atomic_store(&g_audio_failed, false); audio_start();
+}
+
 static int fit(frame *f, size_t n) {
     if (n <= f->cap) return 1;
     uint32_t *p = realloc(f->px, n * sizeof *p);
@@ -243,6 +285,11 @@ void front_run(const char *title, void (*run)(void *arg), void *arg) {
     [menu addItemWithTitle:@"Keyboard Controls…" action:@selector(keyboard:) keyEquivalent:@","].target = g_app;
     [menu addItemWithTitle:[@"Quit " stringByAppendingString:name] action:@selector(terminate:) keyEquivalent:@"q"];
     item.submenu = menu; [bar addItem:item]; app.mainMenu = bar;
+    NSMenu *game = [[NSMenu alloc] initWithTitle:@"Game"]; game.autoenablesItems = NO;
+    g_save_state = [game addItemWithTitle:@"Save State" action:@selector(state:) keyEquivalent:@"s"];
+    g_load_state = [game addItemWithTitle:@"Load State" action:@selector(state:) keyEquivalent:@"l"];
+    g_save_state.tag = FRONT_STATE_SAVE; g_load_state.tag = FRONT_STATE_LOAD; g_save_state.target = g_load_state.target = g_app;
+    NSMenuItem *game_item = [[NSMenuItem alloc] initWithTitle:@"Game" action:nil keyEquivalent:@""]; game_item.submenu = game; [bar addItem:game_item]; state_menu_update();
     g_graphics = [[NSMenu alloc] initWithTitle:@"Graphics"]; g_graphics.autoenablesItems = NO;
     const int scales[] = {0, 1, 2, 4}; NSArray<NSString *> *titles = @[@"Software", @"Metal (1×)", @"Metal (2×)", @"Metal (4×)"];
     for (unsigned i = 0; i < sizeof scales / sizeof *scales; i++) {
@@ -252,7 +299,7 @@ void front_run(const char *title, void (*run)(void *arg), void *arg) {
     g_win = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 640, 480)
                                         styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable
                                           backing:NSBackingStoreBuffered defer:NO];
-    g_win.title = name; g_win.releasedWhenClosed = NO; g_win.contentAspectRatio = NSMakeSize(4, 3);
+    g_title = name; g_win.title = name; g_win.releasedWhenClosed = NO; g_win.contentAspectRatio = NSMakeSize(4, 3);
     g_win.delegate = g_app;
     FrontView *v = [[FrontView alloc] initWithFrame:NSMakeRect(0, 0, 640, 480)];
     v.wantsLayer = YES; v.layerContentsRedrawPolicy = NSViewLayerContentsRedrawNever;

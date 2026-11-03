@@ -1,0 +1,53 @@
+# External disc identified with scripts/disc_info.py on 2026-11-02; only metadata, hashes and normal pad inputs are retained.
+name = "Crash Bandicoot 3 - Warped (Europe, Australia)"
+serial = "SCES-01420"
+
+[disc]
+licence = "SCEE"
+boot = 'SCES_014.20'
+boot_sha256 = "69d1699f2792867055929bc6ff11ebdfe18a5d09c7974f0bf33f285578c738c3"
+tracks = [
+  { number = 1, mode = "MODE2/2352", sectors = 146562, sha256 = "aef1ed3bdc7abfab1458aac51356dad67f462653ea39b0196de0ff68dbafccf1" },
+]
+
+# Capture/build route from reset with empty memory-card slots. This is the observed scope, not a completed level or full-game compatibility claim.
+[validation]
+date = "2026-11-03"
+screen = "Time Twister hub after the opening cutscene"
+frames = 14400
+inputs = [
+  "3600:4000", "3606:0", "4200:8", "4206:0", "5400:8", "5406:0",
+]
+width = 512
+height = 256
+frame_hash_fnv1a64 = "e324179600831c56"
+
+native_instructions = 5904716904
+lockstep_stops = 128675248
+
+[title]
+date = "2026-11-02"
+screen = "title/main menu"
+frames = 3600
+inputs = []
+width = 512
+height = 256
+frame_hash_fnv1a64 = "60d6110e99f2670b"
+
+# Rechecked after the shared CPU dispatcher issues interrupted GTE commands before IRQ entry; native equality alone had missed this reference bug.
+[validation.metal_4x]
+date = "2026-11-03"
+scale = 4
+width = 2048
+height = 1024
+frame_hash_fnv1a64 = "40bcd031370c01b6"
+native_vram_cache_match_every_frame = true
+
+# Continue with port 1 released from field 14400. Exclude the moving character and gears; all captures stay outside the repository.
+[validation.geometry_stability]
+date = "2026-11-03"
+continue_frames = 120
+buttons = 0
+scales = [2, 4]
+max_transient_black_background_native_pixels = 0
+native_vram_cache_match_every_frame = true

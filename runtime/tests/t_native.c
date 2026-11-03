@@ -51,8 +51,10 @@ int main(void) {
     CHECK(same, "the native code and the interpreter agree at every stop");
     CHECK(a->exit_requested && a->exit_code == 0 && b->exit_requested, "the program reaches its exit port (%d stops, %llu cycles)", stops, (unsigned long long)a->cycles);
     CHECK(b->native_runs > 20, "the native code ran: entered %llu times", (unsigned long long)b->native_runs);
-    // What the native machine still interprets: the JR RA and its delay slot after each of the 8 exceptions the handler returns into the middle of a block from
-    CHECK(b->interp_steps == 16, "the native machine interpreted %llu instructions of the interpreter's %llu", (unsigned long long)b->interp_steps,
+    CHECK(mem_read32(a, 0x8003001c) == 16 && mem_read32(a, 0x80030020) == 0x445566,
+          "an IRQ at a generated GTE block issues GPF exactly once before the BIOS-style return skips it");
+    // Eight synchronous exceptions return to JR RA and its delay slot; the IRQ returns past GPF into a block and interprets its nine remaining instructions.
+    CHECK(b->interp_steps == 25, "the native machine interpreted %llu instructions of the interpreter's %llu", (unsigned long long)b->interp_steps,
           (unsigned long long)a->interp_steps);
 
     // The handler's log, CAUSE and EPC for each exception, in the order the program raises them

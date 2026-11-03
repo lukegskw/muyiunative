@@ -6,6 +6,8 @@ Issues and pull requests are welcome. This page says how a change gets in; what 
 
 Choose Report a Problem in the app menu to reveal the current Finder run's log and open the bug form with its app version, commit, Mac/macOS, game serial and renderer filled in. Describe what happened and how it was built and run. Review the log for personal information and game data before attaching it. About muyiunative also shows the version and commit. For a terminal run, review and copy its output; headless checks keep their output in the terminal or calling build tool. General game results belong in the [compatibility form](https://github.com/lukegskw/muyiunative/issues/new?template=compatibility_report.yml), with exactly what was checked. Vulnerabilities use [private reporting](SECURITY.md).
 
+For a first gameplay test, follow the [testing guide](docs/testing-games.md): Software baseline, Metal comparisons, input/saving checks and a per-game report.
+
 ## Never game data
 
 Never commit or attach disc images, BIOS dumps, memory cards, save states, generated game code, game apps or anything extracted from a game or a BIOS. Reviewed logs, screenshots, serials, hashes and addresses can describe a result without sharing those files.

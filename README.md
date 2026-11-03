@@ -6,7 +6,7 @@ The aim is native code, not emulation: the game's MIPS code is translated to C a
 
 ## Status
 
-The [0.7.0 Mac preview is available](https://github.com/lukegskw/muyiunative/releases/tag/v0.7.0). The launcher builds game apps, with two controller ports, logs and problem reports, persistent memory cards and keyboard remapping. The downloaded-launcher build/controller flow has passed its [player check](docs/development.md#phase-7-the-public-preview). Software is the default renderer; Metal offers 1×, 2× and 4× geometry. Only the game and route in the [compatibility list](#compatibility) have been verified. Whole-game compatibility, whole-route live audio accuracy and hardware timing remain open; expect bugs.
+The [0.7.0 Mac preview is available](https://github.com/lukegskw/muyiunative/releases/tag/v0.7.0). The launcher builds game apps, with two controller ports, logs and problem reports, persistent memory cards and keyboard remapping. The downloaded-launcher build/controller flow has passed its [player check](docs/development.md#phase-7-the-public-preview). Software is the default renderer; Metal offers 1×, 2× and 4× geometry. Only the games and routes in the [compatibility list](#compatibility) have been verified. Whole-game compatibility, whole-route live audio accuracy and hardware timing remain open; expect bugs.
 
 ## Install
 
@@ -20,19 +20,31 @@ Choose **Build Game App…** to use your own disc. Keep generated game apps on y
 
 Games tested on the Mac. Open a game's image or title for its tested revision, progress and known issues; the [game notes](profiles/README.md) collect the compatibility details. The gallery follows [nxnative's presentation](https://github.com/seedds/nxnative#games).
 
+The FF IX and Crash captures use local source changes newer than the published 0.7.0 preview. Their profiles record the fixes and tested scope; those fixes are not yet in that download.
+
 <table>
 <tr>
 <td align="center" valign="top" width="33%">
-<a href="profiles/SLUS-01212/README.md"><img src="docs/images/metal-slug-x.png" width="256" alt="Metal Slug X (USA), Mission 1 running in muyiunative"></a><br>
-<b><a href="profiles/SLUS-01212/README.md">Metal Slug X (USA)</a></b><br>
+<a href="profiles/SLUS-01212/README.md"><img src="docs/images/metal-slug-x.png" width="256" height="192" alt="Metal Slug X, Mission 1 running in muyiunative"></a><br>
+<b><a href="profiles/SLUS-01212/README.md">Metal Slug X</a></b><br>
 <sub>SLUS-01212 · Mac<br>Mission 1 verified · Xbox Bluetooth</sub>
+</td>
+<td align="center" valign="top" width="33%">
+<a href="profiles/SLUS-01251/README.md"><img src="docs/images/final-fantasy-ix.png" width="256" height="192" alt="Final Fantasy IX, the first battle in the cargo ship running in muyiunative"></a><br>
+<b><a href="profiles/SLUS-01251/README.md">Final Fantasy IX</a></b><br>
+<sub>SLUS-01251 · Mac<br>First battle · Metal 4× source build</sub>
+</td>
+<td align="center" valign="top" width="33%">
+<a href="profiles/SCES-01420/README.md"><img src="docs/images/crash-bandicoot-3.png" width="256" height="192" alt="Crash Bandicoot 3 - Warped, the Time Twister hub running in muyiunative"></a><br>
+<b><a href="profiles/SCES-01420/README.md">Crash Bandicoot 3 - Warped</a></b><br>
+<sub>SCES-01420 · Mac<br>Time Twister hub · Metal 4× source build</sub>
 </td>
 </tr>
 </table>
 
-The first-mission route uses five continues and does not establish that the full game works. No other game is confirmed. Unseen code falls back to the interpreter, which does not guarantee compatibility with an unknown game. Screenshots show actual muyiunative output; [capture details](docs/images/README.md) identify their build and renderer.
+These checks do not establish full-game compatibility. The Metal Slug X first-mission route uses five continues. The new profiles document the graphics corrections, audio measurements and remaining validation limits. Unseen code falls back to the interpreter, which does not guarantee compatibility with an unknown game. Screenshots show actual muyiunative output; [capture details](docs/images/README.md) identify their build and renderer.
 
-To add evidence, open a [compatibility report](https://github.com/lukegskw/muyiunative/issues/new?template=compatibility_report.yml) with the title, serial, region, boot executable SHA-256, app version, renderer, controller and exactly how far you played. The form explains how to find the hash without a terminal. Report build failures too. Share hashes and observations, never disc data or game apps. For a vulnerability, use [private security reporting](SECURITY.md).
+For a first test pass, follow the [game testing guide](docs/testing-games.md). To add evidence, open a [compatibility report](https://github.com/lukegskw/muyiunative/issues/new?template=compatibility_report.yml) with the title, serial, region, boot executable SHA-256, app version, renderer, controller and exactly how far you played. The form explains how to find the hash without a terminal. Report build failures too. Share hashes and observations, never disc data or game apps. For a vulnerability, use [private security reporting](SECURITY.md).
 
 ## Build from the launcher
 
@@ -72,6 +84,12 @@ open shell/mac/build/muyiunative.app
 
 Game apps connect two memory cards and save them in `~/Library/Application Support/muyiunative/Saves/<serial>-<boot-sha256>/card1.mcr` and `card2.mcr`. They are raw 128 KB images, created only when missing, saved once per emulated second when dirty and again before quitting. Moving or rebuilding the same game app preserves its saves. Close the game before backing up or replacing its cards; a second copy cannot use the same save folder simultaneously. Invalid cards are reported and kept intact.
 
+### Quick states
+
+In a built game app, choose **Game → Save State** (⌘S) to keep the current point, and **Game → Load State** (⌘L) to resume it, including after closing and reopening the app. There is one quick state per game; saving replaces it. The window title briefly confirms success. Load State becomes available once a state exists.
+
+The file is `quick.ps1state` beside that game's memory cards in Application Support. Loading keeps the current memory-card contents and graphics choice. A busy card transaction, damaged file, different game/BIOS/disc or incompatible runtime format is reported without loading it. State compatibility across future runtime changes is not guaranteed; ordinary in-game saves remain separate. States stay outside the app and repository.
+
 ### Version and problem reports
 
 Choose **About muyiunative…** in the app menu to see its version, build number and commit. The preview version is 0.7.0; the build number counts commits in the complete Git history. Every packed app carries this information, including game apps.
@@ -84,7 +102,7 @@ Terminal sessions keep their normal output; copy it for a report. Headless build
 
 ### Graphics
 
-Choose Software or Metal at 1×, 2× or 4× in the game app's Graphics menu. Switching keeps the game running. Software remains the default. Metal draws the PS1 commands independently on the GPU; 2× and 4× add geometry samples, while textures retain their source resolution. Native-width lines, 24-bit video and texture-feedback regions retain native pixel detail. The software GPU still maintains the console's reference VRAM, so this version prioritizes higher-resolution output and exact native rendering over a CPU speed-up.
+Choose Software or Metal at 1×, 2× or 4× in the game app's Graphics menu. Switching keeps the game running. Software remains the default. Metal draws the PS1 commands independently on the GPU; 2× and 4× add geometry samples, while textures retain their source resolution. Native-width lines, 24-bit video and texture-feedback regions retain native pixel detail. Interactive Metal presentation runs two frames behind CPU simulation to overlap rendering with the next frame's audio production; headless reference checks remain synchronous. The software GPU still maintains the console's reference VRAM, so this version prioritizes higher-resolution output and exact native rendering over a CPU speed-up.
 
 To make an app open with Metal at 2×:
 
@@ -98,15 +116,15 @@ The shader library is built and bundled with the app; playing needs no compiler.
 
 Connect a macOS-supported extended gamepad over USB, or pair it in System Settings → Bluetooth. Game apps use Apple's GameController framework for wired and wireless input. The keyboard and first controller share port 1; a second controller uses port 2. Controllers can connect and disconnect during play. A remaining controller keeps its port; another controller fills the first vacant port. When the game window loses focus, both ports release their buttons until it regains focus.
 
-| Controller control             | PlayStation button                |
-| ------------------------------ | --------------------------------- |
-| South / East / West / North     | Cross / Circle / Square / Triangle |
-| Left / Right shoulder          | L1 / R1                           |
-| Left / Right trigger           | L2 / R2                           |
-| Menu / Options                 | Start / Select                    |
-| D-pad or left stick            | Up / Left / Down / Right          |
+| Controller control          | PlayStation button                 |
+| --------------------------- | ---------------------------------- |
+| South / East / West / North | Cross / Circle / Square / Triangle |
+| Left / Right shoulder       | L1 / R1                            |
+| Left / Right trigger        | L2 / R2                            |
+| Menu / Options              | Start / Select                     |
+| D-pad or left stick         | Up / Left / Down / Right           |
 
-Face buttons follow their positions rather than their printed letters. The left stick becomes digital at ±0.5 on each axis; triggers activate at 0.5. D-pad and stick directions combine. A controller without an Options button can use the keyboard's Select binding on port 1. Xbox Bluetooth input has been checked in Metal Slug X (USA); wired and two-player hardware checks are still pending ([Development](docs/development.md#phase-7-the-public-preview)).
+Face buttons follow their positions rather than their printed letters. The left stick becomes digital at ±0.5 on each axis; triggers activate at 0.5. D-pad and stick directions combine. A controller without an Options button can use the keyboard's Select binding on port 1. Xbox Bluetooth input has been checked in Metal Slug X; wired and two-player hardware checks are still pending ([Development](docs/development.md#phase-7-the-public-preview)).
 
 ### Keyboard controls
 

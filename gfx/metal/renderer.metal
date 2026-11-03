@@ -85,12 +85,8 @@ static int4 bounds(constant ps1_render_op &o) {
     }
     return int4(max(x0, o.ax1), max(y0, o.ay1), min(x1, o.ax2), min(y1, o.ay2));
 }
-static void gradients(ps1_vtx a, ps1_vtx b, ps1_vtx c, long area, device long *grad) {
-    int fa[5] = {a.r, a.g, a.b, a.u, a.v}, fb[5] = {b.r, b.g, b.b, b.u, b.v}, fc[5] = {c.r, c.g, c.b, c.u, c.v};
-    long bx = b.x - a.x, by = b.y - a.y, cx = c.x - a.x, cy = c.y - a.y;
-    for (uint i = 0; i < 5; i++) {
-        long nb = fb[i] - fa[i], nc = fc[i] - fa[i]; grad[i] = (nb * cy - nc * by) * 4096 / area; grad[i + 5] = (nc * bx - nb * cx) * 4096 / area;
-    }
+static void gradients(constant ps1_render_op &o, device long *grad, constant long *prepared) {
+    for (uint i = 0; i < 10; i++) grad[i] = prepared[o.p[3] * 10 + i];
 }
 static int interpolate(int value, ps1_vtx a, int x, int y, uint scale, device const long *grad, uint i) {
     long n = long(value) * 4096 * scale + grad[i] * (x - a.x * int(scale)) + grad[i + 5] * (y - a.y * int(scale)) + 2048 * scale;
@@ -108,22 +104,11 @@ static void save_sample(device uint *scratch, device const ushort *vram, int x, 
 static bool sample_written(device const uint *scratch, int x, int y) {
     uint at = index_at(x, y, 1); return scratch[WRITTEN_BASE + (at >> 5)] & (1u << (at & 31));
 }
-static bool intervals_overlap(uint a, uint an, uint b, uint bn, uint size) {
-    return an && bn && (((a - b) & (size - 1)) < bn || ((b - a) & (size - 1)) < an);
-}
-static bool texture_feedback(constant ps1_render_op &o, int4 box) {
-    uint width = uint(box.z - box.x + 1), height = uint(box.w - box.y + 1), depth = o.texpage >> 7 & 3;
-    uint tx = (o.texpage & 15) * 64, ty = (o.texpage >> 4 & 1) * 256, tw = depth == 0 ? 64 : depth == 1 ? 128 : 256;
-    if (intervals_overlap(uint(box.x), width, tx, tw, 1024) && intervals_overlap(uint(box.y), height, ty, 256, 512)) return true;
-    uint clut = o.clut & 0x7fff, entries = depth == 0 ? 16 : 256;
-    return depth < 2 && intervals_overlap(uint(box.x), width, (clut & 63) * 16, entries, 1024) && intervals_overlap(uint(box.y), height, clut >> 6, 1, 512);
-}
-
-static void draw_triangle(device ushort *vram, device ps1_render_cache &cache, constant ps1_render_op &o, device uint *scratch, uint scale) {
+static void draw_triangle(device ushort *vram, device ps1_render_cache &cache, constant ps1_render_op &o, device uint *scratch, uint scale, constant long *prepared) {
     ps1_vtx a = o.a, b = o.b, c = o.c; long area = edge(a, b, c.x, c.y, 1);
     if (!area || max(max(a.x, b.x), c.x) - min(min(a.x, b.x), c.x) > 1023 || max(max(a.y, b.y), c.y) - min(min(a.y, b.y), c.y) > 511) return;
     if (area < 0) { ps1_vtx t = b; b = c; c = t; area = -area; }
-    device long *grad = reinterpret_cast<device long *>(scratch); gradients(a, b, c, area, grad);
+    device long *grad = reinterpret_cast<device long *>(scratch); gradients(o, grad, prepared);
     int4 box = bounds(o); ushort flat = rgb15(0, 0, a.r, a.g, a.b, false);
     for (int y = box.y; y <= box.w; y++) for (int x = box.x; x <= box.z; x++) {
         if (!inside(a, b, c, x, y, 1)) continue;
@@ -193,10 +178,10 @@ static void upload_pixel(device ushort *vram, device ushort *hires, constant ps1
 }
 
 kernel void render_native(device ushort *vram [[buffer(0)]], device ushort *hires [[buffer(1)]], device ps1_render_cache &cache [[buffer(2)]],
-                          constant ps1_render_op &o [[buffer(3)]], constant uint &scale [[buffer(4)]], device uint *scratch [[buffer(5)]], uint tid [[thread_position_in_grid]]) {
+                          constant ps1_render_op &o [[buffer(3)]], constant uint &scale [[buffer(4)]], device uint *scratch [[buffer(5)]], constant long *prepared [[buffer(7)]], uint tid [[thread_position_in_grid]]) {
     if (tid) return;
     switch (o.type) {
-    case RENDER_TRIANGLE: draw_triangle(vram, cache, o, scratch, scale); break;
+    case RENDER_TRIANGLE: draw_triangle(vram, cache, o, scratch, scale, prepared); break;
     case RENDER_RECT: draw_rectangle(vram, cache, o, scratch, scale); break;
     case RENDER_LINE: draw_line(vram, o); break;
     case RENDER_FILL: {
@@ -222,6 +207,23 @@ kernel void render_upload(device ushort *vram [[buffer(0)]], device ushort *hire
     (void)cache; (void)scratch; if (i < count) upload_pixel(vram, hires, ops[i], scale);
 }
 
+// The host proves that source and destination are disjoint (or identical). Copy the fine samples themselves, preserving geometry, blends and per-sample masks;
+// replicating native VRAM here would lose the extra detail whenever a game moves its framebuffer. Overlapping copies retain copy_rectangle's ordered rows.
+kernel void render_copy(device ushort *vram [[buffer(0)]], device ushort *hires [[buffer(1)]], constant ps1_render_op &o [[buffer(3)]],
+                        constant uint &scale [[buffer(4)]], uint2 gid [[thread_position_in_grid]]) {
+    uint width = ((o.p[2] - 1) & 1023) + 1, height = (((o.p[2] >> 16) - 1) & 511) + 1;
+    if (gid.x >= width || gid.y >= height) return;
+    int sx = int(o.p[0] & 1023) + int(gid.x), sy = int(o.p[0] >> 16 & 511) + int(gid.y);
+    int dx = int(o.p[1] & 1023) + int(gid.x), dy = int(o.p[1] >> 16 & 511) + int(gid.y);
+    ushort source = vram[index_at(sx, sy, 1)]; device ushort &dest = vram[index_at(dx, dy, 1)];
+    if (!((o.mask & 2) && (dest & 0x8000))) dest = source | ushort((o.mask & 1) << 15);
+    if (scale > 1) for (uint fy = 0; fy < scale; fy++) for (uint fx = 0; fx < scale; fx++) {
+        ushort fine = hires[index_at(sx * int(scale) + int(fx), sy * int(scale) + int(fy), scale)];
+        device ushort &p = hires[index_at(dx * int(scale) + int(fx), dy * int(scale) + int(fy), scale)];
+        if (!((o.mask & 2) && (p & 0x8000))) p = fine | ushort((o.mask & 1) << 15);
+    }
+}
+
 // The measured title replay spent all 4,403 samples waiting for GPU completion while fills and flat rectangles ran in one lane. Their pixels have no texture/cache
 // dependencies and unique destinations within a command; dispatch them in parallel while preserving the barriers between commands (psx-spx, Quick Rectangle Fill).
 kernel void render_flat(device ushort *vram [[buffer(0)]], device ushort *hires [[buffer(1)]], device ps1_render_cache &cache [[buffer(2)]],
@@ -245,16 +247,16 @@ kernel void render_flat(device ushort *vram [[buffer(0)]], device ushort *hires 
 // The OpenBIOS animation missed 16.7 ms on 145 boot frames: two large untextured triangles alone took ~64 ms in the single-lane native shader. Their pixels have
 // unique destinations and no texture/cache feedback, so exact native coverage and color can run in parallel. Prepare the reference's 12-bit gradients once per
 // Gouraud triangle; keep the same top-left edges, winding, size rejection and flat/Gouraud dither rules (psx-spx, GPU Render Polygon Commands / Vertex attributes).
-kernel void render_triangle_prepare(constant ps1_render_op &o [[buffer(3)]], device long *grad [[buffer(5)]], uint tid [[thread_position_in_grid]]) {
+static void triangle_prepare(constant ps1_render_op &o, device long *grad, uint tid, constant long *prepared) {
     if (tid) return;
     ps1_vtx a = o.a, b = o.b, c = o.c; long area = edge(a, b, c.x, c.y, 1);
     if (!area || max(max(a.x, b.x), c.x) - min(min(a.x, b.x), c.x) > 1023 || max(max(a.y, b.y), c.y) - min(min(a.y, b.y), c.y) > 511) return;
     if (area < 0) { ps1_vtx t = b; b = c; c = t; area = -area; }
-    gradients(a, b, c, area, grad);
+    gradients(o, grad, prepared);
 }
 
-kernel void render_triangle(device ushort *vram [[buffer(0)]], constant ps1_render_op &o [[buffer(3)]],
-                            device const long *grad [[buffer(5)]], uint2 gid [[thread_position_in_grid]]) {
+static void triangle(device ushort *vram, constant ps1_render_op &o,
+                            device const long *grad, uint2 gid) {
     ps1_vtx a = o.a, b = o.b, c = o.c; long area = edge(a, b, c.x, c.y, 1);
     if (!area || max(max(a.x, b.x), c.x) - min(min(a.x, b.x), c.x) > 1023 || max(max(a.y, b.y), c.y) - min(min(a.y, b.y), c.y) > 511) return;
     if (area < 0) { ps1_vtx t = b; b = c; c = t; }
@@ -330,7 +332,7 @@ static bool texture_position(constant ps1_render_op &o, device const long *grad,
     uv = int2(interpolate(a.u, a, x, y, 1, grad, 3), interpolate(a.v, a, x, y, 1, grad, 4)); return true;
 }
 
-kernel void render_texture_prepare(constant ps1_render_op &o [[buffer(3)]], device uint *scratch [[buffer(5)]], uint tid [[thread_position_in_grid]]) {
+static void texture_prepare(constant ps1_render_op &o, device uint *scratch, uint tid, constant long *prepared) {
     device atomic_uint *state = reinterpret_cast<device atomic_uint *>(scratch + CACHE_EVENT_BASE);
     atomic_store_explicit(state + tid, 0xffffffffu, memory_order_relaxed);
     atomic_store_explicit(state + 256 + tid, 0u, memory_order_relaxed);
@@ -340,13 +342,13 @@ kernel void render_texture_prepare(constant ps1_render_op &o [[buffer(3)]], devi
             ps1_vtx a = o.a, b = o.b, c = o.c; long area = edge(a, b, c.x, c.y, 1);
             if (!area || max(max(a.x, b.x), c.x) - min(min(a.x, b.x), c.x) > 1023 || max(max(a.y, b.y), c.y) - min(min(a.y, b.y), c.y) > 511) return;
             if (area < 0) { ps1_vtx t = b; b = c; c = t; area = -area; }
-            gradients(a, b, c, area, reinterpret_cast<device long *>(scratch));
+            gradients(o, reinterpret_cast<device long *>(scratch), prepared);
         }
     }
 }
 
-kernel void render_texture_track(device const ushort *vram [[buffer(0)]], device ps1_render_cache &cache [[buffer(2)]], constant ps1_render_op &o [[buffer(3)]],
-                                 device uint *scratch [[buffer(5)]], uint2 gid [[thread_position_in_grid]]) {
+static void texture_track(device const ushort *vram, device ps1_render_cache &cache, constant ps1_render_op &o,
+                                 device uint *scratch, uint2 gid) {
     int4 box = bounds(o); uint width = uint(box.z - box.x + 1);
     if (gid.x >= width || gid.y >= uint(box.w - box.y + 1)) return;
     device const long *grad = reinterpret_cast<device const long *>(scratch); int x = box.x + int(gid.x), y = box.y + int(gid.y); int2 uv;
@@ -372,8 +374,8 @@ kernel void render_texture_track(device const ushort *vram [[buffer(0)]], device
     }
 }
 
-kernel void render_texture_draw(device ushort *vram [[buffer(0)]], device ushort *hires [[buffer(1)]], device const ps1_render_cache &cache [[buffer(2)]],
-                                constant ps1_render_op &o [[buffer(3)]], constant uint &scale [[buffer(4)]], device uint *scratch [[buffer(5)]], uint2 gid [[thread_position_in_grid]]) {
+static void texture_draw(device ushort *vram, device ushort *hires, device const ps1_render_cache &cache,
+                                constant ps1_render_op &o, constant uint &scale, device uint *scratch, uint2 gid) {
     int4 box = bounds(o); uint width = uint(box.z - box.x + 1);
     if (gid.x >= width || gid.y >= uint(box.w - box.y + 1)) return;
     device const long *grad = reinterpret_cast<device const long *>(scratch); int x = box.x + int(gid.x), y = box.y + int(gid.y); int2 uv;
@@ -399,8 +401,8 @@ kernel void render_texture_draw(device ushort *vram [[buffer(0)]], device ushort
         textured_plot(hires, x * int(scale) + int(fx), y * int(scale) + int(fy), scale, sample, o.a.r, o.a.g, o.a.b, o);
 }
 
-kernel void render_texture_finish(device const ushort *vram [[buffer(0)]], device ps1_render_cache &cache [[buffer(2)]],
-                                  constant ps1_render_op &o [[buffer(3)]], device const uint *scratch [[buffer(5)]], uint tid [[thread_position_in_grid]]) {
+static void texture_finish(device const ushort *vram, device ps1_render_cache &cache,
+                                  constant ps1_render_op &o, device const uint *scratch, uint tid) {
     device const uint *state = scratch + CACHE_EVENT_BASE;
     if (state[256 + tid] && state[tid] != 0xffffffffu) {
         int4 box = bounds(o); uint width = uint(box.z - box.x + 1), at = state[256 + tid] - 1;
@@ -416,8 +418,8 @@ kernel void render_texture_finish(device const ushort *vram [[buffer(0)]], devic
     }
 }
 
-kernel void render_scaled(device const ushort *vram [[buffer(0)]], device ushort *hires [[buffer(1)]], device const ps1_render_cache &cache [[buffer(2)]],
-                          constant ps1_render_op &o [[buffer(3)]], constant uint &scale [[buffer(4)]], device uint *scratch [[buffer(5)]], uint2 gid [[thread_position_in_grid]]) {
+static void scaled(device const ushort *vram, device ushort *hires, device const ps1_render_cache &cache,
+                          constant ps1_render_op &o, constant uint &scale, device uint *scratch, uint2 gid) {
     if (scale <= 1) return;
     if (o.type == RENDER_FILL) {
         uint width = ((o.p[2] & 1023) + 15) & ~15u, height = o.p[2] >> 16 & 511;
@@ -429,7 +431,7 @@ kernel void render_scaled(device const ushort *vram [[buffer(0)]], device ushort
     if (gid.x >= uint(box.z - box.x + 1) * scale || gid.y >= uint(box.w - box.y + 1) * scale) return;
     int x = box.x * int(scale) + int(gid.x), y = box.y * int(scale) + int(gid.y), nx = x / int(scale), ny = y / int(scale);
     int r = o.a.r, g = o.a.g, bl = o.a.b, u = o.a.u, v = o.a.v; bool native_covered = true;
-    bool feedback = (o.flags & RENDER_TEXTURE) && texture_feedback(o, box);
+    bool feedback = o.flags & RENDER_FEEDBACK;
     if (o.type == RENDER_TRIANGLE) {
         ps1_vtx a = o.a, b = o.b, c = o.c; long area = edge(a, b, c.x, c.y, 1);
         if (!area || max(max(a.x, b.x), c.x) - min(min(a.x, b.x), c.x) > 1023 || max(max(a.y, b.y), c.y) - min(min(a.y, b.y), c.y) > 511) return;
@@ -465,4 +467,65 @@ kernel void render_scaled(device const ushort *vram [[buffer(0)]], device ushort
         ushort sample = native_covered && (raw >> 16) == key ? ushort(raw) : texel_extra(vram, cache, u, v, o);
         textured_plot(hires, x, y, scale, sample, r, g, bl, o);
     } else plot(hires, x, y, scale, rgb15(nx, ny, r, g, bl, o.flags & RENDER_DITHER), o.flags & RENDER_SEMI, o.mask, o.texpage);
+}
+
+// Keep the independently tested per-primitive entry points for large draws. Small ordered batches call the same pixel/cache routines within one workgroup.
+kernel void render_triangle_prepare(constant ps1_render_op &o [[buffer(3)]], device long *grad [[buffer(5)]], constant long *prepared [[buffer(7)]], uint tid [[thread_position_in_grid]]) {
+    triangle_prepare(o, grad, tid, prepared);
+}
+
+kernel void render_triangle(device ushort *vram [[buffer(0)]], constant ps1_render_op &o [[buffer(3)]],
+                            device const long *grad [[buffer(5)]], uint2 gid [[thread_position_in_grid]]) {
+    triangle(vram, o, grad, gid);
+}
+
+kernel void render_texture_prepare(constant ps1_render_op &o [[buffer(3)]], device uint *scratch [[buffer(5)]], constant long *prepared [[buffer(7)]], uint tid [[thread_position_in_grid]]) {
+    texture_prepare(o, scratch, tid, prepared);
+}
+
+kernel void render_texture_track(device const ushort *vram [[buffer(0)]], device ps1_render_cache &cache [[buffer(2)]], constant ps1_render_op &o [[buffer(3)]],
+                                 device uint *scratch [[buffer(5)]], uint2 gid [[thread_position_in_grid]]) {
+    texture_track(vram, cache, o, scratch, gid);
+}
+
+kernel void render_texture_draw(device ushort *vram [[buffer(0)]], device ushort *hires [[buffer(1)]], device const ps1_render_cache &cache [[buffer(2)]],
+                                constant ps1_render_op &o [[buffer(3)]], constant uint &scale [[buffer(4)]], device uint *scratch [[buffer(5)]], uint2 gid [[thread_position_in_grid]]) {
+    texture_draw(vram, hires, cache, o, scale, scratch, gid);
+}
+
+kernel void render_texture_finish(device const ushort *vram [[buffer(0)]], device ps1_render_cache &cache [[buffer(2)]],
+                                  constant ps1_render_op &o [[buffer(3)]], device const uint *scratch [[buffer(5)]], uint tid [[thread_position_in_grid]]) {
+    texture_finish(vram, cache, o, scratch, tid);
+}
+
+kernel void render_scaled(device const ushort *vram [[buffer(0)]], device ushort *hires [[buffer(1)]], device const ps1_render_cache &cache [[buffer(2)]],
+                          constant ps1_render_op &o [[buffer(3)]], constant uint &scale [[buffer(4)]], device uint *scratch [[buffer(5)]], uint2 gid [[thread_position_in_grid]]) {
+    scaled(vram, hires, cache, o, scale, scratch, gid);
+}
+
+// Crash's title sends ~1,700 small triangles in a busy frame, taking >30 ms with separate encoder dispatches. One workgroup processes their existing stages in
+// order, including cache misses and fine samples. No primitives run concurrently: device barriers retain destination blending, masks and stale texture history.
+kernel void render_triangles(device ushort *vram [[buffer(0)]], device ushort *hires [[buffer(1)]], device ps1_render_cache &cache [[buffer(2)]],
+                             constant ps1_render_op *ops [[buffer(3)]], constant uint &scale [[buffer(4)]], device uint *scratch [[buffer(5)]],
+                             constant uint &count [[buffer(6)]], constant long *prepared [[buffer(7)]], uint tid [[thread_index_in_threadgroup]]) {
+    for (uint n = 0; n < count; n++) {
+        constant ps1_render_op &o = ops[n]; int4 box = bounds(o);
+        uint width = uint(box.z - box.x + 1), height = uint(box.w - box.y + 1), pixels = width * height;
+        if (o.flags & RENDER_TEXTURE) {
+            texture_prepare(o, scratch, tid, prepared);
+            threadgroup_barrier(mem_flags::mem_device);
+            for (uint i = tid; i < pixels; i += 256) texture_track(vram, cache, o, scratch, uint2(i % width, i / width));
+            threadgroup_barrier(mem_flags::mem_device);
+            for (uint i = tid; i < pixels; i += 256) texture_draw(vram, hires, cache, o, scale, scratch, uint2(i % width, i / width));
+            threadgroup_barrier(mem_flags::mem_device);
+            texture_finish(vram, cache, o, scratch, tid);
+        } else {
+            if ((o.flags & RENDER_GOURAUD) && !tid) triangle_prepare(o, reinterpret_cast<device long *>(scratch), 0, prepared);
+            threadgroup_barrier(mem_flags::mem_device);
+            for (uint i = tid; i < pixels; i += 256) triangle(vram, o, reinterpret_cast<device const long *>(scratch), uint2(i % width, i / width));
+        }
+        threadgroup_barrier(mem_flags::mem_device);
+        if (scale > 1) for (uint i = tid; i < pixels * scale * scale; i += 256) scaled(vram, hires, cache, o, scale, scratch, uint2(i % (width * scale), i / (width * scale)));
+        threadgroup_barrier(mem_flags::mem_device);
+    }
 }
