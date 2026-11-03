@@ -1,10 +1,10 @@
-# Mac host tests beside their code (plan.md, phases 4-7): replay, keyboard, controllers, playback policy and saves need no Apple frameworks, devices, game, BIOS or GPU.
+# Mac host tests beside their code (plan.md, phases 4-7). The Mac audio adapter uses SDK types and mocked AudioQueue calls; no tests open devices or need game data.
 # make run checks them; make asan builds the same checks with ASan/UBSan in build/asan. Only persistence needs the runtime, built once into objects.
 B = build
 SAN ?=
 RT = ../../../runtime
 CFLAGS = -O1 -g -Wall -Wextra -I$(RT) $(SAN)
-TESTS = t_keyboard t_controllers t_replay t_audio t_saves t_log t_report
+TESTS = t_keyboard t_controllers t_replay t_audio t_audio_output t_saves t_state t_log t_report
 OBJ = $(patsubst $(RT)/%.c,$(B)/rt/%.o,$(sort $(wildcard $(RT)/*.c)))
 .DEFAULT_GOAL := run
 .SECONDARY: $(OBJ)
@@ -23,6 +23,14 @@ $(B)/rt/%.o: $(RT)/%.c $(wildcard $(RT)/*.h) Makefile
 $(B)/t_saves: t_saves.c ../saves.c ../saves.h $(OBJ) Makefile
 	@mkdir -p $(@D)
 	clang $(CFLAGS) -o $@ t_saves.c ../saves.c $(OBJ)
+
+$(B)/t_state: t_state.c ../state.c ../state.h $(OBJ) Makefile
+	@mkdir -p $(@D)
+	clang $(CFLAGS) -o $@ t_state.c ../state.c $(OBJ)
+
+$(B)/t_audio_output: t_audio_output.m ../audio_mac.m ../audio.h ../front.h $(wildcard $(RT)/*.h) Makefile
+	@mkdir -p $(@D)
+	clang $(CFLAGS) -fobjc-arc -o $@ t_audio_output.m
 
 $(B)/t_log: t_log.c ../log.c ../log.h Makefile
 	@mkdir -p $(@D)

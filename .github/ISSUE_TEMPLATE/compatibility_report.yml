@@ -5,6 +5,7 @@ body:
     attributes:
       value: |
         Report one game and disc revision per issue. Say exactly what you played; reaching a title screen does not mean the whole game works.
+        For a first test pass, follow the [testing guide](https://github.com/lukegskw/muyiunative/blob/main/docs/testing-games.md).
         Never upload a disc image, BIOS dump, game app, generated code, memory card, save state or extracted game data. Hashes and serials identify a disc without sharing it.
         For a security vulnerability, use the private reporting instructions in SECURITY.md instead of this form.
   - type: input
@@ -50,8 +51,9 @@ body:
   - type: input
     id: device
     attributes:
-      label: Mac and macOS version
-      description: Apple menu > About This Mac; include the chip.
+      label: Mac, RAM and macOS version
+      description: Apple menu > About This Mac; include the chip and memory capacity.
+      placeholder: MacBook Pro M1, 16 GB RAM, macOS 14.7
     validations:
       required: true
   - type: dropdown

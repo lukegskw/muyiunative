@@ -1,0 +1,95 @@
+# External disc identified with scripts/disc_info.py on 2026-11-02; only metadata, hashes and normal pad inputs are retained.
+name = "Final Fantasy IX"
+serial = "SLUS-01251"
+
+[disc]
+licence = "SCEA"
+boot = 'SLUS_012.51'
+boot_sha256 = "e30e40745d079aed7071c130785fb42406d8857bdf5484a101ec9baed143ee1c"
+tracks = [
+  { number = 1, mode = "MODE2/2352", sectors = 314930, sha256 = "d5d14f338179bd9dd15ec9e0997462c28643ef84268f3db86c1b3742dbabc6bc" },
+]
+
+# Capture/build route from reset with empty memory-card slots. This is the observed scope, not a completed level or full-game compatibility claim.
+[validation]
+date = "2026-11-03"
+screen = "first battle in the cargo ship"
+frames = 24720
+inputs = [
+  "4800:10", "4806:0", "4860:4000", "4866:0", "18000:4000", "18006:0",
+  "18060:10", "18100:0", "18120:4000", "18126:0", "18180:4000", "18186:0",
+  "18240:4000", "18246:0", "18300:4000", "18306:0", "18420:40", "18428:0",
+  "18460:4000", "18466:0", "18520:4000", "18526:0", "18580:4000", "18586:0",
+  "18640:4000", "18646:0", "18700:4000", "18706:0", "18840:10", "18854:0",
+  "18880:4000", "18886:0", "18940:4000", "18946:0", "19000:4000", "19006:0",
+  "19060:4000", "19066:0", "19120:4000", "19126:0", "19180:4000", "19186:0",
+  "19240:4000", "19246:0", "19320:10", "19400:0", "19420:4000", "19426:0",
+  "19480:4000", "19486:0", "19540:4000", "19546:0", "19600:4000", "19606:0",
+  "19660:4000", "19666:0", "19720:4000", "19726:0", "19800:4000", "19806:0",
+  "19860:4000", "19866:0", "19920:4000", "19926:0", "19980:4000", "19986:0",
+  "20040:4000", "20046:0", "20100:4000", "20106:0", "20160:4000", "20166:0",
+  "20220:4000", "20226:0", "20280:4000", "20286:0", "20340:4000", "20346:0",
+  "20400:4000", "20406:0", "20460:4000", "20466:0", "20520:4000", "20526:0",
+  "20760:8", "20766:0", "20820:4000", "20826:0", "20880:4000", "20886:0",
+  "20940:4000", "20946:0", "21000:4000", "21006:0", "21060:4000", "21066:0",
+  "21120:4000", "21126:0", "21180:4000", "21186:0", "21240:4000", "21246:0",
+  "21300:4000", "21306:0", "21960:4000", "21966:0", "22050:4000", "22056:0",
+  "22140:4000", "22146:0", "22230:4000", "22236:0", "22320:4000", "22326:0",
+  "22410:4000", "22416:0", "22500:4000", "22506:0", "22590:4000", "22596:0",
+  "22680:4000", "22686:0", "22770:4000", "22776:0", "22860:4000", "22866:0",
+  "22950:4000", "22956:0", "23040:4000", "23046:0", "23130:4000", "23136:0",
+  "23220:4000", "23226:0", "23310:4000", "23316:0", "23400:4000", "23406:0",
+  "23490:4000", "23496:0", "23580:4000", "23586:0", "23670:4000", "23676:0",
+  "23760:4000", "23766:0", "23850:4000", "23856:0", "23940:4000", "23946:0",
+  "24030:4000", "24036:0", "24120:4000", "24126:0", "24210:4000", "24216:0",
+  "24300:4000", "24306:0", "24390:4000", "24396:0", "24480:4000", "24486:0",
+  "24570:4000", "24576:0",
+]
+width = 320
+height = 218
+frame_hash_fnv1a64 = "1f8773f9f941218a"
+
+native_instructions = 7904116658
+lockstep_stops = 177178253
+
+[title]
+date = "2026-11-02"
+screen = "title/main menu"
+frames = 4800
+inputs = []
+width = 320
+height = 224
+frame_hash_fnv1a64 = "cff7e85f12d90d7c"
+
+[validation.metal_4x]
+date = "2026-11-03"
+scale = 4
+width = 1280
+height = 872
+frame_hash_fnv1a64 = "e96e2c2a5c0ac791"
+native_vram_cache_match_every_frame = true
+
+# Continue validation with port 1 released. Compare this static crate region every fourth field after 40 warmup fields; captures stay outside the repository.
+[validation.crate_stability]
+date = "2026-11-03"
+continue_frames = 180
+buttons = 0
+compare_start = 24760
+compare_frames = 100
+compare_step = 4
+region = [0, 60, 40, 115]
+changing_pixels_1x = 0
+changing_pixels_2x = 0
+changing_pixels_4x = 0
+
+# A local quick state after 40 released-pad fields; the state file itself stays in Application Support.
+[validation.quick_state]
+date = "2026-11-03"
+frame = 24760
+continue_frames = 40
+buttons = 0
+scale = 4
+width = 1280
+height = 872
+frame_hash_fnv1a64 = "07328e9697fefcb9"
+exact_replay_fields = 120

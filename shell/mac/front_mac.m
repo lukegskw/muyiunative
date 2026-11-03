@@ -3,7 +3,6 @@
 #import <Cocoa/Cocoa.h>
 #import <ImageIO/ImageIO.h>
 #import <QuartzCore/CAMetalLayer.h>
-#import <AudioToolbox/AudioToolbox.h>
 #import <GameController/GameController.h>
 #include <os/lock.h>
 #include <pthread.h>
@@ -15,7 +14,6 @@
 #include "ps1.h"
 #include "keyboard.h"
 #include "product.h"
-#include "audio.h"
 #include "controllers.h"
 #include "report.h"
 
@@ -24,6 +22,10 @@ static atomic_bool g_stop, g_running;
 static atomic_int g_renderer;
 static NSMenu *g_graphics;
 static NSWindow *g_win;
+static NSMenuItem *g_save_state, *g_load_state;
+static atomic_int g_state_request;
+static atomic_bool g_state_enabled, g_state_available, g_state_busy;
+static NSString *g_title;
 static BOOL g_quitting;
 static os_unfair_lock g_input_lock = OS_UNFAIR_LOCK_INIT;   // only host input; neither thread shares a ps1
 static front_controllers g_pads;
@@ -44,6 +46,28 @@ static uint16_t key_event(NSEvent *e, int down) {
     return front_keyboard_event(e.keyCode, s.length ? [s characterAtIndex:0] : 0, down);
 }
 static void release_keys(void) { front_keyboard_reset(); atomic_store(&g_buttons, 0); }
+static void state_menu_update(void) {
+    BOOL enabled = atomic_load(&g_state_enabled) && !atomic_load(&g_state_busy);
+    g_save_state.enabled = enabled; g_load_state.enabled = enabled && atomic_load(&g_state_available);
+}
+void front_state_menu(int enabled, int available) {
+    atomic_store(&g_state_enabled, enabled != 0); atomic_store(&g_state_available, available != 0);
+}
+int front_state_request(void) { return atomic_exchange(&g_state_request, FRONT_STATE_NONE); }
+void front_state_complete(int action, const char *error) { @autoreleasepool {
+    NSString *message = error ? @(error) : nil;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        atomic_store(&g_state_busy, false);
+        if (!message && action == FRONT_STATE_SAVE) atomic_store(&g_state_available, true);
+        state_menu_update();
+        if (message) front_error(message.UTF8String);
+        else {
+            g_win.title = [NSString stringWithFormat:@"%@ — State %@", g_title, action == FRONT_STATE_SAVE ? @"saved" : @"loaded"];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ g_win.title = g_title; });
+        }
+        if (g_quitting) atomic_store(&g_stop, true);
+    });
+} }
 static void input_focus(int focused) {
     release_keys(); os_unfair_lock_lock(&g_input_lock);
     front_controllers_focus(&g_pads, focused); os_unfair_lock_unlock(&g_input_lock);
@@ -104,10 +128,14 @@ void front_buttons(front_pad pads[2]) {
 - (BOOL)windowShouldClose:(NSWindow *)window { (void)window; [NSApp terminate:nil]; return NO; }
 - (void)keyboard:(id)sender { (void)sender; release_keys(); front_keyboard_settings(); }
 - (void)renderer:(NSMenuItem *)sender { release_keys(); front_renderer_set((int)sender.tag); }
+- (void)state:(NSMenuItem *)sender {
+    if (!atomic_load(&g_state_enabled) || atomic_exchange(&g_state_busy, true)) return;
+    release_keys(); atomic_store(&g_state_request, (int)sender.tag); state_menu_update();
+}
 // AppKit's applicationShouldTerminate: contract: NSTerminateLater keeps its event loop alive while the machine thread finishes a save, then replies on the main queue.
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)app {
     (void)app; if (!atomic_load(&g_running)) return NSTerminateNow;
-    g_quitting = YES; atomic_store(&g_stop, true); return NSTerminateLater;
+    g_quitting = YES; if (!atomic_load(&g_state_busy)) atomic_store(&g_stop, true); return NSTerminateLater;
 }
 @end
 
@@ -126,74 +154,6 @@ static os_unfair_lock g_lock = OS_UNFAIR_LOCK_INIT;   // guards g_new, g_fresh a
 static frame g_new, g_shown;                          // the newest frame (the machine's thread writes it) and the one presented (main thread)
 static bool g_fresh;
 static atomic_bool g_queued;                          // a present is queued on the main thread
-
-// The machine writes the bounded sample ring; one serial delivery queue owns returned buffers and every enqueue, preserving sample order without blocking a callback.
-enum { AUDIO_CHUNK = FRONT_AUDIO_CHUNK, AUDIO_BUFFERS = FRONT_AUDIO_BUFFERS };
-static os_unfair_lock g_audio_lock = OS_UNFAIR_LOCK_INIT;
-static front_audio_state g_audio_state;
-static AudioQueueRef g_audio_queue;
-static AudioQueueBufferRef g_audio_buffers[AUDIO_BUFFERS];
-static dispatch_queue_t g_audio_delivery;
-static atomic_bool g_audio_failed;
-static void audio_service(void) {
-    if (!g_audio_queue) return;
-    for (;;) {
-        unsigned id; int16_t samples[AUDIO_CHUNK * 2];
-        os_unfair_lock_lock(&g_audio_lock);
-        int ready = front_audio_take(&g_audio_state, &id, samples);
-        os_unfair_lock_unlock(&g_audio_lock);
-        if (!ready) return;
-        AudioQueueBufferRef b = g_audio_buffers[id];
-        memcpy(b->mAudioData, samples, sizeof samples); b->mAudioDataByteSize = sizeof samples;
-        OSStatus err = AudioQueueEnqueueBuffer(g_audio_queue, b, 0, NULL);
-        if (err) { if (!atomic_exchange(&g_audio_failed, true)) RED("front end: cannot enqueue audio (%d)", (int)err); return; }
-    }
-}
-void front_audio(const int16_t *samples, int frames) {
-    if (!g_audio_delivery || frames <= 0) return;
-    os_unfair_lock_lock(&g_audio_lock);
-    front_audio_push(&g_audio_state, samples, (unsigned)frames);
-    os_unfair_lock_unlock(&g_audio_lock);
-    dispatch_async(g_audio_delivery, ^{ audio_service(); });
-}
-static void audio_buffer(AudioQueueRef q, AudioQueueBufferRef b) {
-    if (!g_audio_queue || q != g_audio_queue) return;
-    // The results callback padded 144 zero samples although real data arrived 1.68 ms later and two buffers were still queued. A returned buffer belongs to us
-    // (Apple, AudioQueueOutputCallbackBlock); retain it until a complete real block is available, then enqueue from this same serial queue without blocking callbacks.
-    os_unfair_lock_lock(&g_audio_lock);
-    int err = front_audio_return(&g_audio_state, (unsigned)(uintptr_t)b->mUserData);
-    os_unfair_lock_unlock(&g_audio_lock);
-    if (err) { if (!atomic_exchange(&g_audio_failed, true)) RED("front end: invalid returned audio buffer"); return; }
-    audio_service();
-}
-static void audio_start(void) {
-    dispatch_queue_attr_t attr = dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INTERACTIVE, 0);
-    g_audio_delivery = dispatch_queue_create("org.muyiunative.audio", attr);
-    if (!g_audio_delivery) { RED("front end: cannot create audio delivery queue"); return; }
-    __block OSStatus err = 0;
-    dispatch_sync(g_audio_delivery, ^{
-        AudioStreamBasicDescription format = {.mSampleRate = 44100, .mFormatID = kAudioFormatLinearPCM,
-            .mFormatFlags = kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked, .mBytesPerPacket = 4, .mFramesPerPacket = 1,
-            .mBytesPerFrame = 4, .mChannelsPerFrame = 2, .mBitsPerChannel = 16};
-        err = AudioQueueNewOutputWithDispatchQueue(&g_audio_queue, &format, 0, g_audio_delivery,
-            ^(AudioQueueRef q, AudioQueueBufferRef b) { audio_buffer(q, b); });
-        for (unsigned i = 0; !err && i < AUDIO_BUFFERS; i++) {
-            AudioQueueBufferRef b; err = AudioQueueAllocateBuffer(g_audio_queue, AUDIO_CHUNK * 4, &b);
-            if (!err) {
-                g_audio_buffers[i] = b; b->mUserData = (void *)(uintptr_t)i;
-                memset(b->mAudioData, 0, AUDIO_CHUNK * 4); b->mAudioDataByteSize = AUDIO_CHUNK * 4;
-                err = AudioQueueEnqueueBuffer(g_audio_queue, b, 0, NULL);   // the same three silent startup buffers, before the machine begins
-            }
-        }
-    });
-    if (!err) err = AudioQueueStart(g_audio_queue, NULL);
-    if (err) {
-        RED("front end: cannot start audio (%d)", (int)err);
-        __block AudioQueueRef failed;
-        dispatch_sync(g_audio_delivery, ^{ failed = g_audio_queue; g_audio_queue = NULL; });
-        if (failed) AudioQueueDispose(failed, true);   // let the callback queue drain while disposal waits for outstanding callbacks
-    }
-}
 
 static int fit(frame *f, size_t n) {
     if (n <= f->cap) return 1;
@@ -243,6 +203,11 @@ void front_run(const char *title, void (*run)(void *arg), void *arg) {
     [menu addItemWithTitle:@"Keyboard Controls…" action:@selector(keyboard:) keyEquivalent:@","].target = g_app;
     [menu addItemWithTitle:[@"Quit " stringByAppendingString:name] action:@selector(terminate:) keyEquivalent:@"q"];
     item.submenu = menu; [bar addItem:item]; app.mainMenu = bar;
+    NSMenu *game = [[NSMenu alloc] initWithTitle:@"Game"]; game.autoenablesItems = NO;
+    g_save_state = [game addItemWithTitle:@"Save State" action:@selector(state:) keyEquivalent:@"s"];
+    g_load_state = [game addItemWithTitle:@"Load State" action:@selector(state:) keyEquivalent:@"l"];
+    g_save_state.tag = FRONT_STATE_SAVE; g_load_state.tag = FRONT_STATE_LOAD; g_save_state.target = g_load_state.target = g_app;
+    NSMenuItem *game_item = [[NSMenuItem alloc] initWithTitle:@"Game" action:nil keyEquivalent:@""]; game_item.submenu = game; [bar addItem:game_item]; state_menu_update();
     g_graphics = [[NSMenu alloc] initWithTitle:@"Graphics"]; g_graphics.autoenablesItems = NO;
     const int scales[] = {0, 1, 2, 4}; NSArray<NSString *> *titles = @[@"Software", @"Metal (1×)", @"Metal (2×)", @"Metal (4×)"];
     for (unsigned i = 0; i < sizeof scales / sizeof *scales; i++) {
@@ -252,7 +217,7 @@ void front_run(const char *title, void (*run)(void *arg), void *arg) {
     g_win = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 640, 480)
                                         styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable
                                           backing:NSBackingStoreBuffered defer:NO];
-    g_win.title = name; g_win.releasedWhenClosed = NO; g_win.contentAspectRatio = NSMakeSize(4, 3);
+    g_title = name; g_win.title = name; g_win.releasedWhenClosed = NO; g_win.contentAspectRatio = NSMakeSize(4, 3);
     g_win.delegate = g_app;
     FrontView *v = [[FrontView alloc] initWithFrame:NSMakeRect(0, 0, 640, 480)];
     v.wantsLayer = YES; v.layerContentsRedrawPolicy = NSViewLayerContentsRedrawNever;
@@ -260,7 +225,7 @@ void front_run(const char *title, void (*run)(void *arg), void *arg) {
     g_win.contentView = v;
     if (!present_init((__bridge void *)v.layer)) RED("front end: no Metal device, the window stays empty");
     [g_win center]; [g_win makeKeyAndOrderFront:nil];
-    [g_win makeFirstResponder:v]; audio_start();
+    [g_win makeFirstResponder:v]; front_audio_start();
     job *j = malloc(sizeof *j);
     pthread_attr_t at; pthread_t t;
     pthread_attr_init(&at); pthread_attr_setstacksize(&at, 8 << 20); pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);

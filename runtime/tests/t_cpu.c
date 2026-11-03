@@ -95,6 +95,25 @@ int main(void) {
     m->i_stat = 0; irq_update(m);
     CHECK(!(m->cpu.cop0[C0_CAUSE] & 0x400), "acknowledging the IRQ in I_STAT clears CAUSE.IP2");
 
+    // psx-spx, COP0 Exception Handling / Interrupts vs GTE Commands: the command at EPC executes even though the IRQ handler starts there. A BIOS-style handler
+    // skips it on return. RGB FIFO movement distinguishes one execution from a skipped or repeated GPF; transfers and disabled COP2 must have no such side effect.
+    const uint32_t irq_ops[] = {0x4a08003d, I(COP2, 0, 8, 12 << 11), I(COP2, 4, 8, 15 << 11), 0x4a08003d};
+    for (unsigned k = 0; k < sizeof irq_ops / sizeof *irq_ops; k++) {
+        RUN_STEPS(0, irq_ops[k]);
+        m->cpu.cop0[C0_SR] = 0x401 | (k == 3 ? 0 : 1u << 30);
+        m->cpu.cop2d[8] = 4096; m->cpu.cop2d[9] = 16; m->cpu.cop2d[10] = 32; m->cpu.cop2d[11] = 48;
+        m->cpu.cop2d[20] = 0x112233; m->cpu.cop2d[21] = 0x445566; m->cpu.cop2d[22] = 0x778899;
+        m->cpu.ld_r = 7; m->cpu.ld_v = 0x12345678;
+        m->i_mask = 1u << IRQ_VBLANK; irq_raise(m, IRQ_VBLANK);
+        m->next_event = m->cycles + 20; cpu_run(m);
+        CHECK(m->cpu.cop0[C0_EPC] == CODE && !(m->cpu.cop0[C0_CAUSE] & 0x8000007c) && (m->cpu.pc & ~4u) == VECTOR,
+              "an IRQ on a COP2 opcode preserves EPC and enters the handler without BD");
+        CHECK(m->cpu.cop2d[20] == (k ? 0x112233u : 0x445566u) && m->cpu.cop2d[21] == (k ? 0x445566u : 0x778899u) &&
+              m->cpu.cop2d[22] == (k ? 0x778899u : 0x030201u), "only an enabled GTE command executes once before IRQ entry");
+        CHECK(r[7] == 0x12345678 && !m->cpu.ld_r && !r[8], "IRQ entry commits the preceding load without executing a COP2 transfer");
+        m->i_stat = 0; irq_update(m);
+    }
+
     RUN(JAL(CODE + 0x10), NOP);
     CHECK(m->cpu.pc == CODE + 0x10 && r[31] == CODE + 8, "JAL links the address after its delay slot");
     RUN(I(ADDIU, 0, 1, 1), I(REGIMM, 1, 0x10, 4), NOP);

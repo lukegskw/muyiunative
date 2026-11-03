@@ -1,5 +1,5 @@
 # The first game (plan.md, decision log). Its dump stays outside the repository; scripts/disc_info.py printed the values of [disc] from it on 2026-10-30
-name = "Metal Slug X (USA)"
+name = "Metal Slug X"
 serial = "SLUS-01212"
 
 [disc]

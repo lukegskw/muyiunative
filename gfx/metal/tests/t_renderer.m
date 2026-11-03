@@ -101,6 +101,162 @@ static void transfers(fixture *t) {
     drawing(t); frame(t);
 }
 
+static void framebuffer_copies(int scale) {
+    fixture t = create(scale); if (!t.r) { drop(&t); return; } drawing(&t);
+    uint16_t row[512];
+    // Crash's 512x240 boot copies took ~294 ms at 4x. Synthetic buffers exercise the same disjoint layout with every mask mode, without game pixels.
+    for (int y = 0; y < 240; y++) {
+        for (int x = 0; x < 512; x++) row[x] = (uint16_t)((x * 73 + y * 137) | (x & 1 ? 0x8000 : 0));
+        upload(&t, 0, 264 + y, row, 512);
+    }
+    for (unsigned mask = 0; mask < 4; mask++) {
+        GP0(&t, 0xe6000000, 0x024080c0, V(0, 0), V(512, 240), 0x024080c0, V(512, 0), V(512, 240));
+        GP0(&t, 0xe6000000 | mask, 0x80000000, V(0, 264), V(512, 0), V(512, 240));
+        GP0(&t, 0x80000000, V(0, 264), V(0, 0), V(512, 240));
+        CHECK(t.m->gpu.vram[10 * VRAM_W + 100] == (uint16_t)(t.m->gpu.vram[274 * VRAM_W + 100] | (mask & 1 ? 0x8000 : 0)),
+              "%dx mask %u disjoint framebuffer copy retains source pixels", scale, mask);
+    }
+    GP0(&t, 0xe6000000);
+    for (int y = 0; y < 24; y++) {
+        for (int x = 0; x < 64; x++) row[x] = (uint16_t)(1 + y * 64 + x);
+        upload(&t, 992, (500 + y) & 511, row, 64);
+    }
+    GP0(&t, 0x80000000, V(992, 500), V(100, 100), V(64, 24));
+    CHECK(t.m->gpu.vram[123 * VRAM_W + 163] == 1536, "%dx disjoint source wraps in both VRAM axes", scale);
+    GP0(&t, 0x80000000, V(100, 100), V(992, 500), V(64, 24));
+    CHECK(t.m->gpu.vram[11 * VRAM_W + 31] == 1536, "%dx disjoint destination wraps in both VRAM axes", scale);
+    // These ranges overlap through wrapping: taking a whole-rectangle snapshot would lose the reference's vertical propagation.
+    GP0(&t, 0x80000000, V(992, 500), V(992, 501), V(64, 24));
+    CHECK(t.m->gpu.vram[12 * VRAM_W + 31] == 64, "%dx wrapped downward overlap propagates preceding rows", scale);
+    GP0(&t, 0x80000000, V(992, 501), V(993, 501), V(64, 1));
+    CHECK(t.m->gpu.vram[501 * VRAM_W + 32] == 64, "%dx horizontal overlap snapshots the source row", scale);
+    GP0(&t, 0xe6000001, 0x80000000, V(0, 0), V(0, 0), V(0, 0));
+    CHECK((t.m->gpu.vram[511 * VRAM_W + 1023] & 0x8000) != 0, "%dx zero copy extents cover full VRAM in an identity copy", scale);
+    GP0(&t, 0xe6000002, 0x80000000, V(0, 0), V(0, 0), V(0, 0));
+    frame(&t);
+
+    // Moving a framebuffer must copy its actual fine samples, including protected/transparent edge detail, rather than upscaling its native VRAM.
+    drawing(&t); GP0(&t, 0x02000000, V(0, 0), V(320, 240), 0x02000000, V(512, 256), V(320, 240));
+    GP0(&t, 0xe6000001, 0x20ffffff, V(10, 10), V(17, 10), V(10, 17), 0xe6000000);
+    int cap_w = 640 * scale, cap_h = 576 * scale, w, h, cw, ch;
+    uint32_t *before = malloc((size_t)cap_w * cap_h * sizeof *before), *after = malloc((size_t)cap_w * cap_h * sizeof *after);
+    CHECK(before && after, "%dx framebuffer copy display buffers allocate", scale);
+    if (before && after) {
+        CHECK(!metal_renderer_frame(t.r, before, cap_w, cap_h, &w, &h, 1), "%dx source framebuffer verifies", scale);
+        for (unsigned mask = 0; mask < 4; mask++) {
+            GP0(&t, 0xe6000000 | mask, 0x80000000, V(0, 0), V(512, 256), V(320, 240));
+            gpu_gp1(t.m, 0x05000000 | 512 | 256 << 10);
+            CHECK(!metal_renderer_frame(t.r, after, cap_w, cap_h, &cw, &ch, 1), "%dx mask %u copied framebuffer verifies", scale, mask);
+            CHECK(w == cw && h == ch && !memcmp(before, after, (size_t)w * h * sizeof *before), "%dx mask %u copy preserves every fine framebuffer sample", scale, mask);
+            gpu_gp1(t.m, 0x05000000);
+        }
+    }
+    free(before); free(after); drop(&t);
+}
+
+static void asynchronous_frames(int scale) {
+    fixture a = create(scale), b = create(scale);
+    if (!a.r || !b.r) { drop(&a); drop(&b); return; }
+    drawing(&a); drawing(&b);
+    int cap_w = 640 * scale, cap_h = 576 * scale, previous_w[2] = {0}, previous_h[2] = {0};
+    size_t capacity = (size_t)cap_w * cap_h * sizeof(uint32_t);
+    uint32_t *expected = malloc(capacity), *previous = malloc(capacity * 2), *actual = malloc(capacity);
+    CHECK(expected && previous && actual, "%dx asynchronous frame buffers allocate", scale);
+    if (expected && previous && actual) for (unsigned n = 0; n < 18; n++) {
+        fixture *both[] = {&a, &b};
+        for (int j = 0; j < 2; j++) {
+            fixture *t = both[j];
+            // Change dimensions, origin, format and display enable while the preceding scanout may still be running. Each frame must own its register snapshot.
+            gpu_gp1(t->m, 0x08000000 | n % 4 | (n % 5 == 0 ? 16 : 0));
+            gpu_gp1(t->m, 0x05000000 | (n & 1 ? 512 : 0) | (n & 2 ? 256 << 10 : 0));
+            gpu_gp1(t->m, 0x03000000 | (n % 7 == 0));
+            BATCH(t, 0xe6000000, 0x02000000 | (n + 1) * 0x030507, V(0, 0), V(512, 511));
+            BATCH(t, 0xe6000000 | n % 4, 0x300000ff, V(10, 10), 0x0000ff00, V(17, 10), 0x00ff0000, V(10, 17));
+            BATCH(t, 0x80000000, V(0, 0), V(512, 256), V(320, 240));
+        }
+        int w, h, sw, sh;
+        CHECK(!metal_renderer_frame(b.r, expected, cap_w, cap_h, &sw, &sh, 1), "%dx synchronous frame %u verifies", scale, n);
+        CHECK(!metal_renderer_frame_async(a.r, actual, cap_w, cap_h, &w, &h), "%dx asynchronous frame %u submits", scale, n);
+        unsigned slot = n % 2; uint32_t *saved = previous + slot * (capacity / sizeof *previous);
+        CHECK(w == previous_w[slot] && h == previous_h[slot] && (n < 2 || !memcmp(actual, saved, (size_t)w * h * sizeof *actual)),
+              "%dx asynchronous frame %u returns the complete image and dimensions from two frames earlier", scale, n);
+        memcpy(saved, expected, (size_t)sw * sh * sizeof *expected); previous_w[slot] = sw; previous_h[slot] = sh;
+    }
+    equal(&a); equal(&b);
+    if (expected && actual) {
+        int w, h, sw, sh;
+        CHECK(!metal_renderer_frame(a.r, actual, cap_w, cap_h, &w, &h, 1) && !metal_renderer_frame(b.r, expected, cap_w, cap_h, &sw, &sh, 1) &&
+              w == sw && h == sh && !memcmp(actual, expected, (size_t)w * h * sizeof *actual), "%dx synchronous readback drains a pending asynchronous frame", scale);
+        CHECK(!metal_renderer_frame_async(a.r, actual, cap_w, cap_h, &w, &h) && !w && !h, "%dx asynchronous submission restarts after synchronous readback", scale);
+    }
+    free(expected); free(previous); free(actual); drop(&a); drop(&b);   // destruction also waits for an outstanding submission
+}
+
+static void triangle_batches(int scale) {
+    fixture t = create(scale); if (!t.r) { drop(&t); return; } drawing(&t);
+    uint16_t row[256]; unsigned clut = 48 | 400 << 6;
+    for (int x = 0; x < 256; x++) row[x] = (uint16_t)(0x8000 | x * 113);
+    upload(&t, 768, 400, row, 256);
+    for (int y = 0; y < 96; y++) {
+        for (int x = 0; x < 256; x++) row[x] = (uint16_t)(1 + (x * 73 + y * 139) % 65535);
+        upload(&t, 512, y, row, 256);
+    }
+    // Keep mixed primitives queued together: flat/Gouraud, every depth, UV wrapping, windows, cache-slot conflicts, blends, masks and a native-empty triangle.
+    // Registers may change between GP0 commands without emitting a barrier operation. The batch must honor each operation's own saved attributes and gradients.
+    for (unsigned pass = 0; pass < 4; pass++) {
+        for (unsigned n = 0; n < 96; n++) {
+            int x = 20 + (n * 7 % 64), y = 20 + (n * 11 % 64), u = n * 19 % 256, v = n * 13 % 96;
+            unsigned page = 8 | (n % 3) << 7 | (n % 4) << 5 | (n & 1) << 9;
+            BATCH(&t, 0xe1000000 | page, 0xe2000000 | (n % 5 == 0 ? 0x04421 : 0), 0xe6000000 | n % 4);
+            if (n % 7 == 0) BATCH(&t, 0x20e0a060 | (n & 1) << 25, V(x, y), V(x + 7, y), V(x, y + 9));
+            else BATCH(&t, 0x34808080 | (n & 3) << 24, V(x, y), UV(u, v, clut), 0x004080c0, V(x + 7, y), UV((u + 63) & 255, v, page),
+                       0x00c08040, V(x, y + 9), UV(u, (v + 65) & 255, 0));
+        }
+        BATCH(&t, 0xe6000000, 0x25000000, V(100, 100), UV(0, 0, clut), V(101, 100), UV(1, 0, 8), V(100, 101), UV(0, 1, 0));
+        equal(&t);
+        pixel(&t, 512, 0, (uint16_t)(0x801f + pass));   // stale cache data must survive matching hits until a covered eviction
+    }
+    int cap_w = 640 * scale, cap_h = 576 * scale, w, h, sw, sh, mismatch = 0;
+    uint32_t *out = malloc((size_t)cap_w * cap_h * sizeof *out), *ref = malloc(640 * 576 * sizeof *ref);
+    CHECK(out && ref, "%dx triangle batch display buffers allocate", scale);
+    if (out && ref) {
+        CHECK(!metal_renderer_frame(t.r, out, cap_w, cap_h, &w, &h, 1), "%dx mixed triangle batches verify native VRAM/cache", scale);
+        ps1_display(t.m, ref, 640, 576, &sw, &sh);
+        for (int y = 0; y < sh; y++) for (int x = 0; x < sw; x++) mismatch += ref[y * sw + x] != out[y * scale * w + x * scale];
+        CHECK(w == sw * scale && h == sh * scale && !mismatch, "%dx mixed triangle batches retain every native sample", scale);
+    }
+    free(out); free(ref); drop(&t);
+}
+
+static void texture_edge_buffers(int scale) {
+    fixture t = create(scale); if (!t.r) { drop(&t); return; } drawing(&t);
+    uint16_t row[256]; unsigned clut = 48 | 400 << 6;
+    for (unsigned i = 0; i < 256; i++) row[i] = 0x801f;
+    upload(&t, 768, 400, row, 256);
+    for (unsigned i = 0; i < 16; i++) row[i] = 0x0101;
+    for (unsigned y = 65; y <= 127; y++) upload(&t, 1008, y, row, 16);
+    GP0(&t, 0xe100008f, 0x01000000, 0x02ff0000, V(0, 0), V(640, 240));
+    // An 8-bit page at x=960 maps U=127 to word 1023. Expanding the UV bound to 128 invents a read at x=0, falsely marking only the left buffer as feedback.
+    // Render the same synthetic face in both buffers: their native and fine pictures must agree after translation, including pixels beyond native coverage.
+    for (int buffer = 0; buffer < 2; buffer++) {
+        unsigned x = buffer * 320;
+        GP0(&t, 0xe3000000 | x, 0xe4000000 | (x + 319) | 239 << 10, 0xe5000000 | x,
+            0x25000000, V(-3, 70), UV(97, 65, clut), V(18, 70), UV(127, 65, 0x8f), V(-3, 88), UV(97, 127, 0));
+    }
+    int cap_w = 640 * scale, cap_h = 576 * scale, w[2], h[2];
+    uint32_t *out[2] = {malloc((size_t)cap_w * cap_h * sizeof(uint32_t)), malloc((size_t)cap_w * cap_h * sizeof(uint32_t))};
+    CHECK(out[0] && out[1], "%dx translated texture-edge buffers allocate", scale);
+    if (out[0] && out[1]) {
+        for (unsigned i = 0; i < 2; i++) {
+            gpu_gp1(t.m, 0x05000000 | i * 320);
+            CHECK(!metal_renderer_frame(t.r, out[i], cap_w, cap_h, &w[i], &h[i], 1), "%dx translated texture-edge frame %u verifies native VRAM/cache", scale, i);
+        }
+        CHECK(w[0] == w[1] && h[0] == h[1] && !memcmp(out[0], out[1], (size_t)w[0] * h[0] * sizeof(uint32_t)),
+              "%dx texture-edge face has identical fine samples in both framebuffers", scale);
+    }
+    free(out[0]); free(out[1]); drop(&t);
+}
+
 static void textures(fixture *t) {
     uint16_t palette[256], source[64]; unsigned clut = 20 | 300 << 6;
     for (unsigned i = 0; i < 256; i++) palette[i] = (uint16_t)(i ? i | 0x8000 : 0);
@@ -429,9 +585,18 @@ static void hires(int scale) {
         CHECK(!metal_renderer_frame(t.r, out, cap_w, cap_h, &w, &h, 1), "%dx masked triangle frame verifies", scale);
         for (int y = 0; y < scale; y++) for (int x = 0; x < scale; x++) fine[y * scale + x] = out[(10 * scale + y) * w + 14 * scale + x];
         sprite(&t, 0x65000000, 14, 10, 0, 0, 0, 1, 1);
-        CHECK(!metal_renderer_frame(t.r, out, cap_w, cap_h, &w, &h, 1), "%dx masked feedback keeps the fine triangle edge", scale);
+        CHECK(!metal_renderer_frame(t.r, out, cap_w, cap_h, &w, &h, 1), "%dx masked disjoint point texture verifies", scale);
         for (int y = 0; y < scale; y++) for (int x = 0; x < scale; x++)
-            CHECK(out[(10 * scale + y) * w + 14 * scale + x] == fine[y * scale + x], "%dx masked feedback preserves subpixel (%d,%d)", scale, x, y);
+            CHECK(out[(10 * scale + y) * w + 14 * scale + x] == ((fine[y * scale + x] & 0xffffff) ? fine[y * scale + x] : 0xffffffff),
+                  "%dx disjoint point texture preserves protected fine samples and fills unprotected (%d,%d)", scale, x, y);
+        // The old whole-page alias test treated a point at (0,0) as feedback at (14,10), incorrectly blocking every child of a protected native pixel. Actual
+        // feedback still gates on native writes; a disjoint source follows the same per-sample mask rule as other independent draws. Restore the edge for the next case.
+        GP0(&t, 0xe6000000, 0x02000000, V(0, 0), V(640, 480), 0xe6000001, 0x2000c0ff, V(10, 10), V(15, 10), V(10, 15), 0xe6000002, 0x01000000);
+        CHECK(!metal_renderer_frame(t.r, out, cap_w, cap_h, &w, &h, 1), "%dx masked edge restores before actual feedback", scale);
+        sprite(&t, 0x65000000, 14, 10, 14, 10, 0, 1, 1);
+        CHECK(!metal_renderer_frame(t.r, out, cap_w, cap_h, &w, &h, 1), "%dx actual masked feedback verifies", scale);
+        for (int y = 0; y < scale; y++) for (int x = 0; x < scale; x++)
+            CHECK(out[(10 * scale + y) * w + 14 * scale + x] == fine[y * scale + x], "%dx actual feedback retains the fine edge (%d,%d)", scale, x, y);
         GP0(&t, 0xe1000108, 0x01000000); sprite(&t, 0x65000000, 10, 10, 0, 0, 0, 33, 35);
         CHECK(!metal_renderer_frame(t.r, out, cap_w, cap_h, &w, &h, 1), "%dx large transparent nonfeedback rectangle verifies", scale);
         for (int y = 0; y < scale; y++) for (int x = 0; x < scale; x++)
@@ -476,6 +641,36 @@ static void hires(int scale) {
     frame(&t); drop(&t);
 }
 
+static void quick_states(int scale) {
+    fixture t = create(scale); if (!t.r) { drop(&t); return; } drawing(&t);
+    size_t count = (size_t)VRAM_W * VRAM_H * scale * scale;
+    uint16_t *fine = malloc(count * sizeof *fine); ps1_gpu *gpu = malloc(sizeof *gpu);
+    uint32_t *before = malloc(640 * 576 * 16 * sizeof *before), *after = malloc(640 * 576 * 16 * sizeof *after);
+    CHECK(fine && gpu && before && after, "%dx state test buffers allocate", scale);
+    if (!fine || !gpu || !before || !after) goto done;
+    BATCH(&t, 0xe6000001, 0x300000ff, V(10, 10), 0x0000ff00, V(33, 12), 0x00ff0000, V(12, 35));
+    int w, h, aw, ah;
+    CHECK(!metal_renderer_frame_async(t.r, after, 2560, 2304, &aw, &ah), "%dx state fixture submits its first image", scale);
+    BATCH(&t, 0xe6000000, 0xe1000020, 0x22ff8000, V(20, 15), V(45, 18), V(23, 40));
+    CHECK(!metal_renderer_frame_async(t.r, after, 2560, 2304, &aw, &ah), "%dx state fixture has two pending images", scale);
+    CHECK(!metal_renderer_save_state(t.r, fine, count), "%dx snapshot waits for pending GPU writes", scale);
+    *gpu = t.m->gpu;
+    CHECK(!metal_renderer_frame(t.r, before, 2560, 2304, &w, &h, 1), "%dx snapshot's completed image verifies", scale);
+    BATCH(&t, 0x02000000, V(0, 0), V(320, 240));
+    CHECK(!metal_renderer_frame_async(t.r, after, 2560, 2304, &aw, &ah), "%dx a later image remains pending before load", scale);
+    CHECK(metal_renderer_load_state(t.r, fine, scale) < 0, "%dx importing into an in-flight renderer is refused", scale);
+    metal_renderer_free(t.r); t.m->gpu = *gpu; t.r = metal_renderer_new(t.m, METALLIB_PATH, scale);
+    CHECK(!metal_renderer_load_state(t.r, fine, scale) && !metal_renderer_frame(t.r, after, 2560, 2304, &aw, &ah, 1), "%dx a fresh renderer restores and verifies", scale);
+    CHECK(w == aw && h == ah && !memcmp(before, after, (size_t)w * h * sizeof *before), "%dx loading preserves every fine color and mask sample", scale);
+    int other = scale == 2 ? 4 : 2;
+    metal_renderer_free(t.r); t.r = metal_renderer_new(t.m, METALLIB_PATH, other);
+    CHECK(!metal_renderer_load_state(t.r, fine, scale) && !metal_renderer_frame(t.r, after, 2560, 2304, &aw, &ah, 1), "%dx state loads under a %dx graphics choice", scale, other);
+    int bad = 0; for (int y = 0; y < ah; y++) for (int x = 0; x < aw; x++) bad += after[y * aw + x] != before[(y * scale / other) * w + x * scale / other];
+    CHECK(!bad, "%dx to %dx state conversion preserves the saved sample grid and native anchors", scale, other);
+done:
+    free(fine); free(gpu); free(before); free(after); drop(&t);
+}
+
 int main(void) { @autoreleasepool {
     if (!MTLCreateSystemDefaultDevice()) { fputs("[RED] metal tests: no Metal device; GPU validation did not run\n", stderr); return 77; }
     fixture a = create(1), b = create(1);
@@ -489,6 +684,11 @@ int main(void) { @autoreleasepool {
         CHECK(!a.m->on_render && !a.m->render_ctx, "freeing a renderer detaches its machine callback");
     }
     drop(&a); drop(&b); large_rectangles(1); large_rectangles(2); large_rectangles(4);
+    framebuffer_copies(1); framebuffer_copies(2); framebuffer_copies(4);
+    asynchronous_frames(1); asynchronous_frames(2); asynchronous_frames(4);
+    triangle_batches(1); triangle_batches(2); triangle_batches(4);
+    texture_edge_buffers(1); texture_edge_buffers(2); texture_edge_buffers(4);
+    quick_states(2); quick_states(4);
     large_triangles(1); large_triangles(2); large_triangles(4); textured_triangles(1); textured_triangles(2); textured_triangles(4); hires(2); hires(4);
     printf("metal: %d checks, %d failed\n", checks, fails); return fails != 0;
 } }

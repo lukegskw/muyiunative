@@ -28,7 +28,16 @@ void cpu_run(ps1 *m) {
     for (;;) {
         if (c->boundary) {
             if (m->cycles >= m->next_event || m->exit_requested) return;
-            if (cpu_irq_due(m)) { c->delay = 0; c->cur_pc = c->pc; m->cycles++; cpu_exception(m, EXC_INT); continue; }
+            if (cpu_irq_due(m)) {
+                c->delay = 0; c->cur_pc = c->pc; m->cycles++;
+                // Crash's hub trace interrupted RTPT, then the BIOS skipped it on return while SXY still held the preceding triangle. psx-spx, CPU Specifications,
+                // COP0 Exception Handling / Interrupts vs GTE Commands: a GTE command at the interrupted PC still issues, but EPC points to that same opcode.
+                // Keep normal IRQ entry (including its pending load and EPC); transfers and disabled COP2 do not issue a command as this side effect.
+                uint32_t op;
+                if ((c->cop0[C0_SR] & (1u << 30)) && !(c->pc & 3) && mem_fetch(m, c->pc, &op) && (op & 0xfe000000u) == 0x4a000000u)
+                    gte_command(m, op);
+                cpu_exception(m, EXC_INT); continue;
+            }
             uint32_t p = c->pc & 0x1fffffff;
             if ((p == 0xa0 && c->r[9] == 0x3c) || (p == 0xb0 && c->r[9] == 0x3d)) tty_putc(m, (char)c->r[4]);
             else if (m->exe && ps1_exe_due(m)) ps1_exe_start(m);

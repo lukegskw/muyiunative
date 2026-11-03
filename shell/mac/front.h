@@ -12,6 +12,13 @@ void front_renderer_set(int scale);   // any thread; ignores other values and up
 void front_present(const uint32_t *px, int w, int h);
 typedef struct front_pad { int connected; uint16_t buttons; } front_pad;
 void front_buttons(front_pad pads[2]);   // frame-boundary snapshot on the machine thread: keyboard + controller 1, then controller 2; active-high buttons
+void front_audio_start(void);   // initialize playback before the machine thread starts
+int front_audio_pause(int paused);   // machine thread: preserve audio across blocking state operations; resume after existing buffers refill; 0 success, -1 OS error
 void front_audio(const int16_t *samples, int frames);   // 44.1 kHz signed stereo from the machine thread
+void front_audio_reset(void);   // machine thread, after loading a state: discard playback from the old timeline and prime fresh output
+enum { FRONT_STATE_NONE, FRONT_STATE_SAVE, FRONT_STATE_LOAD };
+void front_state_menu(int enabled, int available);   // configure per-game quick states before front_run
+int front_state_request(void);   // machine thread: consume one menu request at a frame boundary
+void front_state_complete(int action, const char *error);   // NULL error: success; update menu and show feedback on the main thread
 // Writes w x h BGRA8 pixels to a PNG file: 0, or -1 after a [RED] line
 int front_write_png(const char *path, const uint32_t *px, int w, int h);

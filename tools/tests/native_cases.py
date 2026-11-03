@@ -10,7 +10,8 @@ from asm import program
 
 BASE, VECTOR = 0x80010000, 0x80000080
 # The exception handler: logs CAUSE and EPC at the pointer in 80020000h, clears the software interrupts, and returns: to EPC for an interrupt, past the instruction
-# for an exception, and past the branch's delay slot when CAUSE.BD is set. Only k0 and k1 are used
+# for an exception, and past the branch's delay slot when CAUSE.BD is set. An interrupt on a GTE command skips that already-issued command, as the BIOS does.
+# Only k0 and k1 are used.
 HANDLER = '''
     lui k0, 0x8002
     lw k1, 0(k0)
@@ -28,7 +29,7 @@ HANDLER = '''
     mtc0 zero, $13
     bltz k1, bd
     andi k1, k1, 0x7c
-    beq k1, zero, done
+    beq k1, zero, interrupt
     nop
     addiu k0, k0, 4
 done:
@@ -37,6 +38,15 @@ done:
 bd:
     j done
     addiu k0, k0, 8
+interrupt:
+    lw k1, 0(k0)
+    nop
+    srl k1, k1, 25
+    xori k1, k1, 0x25
+    bne k1, zero, done
+    nop
+    j done
+    addiu k0, k0, 4
 '''
 MAIN = '''
 start:
@@ -213,6 +223,23 @@ after:
 bcf:
     bc2t bcf
     nop
+    addiu t0, zero, 4096        ; a known GPF result, including FIFO movement that detects a repeated command
+    mtc2 t0, $8
+    addiu t0, zero, 16
+    mtc2 t0, $9
+    addiu t0, zero, 32
+    mtc2 t0, $10
+    addiu t0, zero, 48
+    mtc2 t0, $11
+    lui t0, 0x11
+    ori t0, t0, 0x2233
+    mtc2 t0, $20
+    lui t0, 0x44
+    ori t0, t0, 0x5566
+    mtc2 t0, $21
+    lui t0, 0x77
+    ori t0, t0, 0x8899
+    mtc2 t0, $22
     lui at, 0x4000              ; a software interrupt, taken at the end of the block
     ori at, at, 0x0101
     mtc0 at, $12
@@ -223,6 +250,9 @@ bcf:
     beq zero, zero, irq
     addiu t2, zero, 3
 irq:
+    cop2 0x008003d              ; the IRQ executes this GPF before entering the handler, which returns past it
+    swc2 $25, 28(s0)
+    swc2 $20, 32(s0)
     addiu t3, zero, 4
     lui at, 0x4001              ; SR.IsC: stores reach the cache, not memory
     mtc0 at, $12

@@ -14,7 +14,8 @@ typedef uint16_t render_u16;
 
 typedef struct ps1_vtx { int x, y, r, g, b, u, v; } ps1_vtx;
 enum { RENDER_TRIANGLE = 1, RENDER_LINE, RENDER_RECT, RENDER_FILL, RENDER_COPY, RENDER_UPLOAD, RENDER_CLEAR, RENDER_RESET };
-enum { RENDER_TEXTURE = 1, RENDER_GOURAUD = 2, RENDER_SEMI = 4, RENDER_RAW = 8, RENDER_DITHER = 16 };
+enum { RENDER_TEXTURE = 1, RENDER_GOURAUD = 2, RENDER_SEMI = 4, RENDER_RAW = 8, RENDER_DITHER = 16,
+       RENDER_FEEDBACK = 32, RENDER_CLASSIFIED = 64 };   // host-only alias classification; the runtime emits neither bit
 typedef struct ps1_render_op {
     render_u32 type, flags, texpage, texwin, mask, clut;
     int ax1, ay1, ax2, ay2;

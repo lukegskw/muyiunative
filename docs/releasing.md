@@ -66,15 +66,15 @@ Before repository publication, the [history audit](public-preview-audit.md) was 
 
 On 2026-11-02, the real local signing/notarization pipeline passed on the M4 Pro with macOS 26.6.2:
 
-| Field                    | Value                                                              |
-| ------------------------ | ------------------------------------------------------------------ |
-| Source commit            | `4813e3b79adb`                                                     |
-| App identity             | 0.7.0 (build 64)                                                   |
-| Apple submission         | `0d644f1d-448b-45e6-b713-8f89681d042a`, Accepted                   |
-| Final launcher archive   | `muyiunative-0.7.0-mac-arm64.zip`                                  |
-| Final ZIP SHA-256        | `8608cf6a84cca176f1bc98df8b1a0ed4a8c31ecc06c49fe643ea8e765cd08a2f` |
-| Extracted-copy checks    | Signature, stapled ticket, Gatekeeper, kit integrity, bundled boot |
-| OpenBIOS 60-frame hash   | `49d1a17d49708cb1`                                                 |
+| Field                  | Value                                                              |
+| ---------------------- | ------------------------------------------------------------------ |
+| Source commit          | `4813e3b79adb`                                                     |
+| App identity           | 0.7.0 (build 64)                                                   |
+| Apple submission       | `0d644f1d-448b-45e6-b713-8f89681d042a`, Accepted                   |
+| Final launcher archive | `muyiunative-0.7.0-mac-arm64.zip`                                  |
+| Final ZIP SHA-256      | `8608cf6a84cca176f1bc98df8b1a0ed4a8c31ecc06c49fe643ea8e765cd08a2f` |
+| Extracted-copy checks  | Signature, stapled ticket, Gatekeeper, kit integrity, bundled boot |
+| OpenBIOS 60-frame hash | `49d1a17d49708cb1`                                                 |
 
 This is a private candidate built from the release implementation commit, before merging the tooling. It has not been published to GitHub Releases and does not complete the downloaded-launcher player check. The final release must identify its actual reviewed source commit and repeat the same packaging/validation flow; merging a later documentation or implementation commit does not silently retarget an existing archive.
 
@@ -82,4 +82,4 @@ This is a private candidate built from the release implementation commit, before
 
 [v0.7.0](https://github.com/lukegskw/muyiunative/releases/tag/v0.7.0) was published on 2026-11-02 from merged commit `a6c39675c4b3541b777efb0dde9aa3a5c0030b2d`, version 0.7.0 (build 66). The final archive is `muyiunative-0.7.0-mac-arm64.zip`, SHA-256 `584fa79917d932430df540586471d46cabafc7149f786569c07a780fa9d5ee39`. Apple accepted submission `12c59a63-89bb-455e-b518-014227e9874a`; the extracted archive passed signature, stapled-ticket, Gatekeeper, kit and bundled boot checks. The ZIP and adjacent checksum were downloaded back from GitHub and matched the local archive.
 
-On the same date, the user confirmed the requested downloaded-launcher test worked: build through the GUI without a terminal and controller play. The resulting Metal Slug X (USA), SLUS-01212 app identifies source `a6c39675c4b3`, 0.7.0 (build 66), in its metadata, matching the published launcher and build log. This completes the player acceptance criterion; it does not extend the previously verified gameplay route or establish whole-game, fresh-Mac, wired or two-player compatibility. The user then authorized making the repository public.
+On the same date, the user confirmed the requested downloaded-launcher test worked: build through the GUI without a terminal and controller play. The resulting Metal Slug X, SLUS-01212 app identifies source `a6c39675c4b3`, 0.7.0 (build 66), in its metadata, matching the published launcher and build log. This completes the player acceptance criterion; it does not extend the previously verified gameplay route or establish whole-game, fresh-Mac, wired or two-player compatibility. The user then authorized making the repository public.
