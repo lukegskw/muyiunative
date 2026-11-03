@@ -4,7 +4,7 @@ Use this guide for a first compatibility report. A useful initial pass is 10–1
 
 ## Before starting
 
-You need an Apple-silicon Mac with macOS 14 or later. An M1 MacBook Pro with 16 GB RAM is within the supported hardware requirements; performance on each game still needs testing. Build from your own `.cue`/`.bin` disc backup using the [Mac preview](https://github.com/lukegskw/muyiunative/releases/tag/v0.7.0) and [launcher instructions](../README.md#build-from-the-launcher). Building needs Apple's free Command Line Tools; playing the built app does not. OpenBIOS is included.
+You need an Apple-silicon Mac with macOS 14 or later. An M1 MacBook Pro with 16 GB RAM is within the supported hardware requirements; performance on each game still needs testing. Build from your own `.cue`/`.bin` disc backup using the [Mac preview](https://github.com/lukegskw/muyiunative/releases/tag/v0.8.0) and [launcher instructions](../README.md#build-from-the-launcher). Building needs Apple's free Command Line Tools; playing the built app does not. OpenBIOS is included.
 
 Record the version, build number and commit from **About muyiunative…** in the game app. The source checkout and README gallery can contain changes newer than the published preview. Keep the exact build with every result; retesting an older download does not verify a newer source fix. Check the [game notes](../profiles/README.md) for previously tested scenes and known issues.
 

@@ -5,7 +5,7 @@
 # it from phase 5 on. A resource, file or folder, is copied into Contents/Resources under its own name.
 # The app is written to a unique temporary directory beside <out.app>, then moved into place, so a failed pack leaves the previous app as it was. An existing <out.app> is replaced only when it carries
 # the same bundle ID: the script never deletes an app it did not pack.
-# Usage: pack_app.py <out.app> --exe <host> [--resource <path>]... [--name muyiunative] [--bundle-id org.muyiunative.<name>] [--version 0.7.0] [--sign -]
+# Usage: pack_app.py <out.app> --exe <host> [--resource <path>]... [--name muyiunative] [--bundle-id org.muyiunative.<name>] [--version 0.8.0] [--sign -]
 import argparse, ctypes, os, plistlib, re, shutil, signal, subprocess, sys, tempfile
 from pathlib import Path
 from xml.parsers.expat import ExpatError
