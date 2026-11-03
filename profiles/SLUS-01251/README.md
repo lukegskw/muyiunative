@@ -2,7 +2,7 @@
 
 [All games](../README.md) · [Build a game app](../../README.md#build-from-the-launcher) · [Profile and input route](game.toml)
 
-**Verified from reset through the first battle in the cargo ship.** The 24,720-frame route includes New Game, the opening movie, lighting the candle and the first encounter. It uses normal pad inputs and empty memory-card slots. Later scenes, the rest of Disc 1, disc changes and save/load have not been verified.
+**Verified from reset through the first battle in the cargo ship.** The 24,720-frame route includes New Game, the opening movie, lighting the candle and the first encounter. It uses normal pad inputs and empty memory-card slots. Later scenes, the rest of Disc 1, disc changes and normal in-game saving have not been verified.
 
 | Field           | Value                                                              |
 | --------------- | ------------------------------------------------------------------ |
@@ -13,7 +13,7 @@
 | Lockstep        | 177,178,253 stops; native code agrees with the interpreter         |
 | Native display  | 320×218 at the recorded battle frame; hash `1f8773f9f941218a`      |
 
-The complete recorded route also passes Metal 4× with native VRAM and texture/CLUT caches matching software at every frame. This is an automated correctness check, not a report that all visual or audible symptoms are gone. The published 0.7.0 launcher predates these source changes.
+The complete recorded route also passes Metal 4× with native VRAM and texture/CLUT caches matching software at every frame. This is an automated correctness check, not a report that all visual or audible symptoms are gone. These fixes are included in preview 0.8.0; the earlier 0.7.0 launcher predates them.
 
 The user reported acceptable software rendering, Metal audio cuts and trembling objects in this battle on 2026-11-02. Investigation found that the Metal renderer classified a whole texture page as feedback even when the requested UVs were disjoint from the destination. In one busy battle frame, 98 suspected feedback primitives reduce to two actual possible aliases. The renderer now includes the requested UV range, texture windows, wrapping, complete fetched cache lines and the full palette when proving independence. Disjoint draws preserve per-sample geometry and mask behavior; actual feedback retains ordered native results. Integer PS1 vertex coordinates and affine textures remain visible at higher resolutions; this is not a subpixel geometry reconstruction system.
 
@@ -32,3 +32,7 @@ The complete 24,720-field route is rechecked after this correction at Metal 4×:
 The route is also rechecked after the shared CPU/GTE interrupt correction on 2026-11-03: all instruction counts, lockstep stops and the fine display hash above remain unchanged, and the crate region remains static at 2×/4×. Both local apps include that runtime correction.
 
 The local quick-state bookmark resumes this first battle at frame 24760 after 40 fields with port 1 released. Save/load preserves the immediate 4× image and reproduces 120 subsequent fields with identical CPU, RAM, SPU, GPU and fine-image state. The normal app menu and ⌘S/⌘L are also checked across app restart and a change to Metal 2×. The private state file is kept only in Application Support.
+
+## Quick states and audio
+
+On 2026-11-03 the user confirmed saving/loading quick states and, after the playback correction, normal audio following a save. The production AudioQueue adapter also passes 720-field 2×/4× windows covering successful and failed state operations, with no source-sample mismatches, ring drops or queue errors. See [audio-after-save validation](../../docs/development.md#audio-after-saving-a-state). This does not establish normal memory-card save/load or whole-game audio accuracy.

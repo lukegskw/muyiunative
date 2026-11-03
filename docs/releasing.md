@@ -28,7 +28,7 @@ Choose a new output path and your local identity, for example:
 scripts/release_mac.py \
   --identity 'Developer ID Application: Your Name (TEAMID)' \
   --notary-profile muyiunative-notary \
-  --output /external/output/muyiunative-0.7.0-mac-arm64.zip
+  --output /external/output/muyiunative-0.8.0-mac-arm64.zip
 ```
 
 The command:
@@ -83,3 +83,21 @@ This is a private candidate built from the release implementation commit, before
 [v0.7.0](https://github.com/lukegskw/muyiunative/releases/tag/v0.7.0) was published on 2026-11-02 from merged commit `a6c39675c4b3541b777efb0dde9aa3a5c0030b2d`, version 0.7.0 (build 66). The final archive is `muyiunative-0.7.0-mac-arm64.zip`, SHA-256 `584fa79917d932430df540586471d46cabafc7149f786569c07a780fa9d5ee39`. Apple accepted submission `12c59a63-89bb-455e-b518-014227e9874a`; the extracted archive passed signature, stapled-ticket, Gatekeeper, kit and bundled boot checks. The ZIP and adjacent checksum were downloaded back from GitHub and matched the local archive.
 
 On the same date, the user confirmed the requested downloaded-launcher test worked: build through the GUI without a terminal and controller play. The resulting Metal Slug X, SLUS-01212 app identifies source `a6c39675c4b3`, 0.7.0 (build 66), in its metadata, matching the published launcher and build log. This completes the player acceptance criterion; it does not extend the previously verified gameplay route or establish whole-game, fresh-Mac, wired or two-player compatibility. The user then authorized making the repository public.
+
+## Preview 0.8.0 artifact
+
+On 2026-11-03 the user merged PR #26, confirmed quick-state saving/loading and corrected audio, and authorized a new preview. The signed launcher for [v0.8.0](https://github.com/lukegskw/muyiunative/releases/tag/v0.8.0) was built from the clean release-preparation commit below. Subsequent release-record documentation commits do not retarget that binary.
+
+| Field | Value |
+| --- | --- |
+| Source commit | `6f2ab8e3fffc27a40aaf2ea66b4036f860674207` |
+| App identity | 0.8.0 (build 72), commit `6f2ab8e3fffc` |
+| Apple submission | `37e910fb-258f-4c72-a121-5435c8abf7ee`, Accepted |
+| Launcher archive | `muyiunative-0.8.0-mac-arm64.zip` |
+| ZIP SHA-256 | `ced07801e6dd72df2fc3116dd9423130ed53b8e79d0c0e9df68725350eac92cd` |
+| Extracted-copy checks | Signature, stapled ticket, Gatekeeper, kit integrity, arm64 resources and bundled boot |
+| OpenBIOS 60-frame hash | `49d1a17d49708cb1` |
+
+The release contains the generic launcher and checksum only. Its source kit includes the FF IX and Crash profiles, shared CPU/Metal/audio fixes and quick states. Gallery images, game apps, discs, generated game code and saves are excluded. All 78 Python tests and pinned ruff/pyright passed during preparation; the real release pipeline verified the newly extracted ZIP after signing/notarization.
+
+[Updating](../README.md#updating) requires replacing the launcher and rebuilding existing game apps. Normal memory-card saves retain their per-game identity. The earlier downloaded-launcher/controller acceptance check remains the 0.7.0 record above; no new fresh-Mac or full-game acceptance is inferred from this artifact validation.
