@@ -101,3 +101,21 @@ On 2026-11-03 the user merged PR #26, confirmed quick-state saving/loading and c
 The release contains the generic launcher and checksum only. Its source kit includes the FF IX and Crash profiles, shared CPU/Metal/audio fixes and quick states. Gallery images, game apps, discs, generated game code and saves are excluded. All 78 Python tests and pinned ruff/pyright passed during preparation; the real release pipeline verified the newly extracted ZIP after signing/notarization.
 
 [Updating](../README.md#updating) requires replacing the launcher and rebuilding existing game apps. Normal memory-card saves retain their per-game identity. The earlier downloaded-launcher/controller acceptance check remains the 0.7.0 record above; no new fresh-Mac or full-game acceptance is inferred from this artifact validation.
+
+## Preview 0.8.1 artifact
+
+On 2026-11-04 the user confirmed the GT2/WipEout fixes were working and authorized the screenshots, commit/push and release. The signed launcher prepared for [v0.8.1](https://github.com/lukegskw/muyiunative/releases/tag/v0.8.1) identifies the clean implementation commit below. This subsequent artifact-record commit does not retarget the binary.
+
+| Field | Value |
+| --- | --- |
+| Source commit | `7d0986bf8b25d700064372ecc971322cb99aa92c` |
+| App identity | 0.8.1 (build 75), commit `7d0986bf8b25` |
+| Apple submission | `557f3b96-d216-4a27-a1e4-14e05eb8eed6`, Accepted |
+| Launcher archive | `muyiunative-0.8.1-mac-arm64.zip` |
+| ZIP SHA-256 | `9e4cedb0fc5395955f00239b97c33bdd7ac9692a612d8b81641cdd362751c910` |
+| Extracted-copy checks | Signature, stapled ticket, Gatekeeper, kit integrity, arm64 resources and bundled boot |
+| OpenBIOS 60-frame hash | `49d1a17d49708cb1` |
+
+The launcher kit includes the new GT2/WipEout profiles, audio recovery after rendering stalls, Metal triangle optimizations and the title-atlas correction. The gallery's approved game screenshots remain outside the kit and download; only the generic launcher ZIP and checksum are distributed. Local validation passes all 78 tool tests, pinned ruff/pyright, 1,800 runtime checks, 4,670 Mac checks and 8,270 Metal checks, including CLT ASan/UBSan runs. The two gallery captures also pass packaged-app per-frame native VRAM/cache comparisons from reset.
+
+The player's confirmation covers the reported scenes and settings in the rebuilt apps. It does not replace the earlier downloaded-launcher acceptance record or establish whole-game, fresh-Mac or original-reporter M1 Max validation. Existing game apps must be rebuilt with the updated launcher to receive these runtime/shader changes.
