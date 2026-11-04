@@ -3,6 +3,7 @@
 // Apple Metal resource synchronization: tracked shared buffers plus explicit encoder barriers preserve command order; wait for completion before CPU readback.
 // The metallib is compiled by xcrun at build time and loaded with newLibraryWithURL:error:, never newLibraryWithSource:.
 #import <Metal/Metal.h>
+#include <limits.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -186,6 +187,48 @@ static void triangle_gradients(const ps1_render_op *o, int64_t *grad) {
     }
 }
 
+static int quad_uv_limits(ps1_render_op *a, ps1_render_op *b) {
+    if (a->type != RENDER_TRIANGLE || !(a->flags & RENDER_TEXTURE) || memcmp(a, b, offsetof(ps1_render_op, a))) return 0;
+    ps1_vtx v[4] = {a->a, a->b, a->c}, next[] = {b->a, b->b, b->c}; unsigned count = 3, shared = 0;
+    for (unsigned i = 0; i < 3; i++) {
+        unsigned j = 0; while (j < 3 && memcmp(next + i, v + j, sizeof *v)) j++;
+        if (j < 3) shared++; else { if (count == 4) return 0; v[count++] = next[i]; }
+    }
+    if (shared != 2 || count != 4) return 0;
+    int x0 = v[0].x, x1 = x0, y0 = v[0].y, y1 = y0;
+    for (unsigned i = 1; i < 4; i++) { x0 = MIN(x0, v[i].x); x1 = MAX(x1, v[i].x); y0 = MIN(y0, v[i].y); y1 = MAX(y1, v[i].y); }
+    if (x0 == x1 || y0 == y1) return 0;
+    ps1_vtx q[4]; unsigned corners = 0;
+    for (unsigned i = 0; i < 4; i++) {
+        if ((v[i].x != x0 && v[i].x != x1) || (v[i].y != y0 && v[i].y != y1)) return 0;
+        unsigned corner = (v[i].x == x1) | (v[i].y == y1) << 1;
+        if (corners & (1u << corner)) return 0;
+        corners |= 1u << corner; q[corner] = v[i];
+    }
+    if (!((q[0].u == q[2].u && q[1].u == q[3].u && q[0].v == q[1].v && q[2].v == q[3].v) ||
+          (q[0].u == q[1].u && q[2].u == q[3].u && q[0].v == q[2].v && q[1].v == q[3].v))) return 0;
+    // WipEout's glyph quad maps Y=399..417 to V=23..41. Native samples stop at V=40, but a 4x sample at Y=416.5 rounds to 41 and reads the neighboring glyph.
+    // psx-spx GPU Render Polygon Commands excludes right/bottom edges. For rectilinear atlas quads, exclude an endpoint texel only when neither triangle's native
+    // grid can request it. Interior fine UVs remain interpolated, including texels skipped by minification; native VRAM/cache and nonrectangular geometry are unchanged.
+    int lo[] = {255, 255}, hi[] = {0, 0}, sampled_lo[] = {INT_MAX, INT_MAX}, sampled_hi[] = {INT_MIN, INT_MIN};
+    for (unsigned i = 0; i < 4; i++) { lo[0] = MIN(lo[0], q[i].u); hi[0] = MAX(hi[0], q[i].u); lo[1] = MIN(lo[1], q[i].v); hi[1] = MAX(hi[1], q[i].v); }
+    for (unsigned i = 0; i < 2; i++) {
+        const ps1_render_op *o = i ? b : a; int64_t grad[10]; triangle_gradients(o, grad);
+        for (unsigned corner = 0; corner < 4; corner++) {
+            int x = corner & 1 ? x1 - 1 : x0, y = corner & 2 ? y1 - 1 : y0;
+            for (unsigned k = 0; k < 2; k++) {
+                int value = (int)(((int64_t)(k ? o->a.v : o->a.u) * 4096 + grad[k + 3] * (x - o->a.x) + grad[k + 8] * (y - o->a.y) + 2048) >> 12);
+                sampled_lo[k] = MIN(sampled_lo[k], value); sampled_hi[k] = MAX(sampled_hi[k], value);
+            }
+        }
+    }
+    for (unsigned k = 0; k < 2; k++) {
+        lo[k] += sampled_lo[k] > lo[k]; hi[k] -= sampled_hi[k] < hi[k];
+        a->p[k] = b->p[k] = (uint32_t)lo[k] | (uint32_t)hi[k] << 16;
+    }
+    a->flags |= RENDER_UV_LIMIT; b->flags |= RENDER_UV_LIMIT; return 1;
+}
+
 static int encode(metal_renderer *r, id<MTLCommandBuffer> cb) {
     if (r->failed) return -1;
     if (!r->n) return 0;
@@ -196,6 +239,7 @@ static int encode(metal_renderer *r, id<MTLCommandBuffer> cb) {
                 (unsigned long long)r->batches, r->n, counts[1], counts[2], counts[3], counts[4], counts[5], counts[6]);
         }
         r->batches++;
+        for (size_t i = 0; i + 1 < r->n; i++) if (quad_uv_limits(r->ops + i, r->ops + i + 1)) i++;
         size_t triangles = 0;
         for (size_t i = 0; i < r->n; i++) {
             ps1_render_op *o = r->ops + i;

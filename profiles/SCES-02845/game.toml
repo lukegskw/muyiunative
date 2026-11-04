@@ -1,0 +1,91 @@
+# External disc identified on 2026-11-03; only metadata, hashes and ordinary pad inputs are retained.
+name = "WipEout 3 - Special Edition (Europe)"
+serial = "SCES-02845"
+
+[disc]
+licence = "SCEE"
+boot = 'SCES_028.45'
+boot_sha256 = "0213f5292fa1d995ebe61f42d5dbdb6614e481cb3840ac5f1521c2dfdccc0a4d"
+tracks = [
+  { number = 1, mode = "MODE2/2352", sectors = 40247, sha256 = "003bdc41068252e791ea7dd99ba1b94814dc48b967e57a7cdc4bf6e1cf4cb1e9" },
+  { number = 2, mode = "AUDIO", sectors = 18483, sha256 = "1bd5f8a1473cf627422e1ac33c325e8d377edbc4bbc8d07e8c90f386b8fba335" },
+  { number = 3, mode = "AUDIO", sectors = 13993, sha256 = "ff38233e805fd35674d47f9d18a0fa053acc33fc7bc93478f33ad97c3de79885" },
+  { number = 4, mode = "AUDIO", sectors = 19433, sha256 = "235df7104a917bbc4c489f0d2a61b3c258f45dcf403724bb563e010f57897bd9" },
+  { number = 5, mode = "AUDIO", sectors = 18916, sha256 = "c1df818782e723bb0ccff48799e12920d979dd8068a47e6abbfcffb424aeb1d7" },
+  { number = 6, mode = "AUDIO", sectors = 18928, sha256 = "0acc7653189d9f82cca15c0f1d3d3c89f9905b108f1bc41072bb231129ae3127" },
+  { number = 7, mode = "AUDIO", sectors = 16708, sha256 = "a48be33f16d7bfa2224345f4daab983aaa80468f87868548726dfc637d0f0df7" },
+  { number = 8, mode = "AUDIO", sectors = 16578, sha256 = "4655762c6f802324d0b1168a30120c297433af6d304781b9677329d635b7ade0" },
+  { number = 9, mode = "AUDIO", sectors = 19307, sha256 = "9f9964d3e1936bd5ac652b7cfc0672010acc64b54b97e286fd61549e5bbc4447" },
+  { number = 10, mode = "AUDIO", sectors = 19113, sha256 = "0b88e22fef3a02f9777f8c66394dc08dd7bf178c307ebd2821f6241183a2d1c5" },
+  { number = 11, mode = "AUDIO", sectors = 19178, sha256 = "144be1f13933a6fb12d55b5141c66526084fa08faf0672656c2e156248a85fb8" },
+  { number = 12, mode = "AUDIO", sectors = 16658, sha256 = "0e7ad724750ac2cdd4069c2c8b221759cfbcb4df32c385be9446a7da3159d3aa" },
+  { number = 13, mode = "AUDIO", sectors = 18246, sha256 = "20c883719c31725dec5ed17c87a4bc9450d7778d226d59fb1aad59e4dab10683" },
+  { number = 14, mode = "AUDIO", sectors = 18691, sha256 = "b2c7a8c8b3249ee93f74115ecef618aeb64ffcaf4bfa8848acca6f3c86d20573" },
+]
+
+# Empty memory-card slots. This route records the audio investigation, not a completed race or full-game compatibility.
+[validation]
+date = "2026-11-03"
+screen = "Porto Kora single race, Vector class"
+frames = 18000
+inputs = [
+  "9600:40",
+  "9606:0",
+  "9720:40",
+  "9726:0",
+  "9840:4000",
+  "9846:0",
+  "10300:8",
+  "10306:0",
+  "12000:4000",
+  "12006:0",
+  "12300:4000",
+  "12306:0",
+  "12600:4000",
+  "12606:0",
+  "12900:4000",
+  "12906:0",
+  "13500:4000",
+  "13506:0",
+  "15000:4000",
+  "15006:0",
+  "15300:4000",
+  "15306:0",
+  "15600:4000",
+  "15606:0",
+  "15900:4000",
+  "15906:0",
+  "16200:4000",
+  "16206:0",
+  "16500:4000",
+  "16506:0",
+]
+width = 512
+height = 256
+frame_hash_fnv1a64 = "a7d6732f640dc3e2"
+
+native_instructions = 6704686462
+lockstep_stops = 147810794
+
+# No inputs from reset; the title remains visible after the language prompt/opening movie.
+[title]
+date = "2026-11-03"
+screen = "title screen with clean atlas glyph edges"
+frames = 7920
+inputs = []
+native_instructions = 3057679807
+width = 512
+height = 256
+frame_hash_fnv1a64 = "e6812973c7d7f201"
+
+[title.metal_2x]
+date = "2026-11-03"
+width = 1024
+height = 512
+frame_hash_fnv1a64 = "54bd9b1a21d00299"
+
+[title.metal_4x]
+date = "2026-11-03"
+width = 2048
+height = 1024
+frame_hash_fnv1a64 = "1153f3867aa48467"

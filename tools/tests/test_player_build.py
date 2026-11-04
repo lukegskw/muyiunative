@@ -71,7 +71,7 @@ class PlayerBuild(unittest.TestCase):
 
     def test_exported_identity_needs_no_git(self):
         with patch('version.subprocess.run', side_effect=AssertionError('Git must not run inside a kit')):
-            self.assertEqual(version.metadata(self.kit), ('0.8.0', json.loads((self.kit / 'build-kit.json').read_text())['BuildVersion'], json.loads((self.kit / 'build-kit.json').read_text())['Commit']))
+            self.assertEqual(version.metadata(self.kit), ('0.8.1', json.loads((self.kit / 'build-kit.json').read_text())['BuildVersion'], json.loads((self.kit / 'build-kit.json').read_text())['Commit']))
 
     def test_clt_build_from_exported_kit_and_independent_app(self):
         lib = ROOT / 'shell/mac/build/gen/ps1gpu.metallib'

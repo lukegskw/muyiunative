@@ -6,13 +6,13 @@ The aim is native code, not emulation: the game's MIPS code is translated to C a
 
 ## Status
 
-The [0.8.0 Mac preview is available](https://github.com/lukegskw/muyiunative/releases/tag/v0.8.0). The launcher builds game apps, with two controller ports, logs and problem reports, persistent memory cards and keyboard remapping. The downloaded-launcher build/controller flow has passed its [player check](docs/development.md#phase-7-the-public-preview). Software is the default renderer; Metal offers 1×, 2× and 4× geometry. The [compatibility list](#compatibility) records tested games and routes. Other games may work, but remain unverified and can have graphics, audio or other errors. Whole-game compatibility, whole-route live audio accuracy and hardware timing remain open; expect bugs.
+The [0.8.1 Mac preview is available](https://github.com/lukegskw/muyiunative/releases/tag/v0.8.1). The launcher builds game apps, with two controller ports, logs and problem reports, persistent memory cards and keyboard remapping. The downloaded-launcher build/controller flow has passed its [player check](docs/development.md#phase-7-the-public-preview). Software is the default renderer; Metal offers 1×, 2× and 4× geometry. The [compatibility list](#compatibility) records tested games and routes. Other games may work, but remain unverified and can have graphics, audio or other errors. Whole-game compatibility, whole-route live audio accuracy and hardware timing remain open; expect bugs.
 
 ## Install
 
 You need **Apple silicon and macOS 14 or later**. Intel Macs, iPhone and older macOS versions are not supported yet. Building a game app needs Apple's free Command Line Tools; playing a completed app needs no developer tools. Bring a `.cue`/`.bin` dump of your own PS1 disc. A CUE and all the track files it references must stay together; compressed formats such as CHD are not accepted.
 
-Download [muyiunative-0.8.0-mac-arm64.zip](https://github.com/lukegskw/muyiunative/releases/download/v0.8.0/muyiunative-0.8.0-mac-arm64.zip) from the [0.8.0 release](https://github.com/lukegskw/muyiunative/releases/tag/v0.8.0), double-click the ZIP in Finder, and move `muyiunative.app` to your Applications folder. The launcher is Developer ID-signed and notarized by Apple, with its notarization ticket attached; players need no Apple Developer account. Open it and accept macOS's normal first-launch confirmation. If macOS reports an invalid signature, damaged app or failed verification, report that failure before proceeding.
+Download [muyiunative-0.8.1-mac-arm64.zip](https://github.com/lukegskw/muyiunative/releases/download/v0.8.1/muyiunative-0.8.1-mac-arm64.zip) from the [0.8.1 release](https://github.com/lukegskw/muyiunative/releases/tag/v0.8.1), double-click the ZIP in Finder, and move `muyiunative.app` to your Applications folder. The launcher is Developer ID-signed and notarized by Apple, with its notarization ticket attached; players need no Apple Developer account. Open it and accept macOS's normal first-launch confirmation. If macOS reports an invalid signature, damaged app or failed verification, report that failure before proceeding.
 
 Choose **Build Game App…** to use your own disc. Keep generated game apps on your Mac: they contain a copy of your disc and cannot be redistributed. The release also provides a SHA-256 checksum; building from source remains available [below](#build-from-the-command-line).
 
@@ -26,7 +26,7 @@ Normal memory-card saves stay in Application Support and are reused for the same
 
 Games tested on the Mac. Open a game's image or title for its tested revision, progress and known issues; the [game notes](profiles/README.md) collect the compatibility details. The gallery follows [nxnative's presentation](https://github.com/seedds/nxnative#games).
 
-Preview 0.8.0 includes the FF IX and Crash profiles, graphics/audio fixes and quick states. These three entries describe tested routes, not a limit on the games you can build. Their profiles record the tested scope; the screenshots retain their original capture provenance.
+Preview 0.8.1 adds the Gran Turismo 2 and WipEout 3 profiles, Metal rendering improvements and audio recovery after rendering stalls. These entries describe tested routes, not a limit on the games you can build. Their profiles record the tested scope; the screenshots retain their original capture provenance.
 
 <table>
 <tr>
@@ -45,6 +45,19 @@ Preview 0.8.0 includes the FF IX and Crash profiles, graphics/audio fixes and qu
 <b><a href="profiles/SCES-01420/README.md">Crash Bandicoot 3 - Warped</a></b><br>
 <sub>SCES-01420 · Mac<br>Time Twister hub · Metal 4× source build</sub>
 </td>
+</tr>
+<tr>
+<td align="center" valign="top" width="33%">
+<a href="profiles/SCUS-94488/README.md"><img src="docs/images/gran-turismo-2.png" width="256" height="192" alt="Gran Turismo 2, Midfield Raceway replay running in muyiunative"></a><br>
+<b><a href="profiles/SCUS-94488/README.md">Gran Turismo 2</a></b><br>
+<sub>SCUS-94488 · Mac<br>Midfield replay · Metal 4× source build</sub>
+</td>
+<td align="center" valign="top" width="33%">
+<a href="profiles/SCES-02845/README.md"><img src="docs/images/wipeout-3-special-edition.png" width="256" height="192" alt="WipEout 3 - Special Edition, Porto Kora race running in muyiunative"></a><br>
+<b><a href="profiles/SCES-02845/README.md">WipEout 3 - Special Edition</a></b><br>
+<sub>SCES-02845 · Mac<br>Porto Kora race · Metal 4× source build</sub>
+</td>
+<td></td>
 </tr>
 </table>
 
@@ -100,7 +113,7 @@ The file is `quick.ps1state` beside that game's memory cards in Application Supp
 
 ### Version and problem reports
 
-Choose **About muyiunative…** in the app menu to see its version, build number and commit. The preview version is 0.8.0; the build number counts commits in the complete Git history. Every packed app carries this information, including game apps.
+Choose **About muyiunative…** in the app menu to see its version, build number and commit. The preview version is 0.8.1; the build number counts commits in the complete Git history. Every packed app carries this information, including game apps.
 
 Apps opened from Finder save their output under `~/Library/Logs/muyiunative/<bundle id>/`, keeping the last five runs for that app. Each run is limited to 10 MiB; when full, the log preserves its version/commit header and recent output, with a marker where earlier output was omitted. Logs replace your home directory in paths with `~`. Errors and host/build information are enabled by default. **Include Game Debug Output** in the app menu enables the game's `tty:` text for the current session, including in the launcher's build window; it starts disabled on the next Finder launch.
 
