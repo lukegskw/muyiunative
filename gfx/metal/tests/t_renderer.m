@@ -158,6 +158,11 @@ static void asynchronous_frames(int scale) {
     fixture a = create(scale), b = create(scale);
     if (!a.r || !b.r) { drop(&a); drop(&b); return; }
     drawing(&a); drawing(&b);
+    uint16_t texture[256];
+    for (unsigned y = 0; y < 16; y++) {
+        for (unsigned x = 0; x < 256; x++) texture[x] = (uint16_t)(1 + (x * 71 + y * 137) % 65535);
+        upload(&a, 768, 300 + y, texture, 256); upload(&b, 768, 300 + y, texture, 256);
+    }
     int cap_w = 640 * scale, cap_h = 576 * scale, previous_w[2] = {0}, previous_h[2] = {0};
     size_t capacity = (size_t)cap_w * cap_h * sizeof(uint32_t);
     uint32_t *expected = malloc(capacity), *previous = malloc(capacity * 2), *actual = malloc(capacity);
@@ -172,6 +177,11 @@ static void asynchronous_frames(int scale) {
             gpu_gp1(t->m, 0x03000000 | (n % 7 == 0));
             BATCH(t, 0xe6000000, 0x02000000 | (n + 1) * 0x030507, V(0, 0), V(512, 511));
             BATCH(t, 0xe6000000 | n % 4, 0x300000ff, V(10, 10), 0x0000ff00, V(17, 10), 0x00ff0000, V(10, 17));
+            // Exercise the group-local cache with earlier frames still submitted. The copy below also changes part of this texture for the following frame.
+            for (unsigned q = 0; q < 32; q++) {
+                int x = 30 + q * 11 % 200, y = 20 + q * 7 % 100, u = q * 17 % 128, v = 44 + q % 4;
+                BATCH(t, 0x25000000 | (n & 1) << 25, V(x, y), UV(u, v, 0), V(x + 7, y), UV(u + 61, v, 0x11c), V(x, y + 9), UV(u, v + 8, 0));
+            }
             BATCH(t, 0x80000000, V(0, 0), V(512, 256), V(320, 240));
         }
         int w, h, sw, sh;
@@ -228,6 +238,72 @@ static void triangle_batches(int scale) {
     free(out); free(ref); drop(&t);
 }
 
+static void triangle_batch_partitions(int scale) {
+    fixture batch = create(scale), split = create(scale);
+    if (!batch.r || !split.r) { drop(&batch); drop(&split); return; } drawing(&batch); drawing(&split);
+    uint16_t row[256]; unsigned clut = 48 | 400 << 6;
+    for (unsigned i = 0; i < 256; i++) row[i] = (uint16_t)(0x8000 | (i * 157 + 13) % 32768);
+    upload(&batch, 768, 400, row, 256); upload(&split, 768, 400, row, 256);
+    for (unsigned y = 0; y < 80; y++) {
+        for (unsigned x = 0; x < 256; x++) row[x] = (uint16_t)(1 + (x * 71 + y * 137) % 65535);
+        upload(&batch, 512, y, row, 256); upload(&split, 512, y, row, 256);
+    }
+    for (unsigned n = 0; n < 96; n++) {
+        int x = 30 + n * 7 % 48, y = 30 + n * 11 % 48, u = n * 17 % 256, v = n * 13 % 80;
+        unsigned page = 8 | (n % 3) << 7 | (n % 4) << 5;
+        uint32_t packet[] = {0xe1000000 | page, 0xe2000000 | (n % 5 ? 0 : 0x04421), 0xe6000000 | n % 4,
+            0x34808080 | (n & 3) << 24, V(x, y), UV(u, v, clut), 0x004080c0, V(x + 7, y), UV((u + 61) & 255, v, page),
+            0x00c08040, V(x, y + 9), UV(u, (v + 67) & 255, 0)};
+        for (size_t i = 0; i < sizeof packet / sizeof *packet; i++) { gpu_gp0(batch.m, packet[i]); gpu_gp0(split.m, packet[i]); }
+        equal(&split);   // Same commands and cache history, with an encoder boundary after every triangle.
+    }
+    // A later triangle samples the preceding triangle's destination. Group-local cache events still require device visibility between primitives.
+    uint32_t dependency[] = {0xe2000000, 0xe6000000, 0x25000000, V(100, 20), UV(0, 0, 0), V(108, 20), UV(8, 0, 0x108), V(100, 28), UV(0, 8, 0),
+        0x25000000, V(120, 20), UV(36, 20, 0), V(128, 20), UV(44, 20, 0x101), V(120, 28), UV(36, 28, 0)};
+    for (size_t i = 0; i < sizeof dependency / sizeof *dependency; i++) {
+        gpu_gp0(batch.m, dependency[i]); gpu_gp0(split.m, dependency[i]); if (!split.m->gpu.n) equal(&split);
+    }
+    equal(&batch);
+    int cap_w = 640 * scale, cap_h = 576 * scale, w[2] = {0}, h[2] = {0};
+    uint32_t *out[2] = {malloc((size_t)cap_w * cap_h * 4), malloc((size_t)cap_w * cap_h * 4)};
+    CHECK(out[0] && out[1], "%dx batch partition images allocate", scale);
+    if (out[0] && out[1]) {
+        int result = metal_renderer_frame(batch.r, out[0], cap_w, cap_h, w, h, 1) || metal_renderer_frame(split.r, out[1], cap_w, cap_h, w + 1, h + 1, 1);
+        CHECK(!result,
+              "%dx batched and split primitives verify native VRAM/cache", scale);
+        if (!result) CHECK(w[0] == w[1] && h[0] == h[1] && !memcmp(out[0], out[1], (size_t)w[0] * h[0] * 4),
+                           "%dx every fine sample is independent of batch partitioning", scale);
+    }
+    free(out[0]); free(out[1]); drop(&batch); drop(&split);
+}
+
+static void thin_triangle_interpolation(void) {
+    fixture t = create(4); if (!t.r) { drop(&t); return; } drawing(&t);
+    uint32_t *out = malloc(2560 * 2304 * sizeof *out); CHECK(out, "thin triangle image allocates");
+    if (!out) { drop(&t); return; }
+    for (int large = 0; large < 2; large++) for (int reverse = 0; reverse < 2; reverse++) {
+        int bx = large ? 1023 : 255, by = large ? 511 : 127, cx = bx - 2, cy = by - 1;
+        int origin_x = large ? 704 : 320, origin_y = large ? 256 : 128, w, h;
+        // Determinant -1: fixed-point products exceed 32 bits but cancel to gray 64 at (a+b+2c)/4. Positions remain legal after the drawing offset.
+        GP0(&t, 0x02000000, V(0, 0), V(1024, 512), 0xe5000000 | 200 | 100 << 11);
+        gpu_gp1(t.m, 0x05000000 | origin_x | origin_y << 10);
+        uint32_t xy[] = {V(bx, by), V(cx, cy)}, colors[] = {0xffffff, 0};
+        GP0(&t, 0x30000000, V(0, 0), colors[reverse], xy[reverse], colors[1 - reverse], xy[1 - reverse]);
+        int result = metal_renderer_frame(t.r, out, 2560, 2304, &w, &h, 1);
+        CHECK(!result, "thin Gouraud triangle verifies native VRAM/cache");
+        int x = 800 + bx + 2 * cx - origin_x * 4, y = 400 + by + 2 * cy - origin_y * 4;
+        if (!result) CHECK(out[y * w + x] == 0xff424242, "thin Gouraud triangle %d/%d retains exact subpixel cancellation", large, reverse);
+    }
+    int w, h;
+    GP0(&t, 0x02000000, V(0, 0), V(1024, 512)); pixel(&t, 831, 320, 0x801f);
+    gpu_gp1(t.m, 0x05000000 | 320 | 128 << 10);
+    GP0(&t, 0x25000000, V(0, 0), UV(0, 44, 0), V(255, 127), UV(252, 124, 0x11c), V(253, 126), UV(0, 44, 0));
+    int result = metal_renderer_frame(t.r, out, 2560, 2304, &w, &h, 1);
+    CHECK(!result, "thin textured triangle verifies native VRAM/cache");
+    if (!result) CHECK(out[267 * w + 281] == 0xffff0000, "thin textured triangle retains exact subpixel UV cancellation");
+    free(out); drop(&t);
+}
+
 static void texture_edge_buffers(int scale) {
     fixture t = create(scale); if (!t.r) { drop(&t); return; } drawing(&t);
     uint16_t row[256]; unsigned clut = 48 | 400 << 6;
@@ -255,6 +331,56 @@ static void texture_edge_buffers(int scale) {
               "%dx texture-edge face has identical fine samples in both framebuffers", scale);
     }
     free(out[0]); free(out[1]); drop(&t);
+}
+
+static void atlas_quads(int scale) {
+    fixture t = create(scale); if (!t.r) { drop(&t); return; } drawing(&t);
+    // A glyph occupies an atlas cell; neighboring cells must not appear solely in finer samples at its excluded right/bottom edges. Cover both dispatch paths,
+    // flipped UVs, reversed winding and the two quad strip orientations. Inputs are synthetic, independent of the game that exposed the edge bleed.
+    uint16_t row[15];
+    for (int y = 22; y <= 41; y++) {
+        for (int x = 12; x <= 26; x++) row[x - 12] = x == 12 || x == 26 || y == 22 || y == 41 ? 0x7c1f : 0x03e0;
+        upload(&t, 512 + 12, y, row, 15);
+    }
+    int cap_w = 640 * scale, cap_h = 576 * scale, w, h;
+    uint32_t *out = malloc((size_t)cap_w * cap_h * sizeof *out);
+    CHECK(out != NULL, "%dx atlas frame allocates", scale); if (!out) { drop(&t); return; }
+    for (int width = 13; width <= 25; width += 12) for (unsigned mode = 0; mode < 32; mode++) {
+        int u0 = mode & 1 ? 25 : 13, u1 = mode & 1 ? 12 : 26, v0 = mode & 2 ? 40 : 23, v1 = mode & 2 ? 22 : 41;
+        uint32_t pos[] = {V(10, 10), V(10 + width, 10), V(10, 28), V(10 + width, 28)};
+        uint32_t uv[] = {UV(u0, v0, 0), UV(u1, v0, 0), UV(u0, v1, 0), UV(u1, v1, 0)};
+        if (mode & 16) { uv[1] = UV(u0, v1, 0); uv[2] = UV(u1, v0, 0); }
+        unsigned order[] = {0, 1, 2, 3};
+        if (mode & 4) { order[1] = 2; order[2] = 1; }
+        if (mode & 8) for (unsigned i = 0; i < 4; i++) order[i] ^= 3;
+        GP0(&t, 0x02000000, V(0, 0), V(64, 64), 0xe1000108, 0x01000000);
+        uint32_t packet[] = {0x2dffffff, pos[order[0]], uv[order[0]], pos[order[1]], (uv[order[1]] & 0xffff) | 0x1080000,
+                             pos[order[2]], uv[order[2]] & 0xffff, pos[order[3]], uv[order[3]] & 0xffff};
+        words(&t, packet, sizeof packet / sizeof *packet);
+        CHECK(!metal_renderer_frame(t.r, out, cap_w, cap_h, &w, &h, 1), "%dx atlas quad width %d mode %u verifies native/cache", scale, width, mode);
+        int bad = 0;
+        for (int y = 10 * scale; y < 28 * scale; y++) for (int x = 10 * scale; x < (10 + width) * scale; x++) bad += out[y * w + x] != 0xff00ff00;
+        CHECK(!bad, "%dx atlas quad width %d mode %u does not sample adjacent cells at fine edges (%d wrong)", scale, width, mode, bad);
+    }
+    // Minification legitimately requests interior texels between native samples. Conversely, magnification can already reach an endpoint at native resolution:
+    // neither fine detail inside the cell nor an endpoint used by the console may be removed to hide bleeding at an unused endpoint.
+    uint16_t detail[17];
+    for (int y = 23; y <= 31; y++) {
+        for (int x = 12; x <= 28; x++) detail[x - 12] = x == 13 ? 0x001f : x == 28 || y == 31 ? 0x7c1f : 0x7c00;
+        upload(&t, 512 + 12, y, detail, 17);
+    }
+    GP0(&t, 0x01000000, 0x2dffffff, V(40, 10), UV(12, 23, 0), V(48, 10), UV(28, 23, 0x108),
+        V(40, 18), UV(12, 31, 0), V(48, 18), UV(28, 31, 0));
+    CHECK(!metal_renderer_frame(t.r, out, cap_w, cap_h, &w, &h, 1), "%dx minified atlas quad verifies", scale);
+    CHECK(out[10 * scale * w + 40 * scale] == 0xff0000ff, "%dx minified quad retains its native blue sample", scale);
+    if (scale > 1) CHECK(out[10 * scale * w + 40 * scale + scale / 2] == 0xffff0000,
+                         "%dx minified quad retains a red interior texel skipped by the native grid", scale);
+    GP0(&t, 0x2dffffff, V(40, 30), UV(12, 23, 0), V(72, 30), UV(28, 23, 0x108),
+        V(40, 38), UV(12, 31, 0), V(72, 38), UV(28, 31, 0));
+    CHECK(!metal_renderer_frame(t.r, out, cap_w, cap_h, &w, &h, 1), "%dx magnified atlas quad verifies", scale);
+    CHECK(out[30 * scale * w + 71 * scale] == 0xffff00ff && out[30 * scale * w + 72 * scale - 1] == 0xffff00ff,
+          "%dx a vertex endpoint reached by the native grid remains available to fine samples", scale);
+    free(out); drop(&t);
 }
 
 static void textures(fixture *t) {
@@ -687,7 +813,10 @@ int main(void) { @autoreleasepool {
     framebuffer_copies(1); framebuffer_copies(2); framebuffer_copies(4);
     asynchronous_frames(1); asynchronous_frames(2); asynchronous_frames(4);
     triangle_batches(1); triangle_batches(2); triangle_batches(4);
+    triangle_batch_partitions(1); triangle_batch_partitions(2); triangle_batch_partitions(4);
+    thin_triangle_interpolation();
     texture_edge_buffers(1); texture_edge_buffers(2); texture_edge_buffers(4);
+    atlas_quads(1); atlas_quads(2); atlas_quads(4);
     quick_states(2); quick_states(4);
     large_triangles(1); large_triangles(2); large_triangles(4); textured_triangles(1); textured_triangles(2); textured_triangles(4); hires(2); hires(4);
     printf("metal: %d checks, %d failed\n", checks, fails); return fails != 0;

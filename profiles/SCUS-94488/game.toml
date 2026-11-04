@@ -1,0 +1,62 @@
+# External disc identified on 2026-11-03; only metadata, hashes and ordinary pad inputs are retained.
+name = "Gran Turismo 2 - Simulation Mode (USA, v1.2)"
+serial = "SCUS-94488"
+
+[disc]
+licence = "SCEA"
+boot = 'SCUS_944.88'
+boot_sha256 = "4dd40d01a3e83967e2d4301106890eb314d72027802bee077bbbc246f152e331"
+tracks = [
+  { number = 1, mode = "MODE2/2352", sectors = 294154, sha256 = "d0ab6e70539601057590a36299543c0adad219254d712f7d4273219094ed5031" },
+]
+
+# Empty memory-card slots. Start Game -> Go Race -> GT League -> Japan Nationals -> Midfield Raceway's replay icon.
+[validation]
+date = "2026-11-04"
+screen = "Midfield Raceway replay, Suzuki Alto Works RS/Z '98"
+frames = 9000
+inputs = [
+  "1800:4000",
+  "1806:0",
+  "3000:80",
+  "3006:0",
+  "3120:4000",
+  "3126:0",
+  "3600:4000",
+  "3606:0",
+  "4200:4000",
+  "4206:0",
+  "4800:20",
+  "4806:0",
+  "4920:4000",
+  "4926:0",
+]
+width = 320
+height = 240
+frame_hash_fnv1a64 = "cc81227fd6b9259e"
+native_instructions = 2944191223
+lockstep_stops = 71531402
+
+[validation.metal_2x]
+date = "2026-11-04"
+width = 640
+height = 480
+frame_hash_fnv1a64 = "79fed437d3bdfcbf"
+
+[validation.metal_4x]
+date = "2026-11-04"
+width = 1280
+height = 960
+frame_hash_fnv1a64 = "f2bb9657bbec112f"
+
+# Original audio-investigation route; no inputs from reset.
+[attract]
+date = "2026-11-03"
+screen = "attract-mode race replay"
+frames = 6000
+inputs = []
+width = 320
+height = 240
+frame_hash_fnv1a64 = "6afd38fe08789ab1"
+native_instructions = 1974878704
+lockstep_stops = 45604383

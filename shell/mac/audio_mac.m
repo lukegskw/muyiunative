@@ -17,9 +17,18 @@ static AudioQueueRef g_audio_queue;
 static AudioQueueBufferRef g_audio_buffers[AUDIO_BUFFERS];
 static dispatch_queue_t g_audio_delivery;
 static atomic_bool g_audio_failed;
-static int g_audio_paused, g_audio_resume;   // delivery queue owns transport; callbacks may still return/refill buffers while paused
+static int g_audio_paused, g_audio_resume;   // explicit pause and pending automatic resume; delivery queue owns both
 static int audio_service(void) {
     if (!g_audio_queue) return 0;
+    os_unfair_lock_lock(&g_audio_lock); int empty = g_audio_state.pending_count == AUDIO_BUFFERS; os_unfair_lock_unlock(&g_audio_lock);
+    // GT2 Metal 4x took 49.6 ms, exhausting three buffers; subsequent paced refills repeatedly reached the empty boundary despite correctly ordered samples.
+    // Suspend that timeline and rebuild the original reserve. Apple AudioQueuePause preserves buffers; AudioQueueStart resumes them. Short deferrals with
+    // any buffer still queued keep playing normally. An explicit state-operation pause owns resumption until it finishes.
+    if (empty && !g_audio_paused && !g_audio_resume) {
+        OSStatus err = AudioQueuePause(g_audio_queue);
+        if (err) { if (!atomic_exchange(&g_audio_failed, true)) RED("front end: cannot pause starved audio (%d)", (int)err); return -1; }
+        g_audio_resume = 1;
+    }
     for (;;) {
         unsigned id; int16_t samples[AUDIO_CHUNK * 2];
         os_unfair_lock_lock(&g_audio_lock);
@@ -36,7 +45,7 @@ static int audio_service(void) {
     // to hold real samples. The producer keeps running after the state operation, so a partial chunk is completed normally, without silence or extra buffers.
     if (g_audio_resume && full) {
         g_audio_resume = 0; OSStatus err = AudioQueueStart(g_audio_queue, NULL);
-        if (err) { g_audio_paused = 1; RED("front end: cannot resume audio for a state operation (%d)", (int)err); return -1; }
+        if (err) { g_audio_paused = 1; RED("front end: cannot resume audio (%d)", (int)err); return -1; }
     }
     return 0;
 }

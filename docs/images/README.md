@@ -1,6 +1,6 @@
 # Compatibility gallery images
 
-The user approved selected screenshots of games running in muyiunative for the compatibility gallery on 2026-11-02, and requested FF IX and Crash images on 2026-11-03. This is the narrow presentation exception in [AGENTS.md](../../AGENTS.md): routine frame-comparison screenshots stay local, and disc images, extracted game code, BIOS dumps, cards and save states remain excluded. Gallery images are never runtime or tool-test inputs and are not included in the launcher's build kit.
+The user approved selected screenshots of games running in muyiunative for the compatibility gallery on 2026-11-02, requested FF IX and Crash images on 2026-11-03, and GT2/WipEout images on 2026-11-04. This is the narrow presentation exception in [AGENTS.md](../../AGENTS.md): routine frame-comparison screenshots stay local, and disc images, extracted game code, BIOS dumps, cards and save states remain excluded. Gallery images are never runtime or tool-test inputs and are not included in the launcher's build kit.
 
 The [main gallery](../../README.md#compatibility) links each image to its [game notes](../../profiles/README.md). Images show actual application output, with no generated artwork, retouching or simulated UI. The layout follows [nxnative's gallery](https://github.com/seedds/nxnative#games); add another entry when its verified scope and capture provenance are available.
 
@@ -65,3 +65,43 @@ The capture began from reset with no persistent memory cards or loaded quick sta
 The packaged app replayed the normal inputs in [game.toml](../../profiles/SCES-01420/game.toml) headlessly with `--input-file <expanded-route> --frames 14400 --renderer metal --scale 4 --verify-renderer --png <output>`. Every frame's native Metal VRAM/cache matched software; all 5,904,716,904 CPU instructions ran natively, with none interpreted. The image shows the [verified scene](../../profiles/SCES-01420/README.md), not a completed game. This capture uses the local fixes documented in that profile; it does not describe the older public 0.7.0 binary.
 
 The capture began from reset with no persistent memory cards or loaded quick state. The selected PNG was copied byte for byte into the gallery; comparison captures, checkpoints and raw logs remain outside the repository. The app, bundled disc and user saves were not modified.
+
+## Gran Turismo 2 - Simulation Mode
+
+![Gran Turismo 2 - Simulation Mode running in muyiunative](gran-turismo-2.png)
+
+| Capture field | Value |
+| --- | --- |
+| File | `gran-turismo-2.png`, 650,405 bytes |
+| Captured | 2026-11-04, Apple M4 Pro, macOS 26.6.2 |
+| App | Locally rebuilt game app, 0.8.0 (build 74), base commit `8baecaf0ba97` with the uncommitted Metal/audio corrections prepared for 0.8.1 |
+| Game / region | Gran Turismo 2 - Simulation Mode / USA, v1.2, SCUS-94488 |
+| Boot executable hash | `4dd40d01a3e83967e2d4301106890eb314d72027802bee077bbbc246f152e331` |
+| Route | 9,000 fields from reset, profile `validation`: Japan Nationals → Midfield Raceway replay |
+| Renderer / output | Metal 4×, original unmodified PNG, 1280×960 |
+| Display FNV-1a hash | `f2bb9657bbec112f` |
+| PNG SHA-256 | `ddb5ccb66a91278ca6b3c8d6805d0b1e3e4cf215a8a3c573cb85dd85185e8203` |
+
+The packaged app replayed the normal inputs in [game.toml](../../profiles/SCUS-94488/game.toml) headlessly with `--input-file <expanded-route> --frames 9000 --renderer metal --scale 4 --verify-renderer --png <output>`. Every frame's native Metal VRAM/cache matched software; all 2,944,191,223 CPU instructions ran natively, with none interpreted. The image shows the [recorded scene](../../profiles/SCUS-94488/README.md), with the user's reported issues confirmed resolved on 2026-11-04. This does not establish completed events or whole-game compatibility.
+
+The capture began from reset with empty memory-card slots and no loaded quick state. The selected PNG was copied byte for byte into the gallery. Only this presentation image is retained; comparison captures, packet traces, checkpoints and raw logs remain outside the repository. No game app, disc or user save was modified by capture.
+
+## WipEout 3 - Special Edition
+
+![WipEout 3 - Special Edition running in muyiunative](wipeout-3-special-edition.png)
+
+| Capture field | Value |
+| --- | --- |
+| File | `wipeout-3-special-edition.png`, 699,690 bytes |
+| Captured | 2026-11-04, Apple M4 Pro, macOS 26.6.2 |
+| App | Locally rebuilt game app, 0.8.0 (build 74), base commit `8baecaf0ba97` with the uncommitted Metal/audio corrections prepared for 0.8.1 |
+| Game / region | WipEout 3 - Special Edition / Europe, multilingual, SCES-02845 |
+| Boot executable hash | `0213f5292fa1d995ebe61f42d5dbdb6614e481cb3840ac5f1521c2dfdccc0a4d` |
+| Route | 18,000 fields from reset, profile `validation`: Porto Kora single race, Vector class |
+| Renderer / output | Metal 4×, original unmodified PNG, 2048×1024 |
+| Display FNV-1a hash | `d814bb8fdc1b3cde` |
+| PNG SHA-256 | `8f09d992b8f64aba5c5731d0fe6f9eb4c2bebf7f07a021179bdaa396f6c220c1` |
+
+The packaged app replayed the normal inputs in [game.toml](../../profiles/SCES-02845/game.toml) headlessly with `--input-file <expanded-route> --frames 18000 --renderer metal --scale 4 --verify-renderer --png <output>`. Every frame's native Metal VRAM/cache matched software; all 6,704,686,462 CPU instructions ran natively, with none interpreted. The image shows the [recorded scene](../../profiles/SCES-02845/README.md), with the user's reported issues confirmed resolved on 2026-11-04. This does not establish completed events or whole-game compatibility.
+
+The capture began from reset with empty memory-card slots and no loaded quick state. The selected PNG was copied byte for byte into the gallery. Only this presentation image is retained; comparison captures, packet traces, checkpoints and raw logs remain outside the repository. No game app, disc or user save was modified by capture.

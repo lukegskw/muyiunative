@@ -54,13 +54,14 @@ static ushort texel(device const ushort *vram, device ps1_render_cache &cache, i
 }
 // Extra subpixel samples do not mutate the native texture caches. When a native sample addresses the same texel, keep its observed value, including stale cache
 // contents. Otherwise consult the current cache without changing its tags, falling back to the native texture page for the additional coordinate.
-static ushort texel_extra(device const ushort *vram, device const ps1_render_cache &cache, int u, int v, constant ps1_render_op &o) {
+template<typename Cache>
+static ushort texel_extra(device const ushort *vram, Cache cache, int u, int v, constant ps1_render_op &o) {
     uint4 a = texture_address(u, v, o.texpage, o.texwin); uint tag = a.y * 1024 + (a.x & ~3u);
-    ushort c = cache.textag[a.z] == tag + 1 ? cache.texcache[a.z][a.x & 3] : vram[a.y * 1024 + a.x];
+    ushort c = cache->textag[a.z] == tag + 1 ? cache->texcache[a.z][a.x & 3] : vram[a.y * 1024 + a.x];
     if (!a.w) return c;
     int2 uv = window_uv(u, v, o.texwin); uint entry = a.w == 2 ? c >> ((uv.x & 3) * 4) & 15 : c >> ((uv.x & 1) * 8) & 255;
     uint clut = o.clut & 0x7fff, need = a.w == 2 ? 16 : 256;
-    if (cache.clut_valid && cache.clut_id == clut && uint(cache.clut_n) >= need) return cache.clutcache[entry];
+    if (cache->clut_valid && cache->clut_id == clut && uint(cache->clut_n) >= need) return cache->clutcache[entry];
     return vram[(clut >> 6) * 1024 + (((clut & 63) * 16 + entry) & 1023)];
 }
 static void textured_plot(device ushort *vram, int x, int y, uint scale, ushort c, int r, int g, int b, constant ps1_render_op &o) {
@@ -69,12 +70,14 @@ static void textured_plot(device ushort *vram, int x, int y, uint scale, ushort 
     if (!(o.flags & RENDER_RAW)) c = rgb15(x / int(scale), y / int(scale), clamp8((c & 31) * r >> 4), clamp8((c >> 5 & 31) * g >> 4), clamp8((c >> 10 & 31) * b >> 4), o.flags & RENDER_DITHER) | mask;
     plot(vram, x, y, scale, c, (o.flags & RENDER_SEMI) && mask, o.mask, o.texpage);
 }
-static long edge(ps1_vtx a, ps1_vtx b, long x, long y, uint scale) {
-    return long(b.x - a.x) * (y - long(a.y) * scale) - long(b.y - a.y) * (x - long(a.x) * scale);
+// GP0 positions and drawing offsets are signed 11-bit values (psx-spx, Vertex attributes / Drawing Offset). Their sums, the 1x/2x/4x raster coordinates and
+// even a rejected polygon's edge products fit signed 32 bits. GT2's close-up replay spent up to ~62 ms in the GPU with widened per-sample arithmetic.
+static int edge(ps1_vtx a, ps1_vtx b, int x, int y, uint scale) {
+    return (b.x - a.x) * (y - a.y * int(scale)) - (b.y - a.y) * (x - a.x * int(scale));
 }
 static bool owns(ps1_vtx a, ps1_vtx b) { return b.y < a.y || (b.y == a.y && b.x > a.x); }
 static bool inside(ps1_vtx a, ps1_vtx b, ps1_vtx c, int x, int y, uint scale) {
-    long wa = edge(b, c, x, y, scale), wb = edge(c, a, x, y, scale), wc = edge(a, b, x, y, scale);
+    int wa = edge(b, c, x, y, scale), wb = edge(c, a, x, y, scale), wc = edge(a, b, x, y, scale);
     return wa >= 0 && wb >= 0 && wc >= 0 && (wa || owns(b, c)) && (wb || owns(c, a)) && (wc || owns(a, b));
 }
 static int4 bounds(constant ps1_render_op &o) {
@@ -88,9 +91,14 @@ static int4 bounds(constant ps1_render_op &o) {
 static void gradients(constant ps1_render_op &o, device long *grad, constant long *prepared) {
     for (uint i = 0; i < 10; i++) grad[i] = prepared[o.p[3] * 10 + i];
 }
-static int interpolate(int value, ps1_vtx a, int x, int y, uint scale, device const long *grad, uint i) {
-    long n = long(value) * 4096 * scale + grad[i] * (x - a.x * int(scale)) + grad[i + 5] * (y - a.y * int(scale)) + 2048 * scale;
-    return int(n >> (12 + log_scale(scale)));
+template<typename Grad>
+static int interpolate(int value, ps1_vtx a, int x, int y, uint scale, Grad grad, uint i) {
+    // Called only after coverage/size rejection. The exact affine value lies within the 8-bit vertex attributes; truncating the two 12-bit gradients adds
+    // <(1023+511)/4096 error. Thus the FINAL numerator fits 32 bits at scale<=4, even when skinny triangles' products exceed that range before cancellation.
+    // Unsigned products/addition preserve its low 32 bits exactly, then bit-casting recovers the signed numerator before the reference's rounding shift.
+    // The determinant-one regression checks cancellation of large products in both fine colors and UVs.
+    uint n = uint(value) * 4096u * scale + uint(grad[i]) * uint(x - a.x * int(scale)) + uint(grad[i + 5]) * uint(y - a.y * int(scale)) + 2048u * scale;
+    return as_type<int>(n) >> (12 + log_scale(scale));
 }
 static void save_sample(device uint *scratch, device const ushort *vram, int x, int y, int u, int v, ushort sample, constant ps1_render_op &o) {
     uint at = index_at(x, y, 1); int2 uv = window_uv(u, v, o.texwin);
@@ -303,7 +311,7 @@ kernel void render_sprites(device ushort *vram [[buffer(0)]], device ushort *hir
         if (reload_clut && !tid) { cache.clut_id = ushort(clut); cache.clut_valid = 1; cache.clut_n = int(need); }
         threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
         if (tid < pixels) {
-            ushort sample = texel_extra(vram, cache, u, v, o);
+            ushort sample = texel_extra(vram, &cache, u, v, o);
             textured_plot(vram, x, y, 1, sample, o.a.r, o.a.g, o.a.b, o);
             if (scale > 1) for (uint fy = 0; fy < scale; fy++) for (uint fx = 0; fx < scale; fx++)
                 textured_plot(hires, x * int(scale) + int(fx), y * int(scale) + int(fy), scale, sample, o.a.r, o.a.g, o.a.b, o);
@@ -323,7 +331,8 @@ static int2 rectangle_uv(constant ps1_render_op &o, int x, int y) {
     return int2(o.a.u + (o.texpage & 0x1000 ? o.a.x - x + 1 : x - o.a.x), o.a.v + (o.texpage & 0x2000 ? o.a.y - y : y - o.a.y));
 }
 
-static bool texture_position(constant ps1_render_op &o, device const long *grad, int x, int y, thread int2 &uv) {
+template<typename Grad>
+static bool texture_position(constant ps1_render_op &o, Grad grad, int x, int y, thread int2 &uv) {
     if (o.type == RENDER_RECT) { uv = rectangle_uv(o, x, y); return true; }
     ps1_vtx a = o.a, b = o.b, c = o.c; long area = edge(a, b, c.x, c.y, 1);
     if (!area || max(max(a.x, b.x), c.x) - min(min(a.x, b.x), c.x) > 1023 || max(max(a.y, b.y), c.y) - min(min(a.y, b.y), c.y) > 511) return false;
@@ -441,7 +450,10 @@ static void scaled(device const ushort *vram, device ushort *hires, device const
         if (!inside(a, b, c, x, y, scale)) return;
         device const long *grad = reinterpret_cast<device const long *>(scratch);
         if (o.flags & RENDER_GOURAUD) { r = interpolate(a.r, a, x, y, scale, grad, 0); g = interpolate(a.g, a, x, y, scale, grad, 1); bl = interpolate(a.b, a, x, y, scale, grad, 2); }
-        if (o.flags & RENDER_TEXTURE) { u = interpolate(a.u, a, x, y, scale, grad, 3); v = interpolate(a.v, a, x, y, scale, grad, 4); }
+        if (o.flags & RENDER_TEXTURE) {
+            u = interpolate(a.u, a, x, y, scale, grad, 3); v = interpolate(a.v, a, x, y, scale, grad, 4);
+            if (o.flags & RENDER_UV_LIMIT) { u = clamp(u, int(o.p[0] & 0xffff), int(o.p[0] >> 16)); v = clamp(v, int(o.p[1] & 0xffff), int(o.p[1] >> 16)); }
+        }
     } else if (o.type == RENDER_RECT) {
         // Sprites keep their native texture pixel grid, including flips; this is identical to the batched sprite path. Polygons above interpolate genuine subpixel UVs.
         u = o.a.u + (o.texpage & 0x1000 ? o.a.x - nx + 1 : nx - o.a.x); v = o.a.v + (o.texpage & 0x2000 ? o.a.y - ny : ny - o.a.y);
@@ -464,7 +476,7 @@ static void scaled(device const ushort *vram, device ushort *hires, device const
         // Conservative page/CLUT overlap detection also covers texture-window aliases, avoiding a false claim of independent subpixel samples in these commands.
         if (feedback) { if (native_covered && sample_written(scratch, nx, ny)) hires[index_at(x, y, scale)] = vram[index_at(nx, ny, 1)]; return; }
         uint raw = scratch[SAMPLE_BASE + index_at(nx, ny, 1)]; int2 uv = window_uv(u, v, o.texwin); uint key = uint(uv.x) | uint(uv.y) << 8;
-        ushort sample = native_covered && (raw >> 16) == key ? ushort(raw) : texel_extra(vram, cache, u, v, o);
+        ushort sample = native_covered && (raw >> 16) == key ? ushort(raw) : texel_extra(vram, &cache, u, v, o);
         textured_plot(hires, x, y, scale, sample, r, g, bl, o);
     } else plot(hires, x, y, scale, rgb15(nx, ny, r, g, bl, o.flags & RENDER_DITHER), o.flags & RENDER_SEMI, o.mask, o.texpage);
 }
@@ -503,29 +515,91 @@ kernel void render_scaled(device const ushort *vram [[buffer(0)]], device ushort
     scaled(vram, hires, cache, o, scale, scratch, gid);
 }
 
-// Crash's title sends ~1,700 small triangles in a busy frame, taking >30 ms with separate encoder dispatches. One workgroup processes their existing stages in
-// order, including cache misses and fine samples. No primitives run concurrently: device barriers retain destination blending, masks and stale texture history.
+// GT2's Midfield replay draws ~3,300 triangles in a busy field: the old small-triangle batch took ~34 ms at 4x. Five device-memory barriers per textured
+// primitive serialized cache/event/sample traffic. This one workgroup owns a cache snapshot and per-primitive events/samples in threadgroup memory instead.
+// Independent textures cannot read their own destination or CLUT writes (the host's alias proof). Only the barrier between primitives needs device visibility;
+// it preserves later source reads, blending and masks. Cache state is copied back before the next encoder operation. Native-empty draws leave it unchanged.
 kernel void render_triangles(device ushort *vram [[buffer(0)]], device ushort *hires [[buffer(1)]], device ps1_render_cache &cache [[buffer(2)]],
                              constant ps1_render_op *ops [[buffer(3)]], constant uint &scale [[buffer(4)]], device uint *scratch [[buffer(5)]],
                              constant uint &count [[buffer(6)]], constant long *prepared [[buffer(7)]], uint tid [[thread_index_in_threadgroup]]) {
+    (void)scratch;
+    threadgroup ps1_render_cache local;
+    threadgroup atomic_uint first[256], last[256], active;
+    threadgroup uint samples[256], need_clut;
+    for (uint k = 0; k < 4; k++) local.texcache[tid][k] = cache.texcache[tid][k];
+    local.textag[tid] = cache.textag[tid]; local.clutcache[tid] = cache.clutcache[tid];
+    if (!tid) { local.clut_id = cache.clut_id; local.clut_valid = cache.clut_valid; local.clut_n = cache.clut_n; }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
     for (uint n = 0; n < count; n++) {
         constant ps1_render_op &o = ops[n]; int4 box = bounds(o);
         uint width = uint(box.z - box.x + 1), height = uint(box.w - box.y + 1), pixels = width * height;
+        constant long *grad = prepared + o.p[3] * 10;
+        ps1_vtx a = o.a, b = o.b, c = o.c; long area = edge(a, b, c.x, c.y, 1);
+        if (!area || max(max(a.x, b.x), c.x) - min(min(a.x, b.x), c.x) > 1023 || max(max(a.y, b.y), c.y) - min(min(a.y, b.y), c.y) > 511) continue;
+        if (area < 0) { ps1_vtx t = b; b = c; c = t; }
         if (o.flags & RENDER_TEXTURE) {
-            texture_prepare(o, scratch, tid, prepared);
-            threadgroup_barrier(mem_flags::mem_device);
-            for (uint i = tid; i < pixels; i += 256) texture_track(vram, cache, o, scratch, uint2(i % width, i / width));
-            threadgroup_barrier(mem_flags::mem_device);
-            for (uint i = tid; i < pixels; i += 256) texture_draw(vram, hires, cache, o, scale, scratch, uint2(i % width, i / width));
-            threadgroup_barrier(mem_flags::mem_device);
-            texture_finish(vram, cache, o, scratch, tid);
+            samples[tid] = 0; atomic_store_explicit(first + tid, 0xffffffffu, memory_order_relaxed); atomic_store_explicit(last + tid, 0u, memory_order_relaxed);
+            if (!tid) atomic_store_explicit(&active, 0u, memory_order_relaxed);
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+            for (uint i = tid; i < pixels; i += 256) {
+                int x = box.x + int(i % width), y = box.y + int(i / width); int2 uv;
+                if (!texture_position(o, grad, x, y, uv)) continue;
+                uint4 address = texture_address(uv.x, uv.y, o.texpage, o.texwin); uint tag = address.y * 1024 + (address.x & ~3u);
+                if (local.textag[address.z] != tag + 1) atomic_fetch_min_explicit(first + address.z, i, memory_order_relaxed);
+                atomic_fetch_max_explicit(last + address.z, i + 1, memory_order_relaxed);
+                atomic_store_explicit(&active, 1u, memory_order_relaxed);
+            }
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+            uint depth = o.texpage >> 7 & 3, need = depth == 0 ? 16 : depth == 1 ? 256 : 0, clut = o.clut & 0x7fff;
+            if (!tid) need_clut = atomic_load_explicit(&active, memory_order_relaxed) && need && (!local.clut_valid || local.clut_id != clut || uint(local.clut_n) < need);
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+            if (need_clut && tid < need) local.clutcache[tid] = vram[(clut >> 6) * 1024 + (((clut & 63) * 16 + tid) & 1023)];
+            if (need_clut && !tid) { local.clut_id = ushort(clut); local.clut_valid = 1; local.clut_n = int(need); }
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+            for (uint i = tid; i < pixels; i += 256) {
+                int x = box.x + int(i % width), y = box.y + int(i / width); int2 uv;
+                if (!texture_position(o, grad, x, y, uv)) continue;
+                uint4 address = texture_address(uv.x, uv.y, o.texpage, o.texwin); uint tag = address.y * 1024 + (address.x & ~3u);
+                ushort sample = local.textag[address.z] == tag + 1 && i < atomic_load_explicit(first + address.z, memory_order_relaxed) ? local.texcache[address.z][address.x & 3] : vram[address.y * 1024 + address.x];
+                int2 mapped = window_uv(uv.x, uv.y, o.texwin);
+                if (address.w) sample = local.clutcache[address.w == 2 ? sample >> ((mapped.x & 3) * 4) & 15 : sample >> ((mapped.x & 1) * 8) & 255];
+                samples[i] = uint(sample) | uint(mapped.x) << 16 | uint(mapped.y) << 24;
+                int r = o.a.r, g = o.a.g, bl = o.a.b;
+                if (o.flags & RENDER_GOURAUD) { r = interpolate(r, o.a, x, y, 1, grad, 0); g = interpolate(g, o.a, x, y, 1, grad, 1); bl = interpolate(bl, o.a, x, y, 1, grad, 2); }
+                textured_plot(vram, x, y, 1, sample, r, g, bl, o);
+            }
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+            uint end = atomic_load_explicit(last + tid, memory_order_relaxed);
+            if (end && atomic_load_explicit(first + tid, memory_order_relaxed) != 0xffffffffu) {
+                uint at = end - 1; int2 uv; texture_position(o, grad, box.x + int(at % width), box.y + int(at / width), uv);
+                uint4 address = texture_address(uv.x, uv.y, o.texpage, o.texwin); uint tag = address.y * 1024 + (address.x & ~3u);
+                for (uint k = 0; k < 4; k++) local.texcache[tid][k] = vram[tag + k]; local.textag[tid] = tag + 1;
+            }
+            threadgroup_barrier(mem_flags::mem_threadgroup);
         } else {
-            if ((o.flags & RENDER_GOURAUD) && !tid) triangle_prepare(o, reinterpret_cast<device long *>(scratch), 0, prepared);
-            threadgroup_barrier(mem_flags::mem_device);
-            for (uint i = tid; i < pixels; i += 256) triangle(vram, o, reinterpret_cast<device const long *>(scratch), uint2(i % width, i / width));
+            for (uint i = tid; i < pixels; i += 256) {
+                int x = box.x + int(i % width), y = box.y + int(i / width); if (!inside(a, b, c, x, y, 1)) continue;
+                ushort color = rgb15(0, 0, o.a.r, o.a.g, o.a.b, false);
+                if (o.flags & RENDER_GOURAUD) color = rgb15(x, y, interpolate(o.a.r, o.a, x, y, 1, grad, 0), interpolate(o.a.g, o.a, x, y, 1, grad, 1), interpolate(o.a.b, o.a, x, y, 1, grad, 2), o.flags & RENDER_DITHER);
+                plot(vram, x, y, 1, color, o.flags & RENDER_SEMI, o.mask, o.texpage);
+            }
         }
-        threadgroup_barrier(mem_flags::mem_device);
-        if (scale > 1) for (uint i = tid; i < pixels * scale * scale; i += 256) scaled(vram, hires, cache, o, scale, scratch, uint2(i % (width * scale), i / (width * scale)));
-        threadgroup_barrier(mem_flags::mem_device);
+        if (scale > 1) for (uint i = tid; i < pixels * scale * scale; i += 256) {
+            int x = box.x * int(scale) + int(i % (width * scale)), y = box.y * int(scale) + int(i / (width * scale)), nx = x / int(scale), ny = y / int(scale);
+            if (!inside(a, b, c, x, y, scale)) continue;
+            int r = o.a.r, g = o.a.g, bl = o.a.b;
+            if (o.flags & RENDER_GOURAUD) { r = interpolate(r, o.a, x, y, scale, grad, 0); g = interpolate(g, o.a, x, y, scale, grad, 1); bl = interpolate(bl, o.a, x, y, scale, grad, 2); }
+            if (o.flags & RENDER_TEXTURE) {
+                int u = interpolate(o.a.u, o.a, x, y, scale, grad, 3), v = interpolate(o.a.v, o.a, x, y, scale, grad, 4);
+                if (o.flags & RENDER_UV_LIMIT) { u = clamp(u, int(o.p[0] & 0xffff), int(o.p[0] >> 16)); v = clamp(v, int(o.p[1] & 0xffff), int(o.p[1] >> 16)); }
+                uint raw = samples[uint(ny - box.y) * width + uint(nx - box.x)]; int2 mapped = window_uv(u, v, o.texwin); uint key = uint(mapped.x) | uint(mapped.y) << 8;
+                ushort sample = inside(a, b, c, nx, ny, 1) && raw >> 16 == key ? ushort(raw) : texel_extra(vram, &local, u, v, o);
+                textured_plot(hires, x, y, scale, sample, r, g, bl, o);
+            } else plot(hires, x, y, scale, rgb15(nx, ny, r, g, bl, o.flags & RENDER_DITHER), o.flags & RENDER_SEMI, o.mask, o.texpage);
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup | mem_flags::mem_device);
     }
+    for (uint k = 0; k < 4; k++) cache.texcache[tid][k] = local.texcache[tid][k];
+    cache.textag[tid] = local.textag[tid]; cache.clutcache[tid] = local.clutcache[tid];
+    if (!tid) { cache.clut_id = local.clut_id; cache.clut_valid = local.clut_valid; cache.clut_n = local.clut_n; }
 }

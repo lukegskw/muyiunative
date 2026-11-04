@@ -71,6 +71,38 @@ static void advance(unsigned chunks) {
         }
     });
 }
+static void starvation(device *d) {
+    // A busy Metal frame can outlast the device reserve. The old adapter immediately fed each subsequent chunk to the empty queue, never rebuilding it.
+    unsigned started = starts, suspended = pauses;
+    advance(2);
+    CHECK(d->count == 1 && g_audio_state.pending_count == 2 && pauses == suspended,
+          "short refills keep playing the remaining buffer without suspending transport");
+    advance(1); unsigned returned = d->callbacks, played = d->real;
+    CHECK(d->paused && g_audio_resume && !g_audio_paused && !d->count && g_audio_state.pending_count == 3 && pauses == suspended + 1,
+          "exhausting the physical reserve suspends playback for automatic reprime");
+    advance(200);
+    CHECK(d->callbacks == returned && d->real == played && !d->empty,
+          "a prolonged producer stall cannot advance the suspended output timeline");
+    produce(2048, 100);
+    CHECK(d->paused && starts == started && g_audio_state.count == 100, "a partial arrival keeps starvation recovery suspended");
+    produce(2148, 412);
+    CHECK(d->paused && starts == started && d->count == 1, "one full buffer does not restart an exhausted queue");
+    produce(2560, 1023);
+    CHECK(d->paused && starts == started && d->count == 2 && g_audio_state.count == 511, "two full buffers still wait for the original reserve");
+    produce(3583, 1);
+    CHECK(!d->paused && !g_audio_resume && d->count == 3 && starts == started + 1,
+          "the last real sample restores all three buffers and restarts playback once");
+    for (unsigned input = 3584; input < 7680; input += 512) { advance(1); produce(input, 512); }
+    CHECK(!d->empty && starts == started + 1 && !g_audio_state.count && d->real + d->count * 512 == 7680,
+          "playback after starvation preserves every stereo sample and maintains its reserve");
+    advance(3); started = starts;
+    CHECK(d->paused && g_audio_resume && !front_audio_pause(1) && g_audio_paused && !g_audio_resume,
+          "an explicit state-operation pause takes ownership of an automatic recovery");
+    produce(7680, 1536);
+    CHECK(d->paused && starts == started && d->count == 3, "refilling during an explicit pause cannot resume playback automatically");
+    CHECK(!front_audio_pause(0) && !d->paused && starts == started + 1, "finishing the explicit pause resumes the refilled queue once");
+    advance(3);
+}
 int main(void) {
     front_audio_start(); device *d = dev(g_audio_queue); CHECK(starts == 1 && d->count == 3, "startup primes and starts its original buffers");
     unsigned input = 2048; produce(0, input); advance(3);
@@ -117,6 +149,7 @@ int main(void) {
     CHECK(!memcmp(&before, &g_audio_state, sizeof before), "a stale callback cannot change the new timeline");
     CHECK(!front_audio_pause(0) && fresh->running && starts == started + 1, "finishing a load starts its fresh queue exactly once");
     produce(0, 2048); advance(4); CHECK(!fresh->empty && fresh->real == 512, "fresh playback after loading delivers the new sample sequence");
+    starvation(fresh);
     AudioQueueRef last = g_audio_queue; dispatch_sync(g_audio_delivery, ^{ g_audio_queue = NULL; }); mock_dispose(last, true);
     CHECK(!front_audio_pause(1) && !front_audio_pause(0), "state operations still work if audio could not initialize");
     printf("audio output: %d checks, %d failed\n", checks, fails); return fails != 0;

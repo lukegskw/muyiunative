@@ -15,7 +15,7 @@ typedef uint16_t render_u16;
 typedef struct ps1_vtx { int x, y, r, g, b, u, v; } ps1_vtx;
 enum { RENDER_TRIANGLE = 1, RENDER_LINE, RENDER_RECT, RENDER_FILL, RENDER_COPY, RENDER_UPLOAD, RENDER_CLEAR, RENDER_RESET };
 enum { RENDER_TEXTURE = 1, RENDER_GOURAUD = 2, RENDER_SEMI = 4, RENDER_RAW = 8, RENDER_DITHER = 16,
-       RENDER_FEEDBACK = 32, RENDER_CLASSIFIED = 64 };   // host-only alias classification; the runtime emits neither bit
+       RENDER_FEEDBACK = 32, RENDER_CLASSIFIED = 64, RENDER_UV_LIMIT = 128 };   // host-only presentation metadata; the runtime emits none of these bits
 typedef struct ps1_render_op {
     render_u32 type, flags, texpage, texwin, mask, clut;
     int ax1, ay1, ax2, ay2;
@@ -29,3 +29,4 @@ typedef struct ps1_render_cache {
 } ps1_render_cache;
 // p fields: RECT = width,height; FILL = rgb24,xy,wh; COPY = source_xy,dest_xy,wh; UPLOAD = VRAM word index,raw16,transfer_index.
 // CLEAR p[0]=1 clears only CLUT validity (GP1 01h); zero clears texture tags and CLUT validity. RESET clears all cache contents, preserving VRAM.
+// Host TRIANGLE + UV_LIMIT: p[0]/p[1] = minimum | maximum<<16 for U/V before texture window/wrapping; p[3] indexes prepared gradients.
