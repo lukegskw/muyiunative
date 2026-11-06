@@ -5,6 +5,7 @@ Compatibility is recorded for a particular disc revision and route, not inferred
 | Game                                                     | Serial     | Region            | Verified progress                     | Platform |
 | -------------------------------------------------------- | ---------- | ----------------- | ------------------------------------- | -------- |
 | [Metal Slug X](SLUS-01212/README.md)                     | SLUS-01212 | USA               | Mission 1 through its results         | Mac      |
+| [Final Fantasy VII, Disc 1](SCES-00867/README.md)        | SCES-00867 | Europe            | Opening movie and first field dialogue | Mac      |
 | [Final Fantasy IX, Disc 1](SLUS-01251/README.md)         | SLUS-01251 | USA               | First battle in the cargo ship        | Mac      |
 | [Crash Bandicoot 3 - Warped](SCES-01420/README.md)       | SCES-01420 | Europe, Australia | Opening cutscene and Time Twister hub | Mac      |
 | [Gran Turismo 2 - Simulation Mode](SCUS-94488/README.md) | SCUS-94488 | USA               | Japan Nationals, Midfield replay      | Mac      |

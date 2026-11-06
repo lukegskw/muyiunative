@@ -1,13 +1,28 @@
 // Streaming video decoder (plan.md, phase 2), from psx-spx, Macroblock Decoder: MDEC I/O Ports, Commands, Decompression, and Data Format. Synthetic t_mdec sends split
 // RLE packets, custom scale/quant tables, and multiple blocks while the output is blocked: input must stop at its 32-word capacity instead of consuming an entire image.
-// The low-level two-pass IDCT honors the uploaded scale table. Its published rounding is explicitly approximate, as are the published YUV coefficients; exact rounding
-// and decode latency remain open and are reported once. One 8x8 output block at a time is packed into a bounded queue; DMA1's 16x16 rearrangement uses per-word metadata
+// The low-level two-pass IDCT honors the uploaded scale table. Its published rounding is explicitly approximate, as are the published YUV coefficients. Each block
+// becomes available after an estimated processing interval; exact rounding, RLE-dependent latency and pipeline overlap remain open. DMA1's 16x16 rearrangement uses per-word metadata
 // https://psx-spx.consoledev.net/macroblockdecodermdec/#mdec-decompression
 #include "ps1.h"
 #include "mdec.h"
+#include <stddef.h>
 #include <string.h>
 
 #define M (&m->mdec)
+// FF VII's DMA1 callback reused buffer 1b53d4h three times before queued GPU uploads to x=0/24/48 consumed it: zero-time decoding made three repeated left columns.
+// psx-spx, DMA Transfer Rates, specifies bus costs separately from decompression. Published console observations measured 4205/7463 cycles for one/two macroblocks:
+// https://github.com/EBonura/PSoXide-editor/blob/main/docs/emulator-accuracy-from-silicon.md#mdec
+// The ~3258-cycle increment includes six 8x8 transforms and DMA. Estimate 512 cycles/transform (~3072/macroblock before bus costs), not a cycle-exact hardware fit.
+// Availability, FIFO backpressure and DMA completion follow that pipeline; no game-specific delay, skipped upload or altered decoded pixel is involved.
+enum { BLOCK_CYCLES = 512 };
+static int available(const ps1 *m) { return m->mdec.out_n && m->mdec.ready[m->mdec.out_head] <= m->cycles; }
+static void update(ps1 *m) {
+    if (M->busy && !M->remaining && !M->in_n && m->cycles >= M->until) M->busy = 0;
+    uint64_t next = M->out_n && !available(m) ? M->ready[M->out_head] : NEVER;
+    if (M->busy && !M->remaining && !M->in_n && M->until > m->cycles && M->until < next) next = M->until;
+    M->next = next; sched_update(m);
+}
+void mdec_event(ps1 *m) { update(m); dma_resume(m); update(m); }
 static int clamp(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 static int signed10(uint16_t v) { int n = v & 1023; return n & 512 ? n - 1024 : n; }
 static int signed9(int n) { n &= 511; return n & 256 ? n - 512 : n; }
@@ -55,10 +70,12 @@ static void emit(ps1 *m) {
     for (int i = 0; i < n; i++) {
         unsigned tail = (M->out_head + M->out_n) & 63;
         M->output[tail] = (uint32_t)bytes[i * 4] | (uint32_t)bytes[i * 4 + 1] << 8 | (uint32_t)bytes[i * 4 + 2] << 16 | (uint32_t)bytes[i * 4 + 3] << 24;
+        M->ready[tail] = M->until;
         M->out_block[tail] = (uint8_t)output_block; M->out_pos[tail] = (uint8_t)i; M->out_depth[tail] = (uint8_t)M->depth; M->out_n++;
     }
 }
 static void finish_block(ps1 *m) {
+    M->until = (M->until > m->cycles ? M->until : m->cycles) + BLOCK_CYCLES;
     idct(m);
     if (!mono(M) && M->stage < 2) memcpy(M->stage ? M->cb : M->cr, M->coeff, sizeof M->coeff);
     else emit(m);
@@ -88,13 +105,20 @@ static void pump(ps1 *m) {
             if (M->k >= 63) finish_block(m);
         }
     }
-    if (M->busy && !M->remaining && !M->in_n) M->busy = 0;
+    update(m);
 }
-void mdec_reset(ps1 *m) { memset(M, 0, sizeof *M); }
+void mdec_reset(ps1 *m) {
+    // FF VII's opening reset at PC 800420f0 erased quant[0][0]=2 and scale[0]=5a82h, making every movie frame mid-gray. psx-spx, MDEC(3) - Set Scale Table:
+    // reset aborts decoding and clears the FIFOs/status, but retains both uploaded tables. A new machine's calloc supplies the initial empty tables.
+    // https://psx-spx.consoledev.net/dev/ps1/cpu/mdec/macroblockdecodermdec/#mdec3-set-scale-table
+    memset(M, 0, offsetof(ps1_mdec, quant));
+    memset(M->coeff, 0, sizeof *M - offsetof(ps1_mdec, coeff));
+    M->next = NEVER;
+}
 int mdec_dma_ready(ps1 *m, int channel) {
     if (!channel) return !!(M->control & 0x40000000) && M->in_n <= 62 && (!M->busy || M->remaining);
     // I/O Ports documents DREQ1 withdrawing part-way through an output block, without an exact threshold. Available-word gating leaves those FIFO pulse timings open
-    return channel == 1 && !!(M->control & 0x20000000) && M->out_n;
+    return channel == 1 && !!(M->control & 0x20000000) && available(m);
 }
 int32_t mdec_dma_offset(ps1 *m) {
     if (!M->out_n) return 0;
@@ -104,26 +128,28 @@ int32_t mdec_dma_offset(ps1 *m) {
     return placed - (b * row * 8 + pos);
 }
 uint32_t mdec_dma_read(ps1 *m) {
-    if (!M->out_n) return 0;   // MDEC I/O Ports: an empty data register returns unspecified garbage
+    if (!available(m)) return 0;   // MDEC I/O Ports: an empty data register returns unspecified garbage
     uint32_t v = M->output[M->out_head]; M->out_head = (M->out_head + 1) & 63; M->out_n--; pump(m); return v;
 }
 uint32_t mdec_read(ps1 *m, uint32_t off) {
+    update(m);
     if (!off) return mdec_dma_read(m);
-    uint32_t status = (M->out_n ? 0 : 1u << 31) | (M->in_n >= 63 || (M->busy && !M->remaining) ? 1u << 30 : 0) | (uint32_t)M->busy << 29;
+    uint32_t status = (available(m) ? 0 : 1u << 31) | (M->in_n >= 63 || (M->busy && !M->remaining) ? 1u << 30 : 0) | (uint32_t)M->busy << 29;
     status |= (uint32_t)mdec_dma_ready(m, 0) << 28 | (uint32_t)mdec_dma_ready(m, 1) << 27;
-    return status | ((M->command >> 2) & 0x07800000) | (uint32_t)(M->out_n ? M->out_block[M->out_head] : block(M)) << 16 | M->count;
+    return status | ((M->command >> 2) & 0x07800000) | (uint32_t)(available(m) ? M->out_block[M->out_head] : block(M)) << 16 | M->count;
 }
 void mdec_write(ps1 *m, uint32_t off, uint32_t v) {
-    if (off) { if (v & 0x80000000) mdec_reset(m); M->control = v & 0x60000000; return; }
+    if (off) { if (v & 0x80000000) mdec_reset(m); M->control = v & 0x60000000; update(m); return; }
     if (!M->busy) {
         M->command = v; M->cmd = (int)(v >> 29); M->depth = (v >> 27) & 3; M->sign = (v >> 26) & 1; M->stp = (v >> 25) & 1;
         M->table_pos = M->stage = M->active = 0; M->in_head = M->in_n = 0;
         M->remaining = M->cmd == 1 ? v & 0xffff : M->cmd == 2 ? (v & 1 ? 32 : 16) : M->cmd == 3 ? 32 : 0;
         M->count = (uint16_t)(M->cmd >= 1 && M->cmd <= 3 ? M->remaining - 1 : v);
         M->busy = M->remaining != 0;
-        if (M->cmd == 1) RED_ONCE(m, RED_MDEC, "mdec: exact IDCT/YUV rounding and FIFO/decode timing are not verified by the public specification");
+        if (M->cmd == 1) RED_ONCE(m, RED_MDEC, "mdec: IDCT/YUV rounding is approximate; 8x8 processing time is estimated, with RLE-dependent latency and pipeline overlap unverified");
     } else if (M->remaining && M->in_n <= 62) {
         unsigned tail = (M->in_head + M->in_n) & 63; M->input[tail] = (uint16_t)v; M->input[(tail + 1) & 63] = (uint16_t)(v >> 16); M->in_n += 2;
         M->remaining--; M->count = (uint16_t)(M->remaining - 1); pump(m);
     } else RED_ONCE(m, RED_MDEC, "mdec: input written without FIFO capacity or remaining parameters");
+    update(m);
 }

@@ -1,6 +1,6 @@
 # Compatibility gallery images
 
-The user approved selected screenshots of games running in muyiunative for the compatibility gallery on 2026-11-02, requested FF IX and Crash images on 2026-11-03, and GT2/WipEout images on 2026-11-04. This is the narrow presentation exception in [AGENTS.md](../../AGENTS.md): routine frame-comparison screenshots stay local, and disc images, extracted game code, BIOS dumps, cards and save states remain excluded. Gallery images are never runtime or tool-test inputs and are not included in the launcher's build kit.
+The user approved selected screenshots of games running in muyiunative for the compatibility gallery on 2026-11-02, requested FF IX and Crash images on 2026-11-03, GT2/WipEout images on 2026-11-04, and the FF VII image on 2026-11-06. This is the narrow presentation exception in [AGENTS.md](../../AGENTS.md): routine frame-comparison screenshots stay local, and disc images, extracted game code, BIOS dumps, cards and save states remain excluded. Gallery images are never runtime or tool-test inputs and are not included in the launcher's build kit.
 
 The [main gallery](../../README.md#compatibility) links each image to its [game notes](../../profiles/README.md). Images show actual application output, with no generated artwork, retouching or simulated UI. The layout follows [nxnative's gallery](https://github.com/seedds/nxnative#games); add another entry when its verified scope and capture provenance are available.
 
@@ -105,3 +105,23 @@ The capture began from reset with empty memory-card slots and no loaded quick st
 The packaged app replayed the normal inputs in [game.toml](../../profiles/SCES-02845/game.toml) headlessly with `--input-file <expanded-route> --frames 18000 --renderer metal --scale 4 --verify-renderer --png <output>`. Every frame's native Metal VRAM/cache matched software; all 6,704,686,462 CPU instructions ran natively, with none interpreted. The image shows the [recorded scene](../../profiles/SCES-02845/README.md), with the user's reported issues confirmed resolved on 2026-11-04. This does not establish completed events or whole-game compatibility.
 
 The capture began from reset with empty memory-card slots and no loaded quick state. The selected PNG was copied byte for byte into the gallery. Only this presentation image is retained; comparison captures, packet traces, checkpoints and raw logs remain outside the repository. No game app, disc or user save was modified by capture.
+
+## Final Fantasy VII
+
+![Final Fantasy VII, the opening field dialogue running in muyiunative](final-fantasy-vii.png)
+
+| Capture field | Value |
+| --- | --- |
+| File | `final-fantasy-vii.png`, 89,870 bytes |
+| Captured | 2026-11-06, Apple M4 Pro, macOS 26.6.2 |
+| App | Locally rebuilt game host, 0.9.0 (build 83), base commit `fd41edc43d17` with the uncommitted MDEC corrections prepared for 0.9.1 |
+| Game / region | Final Fantasy VII / Europe, Disc 1, SCES-00867 |
+| Boot executable hash | `e81ad4795b295c8f3c0af2718d2c09e887dcd142fd8940b9ae16b42c99044bb5` |
+| Route | 12,051 frames from reset, New Game → opening movie → first field dialogue |
+| Renderer / output | Software, original unmodified PNG, 320×240 |
+| Display FNV-1a hash | `d592ed0f68b5b7ea` |
+| PNG SHA-256 | `1acb2ec08d5fe226089b793a9813bd69d51da24f88b82bdf3c6ad01186ff8483` |
+
+The game host replayed the normal inputs now recorded in [game.toml](../../profiles/SCES-00867/game.toml), with `--bios <bundled OpenBIOS> --disc <local Disc 1> --headless --lockstep --frames 12051 --input <route events> --png <output>`. Native execution agreed with the interpreter at all 97,145,525 stops; 4,209,310,383 instructions ran natively and 299,921,161 were interpreted. The image shows the [verified scene](../../profiles/SCES-00867/README.md), not a completed game. The user confirmed the corrected game and requested its gallery entry on 2026-11-06.
+
+The capture began from reset with empty memory-card slots and no loaded quick state. The selected PNG was copied byte for byte into the gallery. Only this presentation image is retained; movie comparison captures, traces, checkpoints and generated code remain outside the repository. No disc or user save was modified by capture.

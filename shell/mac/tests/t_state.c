@@ -72,6 +72,17 @@ int main(void) {
         }
         front_state_free(s);
     }
+    mdec_reset(m); mdec_write(m, 0, 0x28000001); mdec_write(m, 0, 0xfe000000);
+    CHECK(m->mdec.next > m->cycles && m->mdec.next != NEVER, "snapshot fixture has decoded output still processing");
+    CHECK(!front_state_save(directory, "synthetic-A", m, 100, 0, NULL, error), "pending decoder processing saves before its completion event");
+    s = front_state_read(directory, "synthetic-A", m, error);
+    CHECK(s && s->machine->mdec.next == m->mdec.next, "pending decoder deadline survives disk serialization");
+    if (s) {
+        front_state_apply(other, s); ps1_run_frame(m); ps1_run_frame(other);
+        CHECK(!memcmp(&m->mdec, &other->mdec, sizeof m->mdec) && m->next_event == other->next_event &&
+              !(mdec_read(m, 4) >> 31) && mdec_read(m, 0) == mdec_read(other, 0), "restoring pending processing exposes the same output at the same guest time");
+        front_state_free(s);
+    }
     uint64_t before = file_hash(path), cycles = m->cycles;
     CHECK(!front_state_read(directory, "synthetic-B", m, error) && strstr(error, "different game"), "a different game's state is rejected");
     m->bios[0] = 1; CHECK(!front_state_read(directory, "synthetic-A", m, error), "a different BIOS is rejected"); m->bios[0] = 0;
