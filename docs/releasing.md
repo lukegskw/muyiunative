@@ -123,3 +123,21 @@ On 2026-11-04 the user confirmed the GT2/WipEout fixes were working and authoriz
 The launcher kit includes the new GT2/WipEout profiles, audio recovery after rendering stalls, Metal triangle optimizations and the title-atlas correction. The gallery's approved game screenshots remain outside the kit and download; only the generic launcher ZIP and checksum are distributed. Local validation passes all 78 tool tests, pinned ruff/pyright, 1,800 runtime checks, 4,670 Mac checks and 8,270 Metal checks, including CLT ASan/UBSan runs. The two gallery captures also pass packaged-app per-frame native VRAM/cache comparisons from reset.
 
 The player's confirmation covers the reported scenes and settings in the rebuilt apps. It does not replace the earlier downloaded-launcher acceptance record or establish whole-game, fresh-Mac or original-reporter M1 Max validation. Existing game apps must be rebuilt with the updated launcher to receive these runtime/shader changes.
+
+## Preview 0.9.0 artifact
+
+On 2026-11-06 the user authorized committing/pushing both feature branches and publishing a new preview with multi-disc apps and launcher updates. The signed launcher prepared for [v0.9.0](https://github.com/lukegskw/muyiunative/releases/tag/v0.9.0) identifies the clean implementation commit below. This subsequent artifact-record commit does not retarget the binary.
+
+| Field | Value |
+| --- | --- |
+| Source commit | `2c6ea81d248eacb070ee337ffbd86f5d585f739b` |
+| App identity | 0.9.0 (build 80), commit `2c6ea81d248e` |
+| Apple submission | `648d5fed-e3c8-4a9b-9d40-321350f389ef`, Accepted |
+| Launcher archive | `muyiunative-0.9.0-mac-arm64.zip` |
+| ZIP SHA-256 | `931cb89c79e851b45b6868a6942baf36108fe2ea9563ec01665a0a855700b92d` |
+| Extracted-copy checks | Signature, stapled ticket, Gatekeeper, kit integrity, arm64 resources and bundled boot |
+| OpenBIOS 60-frame hash | `49d1a17d49708cb1` |
+
+Publication uses the generic launcher ZIP, its checksum and its signed appcast. Normal game apps and game data remain excluded. The updater feed publishes signed metadata from the release, including previews. Existing published 0.8.1 launchers need a manual replacement for this first upgrade; subsequent versions can update from inside the launcher. Game apps continue to require a manual rebuild with the original disc set. Earlier quick states from published versions use an incompatible format; ordinary memory-card saves retain their game identity.
+
+The implementation passes the 92-tool-test suite with the two release-version expectations updated for 0.9.0, pinned ruff and pyright, and isolated UI checks of automatic notification, changed-package rejection and full install/relaunch. The preceding multi-disc checks cover synthetic portable apps and the requested FFIX swaps reached through memory-card loading; they do not establish story-ending handoffs or whole-game compatibility.
