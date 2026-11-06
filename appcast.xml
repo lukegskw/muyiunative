@@ -5,17 +5,17 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <title>muyiunative updates</title>
     <link>https://github.com/lukegskw/muyiunative/releases</link>
     <item>
-      <title>muyiunative 0.9.0</title>
-      <pubDate>Fri, 06 Nov 2026 10:35:55 GMT</pubDate>
-      <link>https://github.com/lukegskw/muyiunative/releases/tag/v0.9.0</link>
-      <sparkle:version>80</sparkle:version>
-      <sparkle:shortVersionString>0.9.0</sparkle:shortVersionString>
+      <title>muyiunative 0.9.1</title>
+      <pubDate>Fri, 06 Nov 2026 15:02:17 GMT</pubDate>
+      <link>https://github.com/lukegskw/muyiunative/releases/tag/v0.9.1</link>
+      <sparkle:version>84</sparkle:version>
+      <sparkle:shortVersionString>0.9.1</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
       <description>After updating the launcher, rebuild your game apps with Build Game App to update them. Existing game apps keep their current version until rebuilt.</description>
-      <enclosure url="https://github.com/lukegskw/muyiunative/releases/download/v0.9.0/muyiunative-0.9.0-mac-arm64.zip" length="2632241" type="application/octet-stream" sparkle:edSignature="jwSplbDjOjjsQFuFUErn+u3zbkJbfEF5bPxVuOE5L31h8ZUM7hs5w4pBbliC+5dVcjmrOokAE2ulstIz45/9CQ=="></enclosure>
+      <enclosure url="https://github.com/lukegskw/muyiunative/releases/download/v0.9.1/muyiunative-0.9.1-mac-arm64.zip" length="2636567" type="application/octet-stream" sparkle:edSignature="ghY7+yNJyKViDqE/IBYCYFV8oKeBkhLwLlZsED77f1MtmkK2LUwiL6HAICUhnxmyoXpptykKopX6RBylpu2aAg=="></enclosure>
     </item>
   </channel>
 </rss><!-- sparkle-signatures:
-edSignature: bPYjhkxNIEku0xwwbgX2JBsqZabXhjEgf7U5jCRYs9HcRe8+3OvfqG1m+WRW6R16EekZxbKEsj51l0/3XKnFCQ==
+edSignature: 1uwO7mt24u+wF03JbTJG9E5r/NJ/s6vqON2SyMiZ5QZR8MhlV/DipSWFPHCqEuGOuwZthkJN3h3perf4fGiEDg==
 length: 1371
 -->
