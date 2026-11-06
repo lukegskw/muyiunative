@@ -6,6 +6,7 @@ void sched_update(ps1 *m) {
     uint64_t e = m->gpu.next_line < m->gpu.next_hblank ? m->gpu.next_line : m->gpu.next_hblank;
     for (int n = 0; n < 3; n++) if (m->tmr[n].next < e) e = m->tmr[n].next;
     if (m->dma_next < e) e = m->dma_next;
+    if (m->mdec.next < e) e = m->mdec.next;
     if (m->cd.next < e) e = m->cd.next;
     if (m->cd.sector_next < e) e = m->cd.sector_next;
     if (m->sio.next < e) e = m->sio.next;
@@ -15,6 +16,7 @@ void sched_update(ps1 *m) {
 
 void sched_run(ps1 *m) {
     while (m->dma_next <= m->cycles) dma_event(m);
+    if (m->mdec.next <= m->cycles) mdec_event(m);
     for (;;) {   // scanlines and hblank edges, in their order
         uint64_t l = m->gpu.next_line, h = m->gpu.next_hblank;
         if (l <= h && l <= m->cycles) gpu_line(m);

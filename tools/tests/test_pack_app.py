@@ -20,7 +20,7 @@ class Version(unittest.TestCase):
 
     def test_shared_version_and_full_history(self):
         release, build, commit = version.metadata()
-        self.assertEqual(release, '0.9.0'); self.assertRegex(build, r'^[1-9][0-9]*$'); self.assertRegex(commit, r'^[0-9a-f]{12,40}$')
+        self.assertEqual(release, '0.9.1'); self.assertRegex(build, r'^[1-9][0-9]*$'); self.assertRegex(commit, r'^[0-9a-f]{12,40}$')
         self.assertEqual(build, subprocess.check_output(['git', '-C', version.ROOT, 'rev-list', '--count', 'HEAD'], text=True).strip())
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'generated/version.h'; version.header(path); original = path.stat().st_mtime_ns

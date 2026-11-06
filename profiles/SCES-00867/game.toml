@@ -1,0 +1,42 @@
+# External disc identified on 2026-11-06; only metadata, hashes and ordinary pad inputs are retained.
+name = "Final Fantasy VII"
+serial = "SCES-00867"
+
+[disc]
+licence = "SCEE"
+boot = 'SCES_008.67'
+boot_sha256 = "e81ad4795b295c8f3c0af2718d2c09e887dcd142fd8940b9ae16b42c99044bb5"
+tracks = [
+  { number = 1, mode = "MODE2/2352", sectors = 317786, sha256 = "c9f4541340d21a1654b7bbddc8cb6d4cdba34bc906d424ea80ffb28804c6e443" },
+]
+
+# Empty memory-card slots, from reset. The opening route does not establish later battles, disc changes or whole-game compatibility.
+[validation]
+date = "2026-11-06"
+screen = "opening movie and first field dialogue"
+frames = 12051
+inputs = ["2500:4000", "2506:0", "3500:10", "3512:0", "3560:2000", "3572:0"]
+width = 320
+height = 240
+frame_hash_fnv1a64 = "d592ed0f68b5b7ea"
+
+# Measured with the earlier 2400-frame capture plus static boot analysis, before this longer capture route was added.
+native_instructions = 4209310383
+interpreted_instructions = 299921161
+lockstep_stops = 97145525
+
+[movie_train]
+date = "2026-11-06"
+screen = "opening movie train, with no repeated left-edge columns"
+frames = 9500
+inputs = ["2500:4000", "2506:0", "3500:10", "3512:0", "3560:2000", "3572:0"]
+width = 320
+height = 240
+frame_hash_fnv1a64 = "6079b9c062a4b036"
+
+[movie_train.metal_1x]
+date = "2026-11-06"
+width = 320
+height = 240
+frame_hash_fnv1a64 = "6079b9c062a4b036"
+native_vram_cache_match_every_frame = true
