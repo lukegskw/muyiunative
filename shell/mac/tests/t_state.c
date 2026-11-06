@@ -27,6 +27,15 @@ static void program(ps1 *m) {
     gpu_gp0(m, 0xa0000000); gpu_gp0(m, 20 | 20u << 16); gpu_gp0(m, 3 | 1u << 16); gpu_gp0(m, 0x12345678);
     ps1_run_frame(m);
 }
+static int image(const char *path, uint8_t marker) {
+    FILE *f = fopen(path, "wb"); if (!f) return -1;
+    for (int i = 0; i < 40; i++) {
+        uint8_t bytes[DISC_SECTOR] = {0}; memset(bytes + 1, 0xff, 10); bytes[15] = 2;
+        if (i == 39) bytes[2000] = marker;   // identical TOC, boot/system area and first 39 sectors; differing later content
+        if (fwrite(bytes, 1, sizeof bytes, f) != sizeof bytes) { fclose(f); return -1; }
+    }
+    return fclose(f);
+}
 
 int main(void) {
     char temp[] = "/tmp/muyiunative-state-XXXXXX", error[FRONT_STATE_ERROR], path[256], previous[256];
@@ -91,6 +100,21 @@ int main(void) {
         CHECK(s && s->scale == 2 && s->frame == 123 && !memcmp(s->fine, fine, words * sizeof *fine), "every fine sample is retained on disk");
         front_state_free(s); free(fine);
     }
-    unlink(path); close(directory); CHECK(!rmdir(root), "successful and failed saves leave no temporary files behind");
+    char disc1[256], disc2[256]; snprintf(disc1, sizeof disc1, "%s/one.bin", root); snprintf(disc2, sizeof disc2, "%s/two.bin", root);
+    CHECK(!image(disc1, 0x11) && !image(disc2, 0x22) && !disc_open(m, disc1), "equal-layout multi-disc fixtures mount");
+    uint8_t sector[DISC_SECTOR]; disc_read(m, 5, sector); off_t position = ftello(m->disc.file[0]);
+    CHECK(!front_state_save(directory, "synthetic-A", m, 456, 0, NULL, error) && ftello(m->disc.file[0]) == position, "state identity covers complete media without moving sector streams");
+    before = file_hash(path);
+    CHECK(!disc_open(m, disc2) && !front_state_read(directory, "synthetic-A", m, error) && strstr(error, "Insert the disc"),
+          "equal-layout discs with different later bytes cannot load each other's state");
+    CHECK(file_hash(path) == before && !disc_read(m, 39, sector) && sector[2000] == 0x22, "wrong-disc rejection keeps the state file and current media intact");
+    CHECK(!disc_open(m, disc1), "original disc can be reinserted"); s = front_state_read(directory, "synthetic-A", m, error);
+    CHECK(s && s->frame == 456, "reinserting the saved disc permits loading again"); front_state_free(s);
+    cd_set_shell(m, 1);
+    CHECK(front_state_save(directory, "synthetic-A", m, 500, 0, NULL, error) < 0 && !front_state_read(directory, "synthetic-A", m, error) && file_hash(path) == before,
+          "open-cover states cannot silently restore a physical disc mismatch"); cd_set_shell(m, 0);
+    CHECK(!disc_open(m, disc2) && !truncate(disc2, DISC_SECTOR) && front_state_save(directory, "synthetic-A", m, 500, 0, NULL, error) < 0 && file_hash(path) == before,
+          "an unreadable media identity never overwrites the last good state");
+    unlink(disc1); unlink(disc2); unlink(path); close(directory); CHECK(!rmdir(root), "successful and failed saves leave no temporary files behind");
     ps1_free(m); ps1_free(other); printf("state: %d checks, %d failed\n", checks, fails); return fails != 0;
 }

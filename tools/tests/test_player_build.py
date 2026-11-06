@@ -69,6 +69,14 @@ class PlayerBuild(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'outside the kit'): player_build.build(args, self.kit)
         self.assertFalse(self.cache.exists())
 
+    def test_disc_list_is_validated_and_forwarded_in_order(self):
+        second = self.tmp / 'second.bin'; second.write_bytes(b'synthetic')
+        self.rewrite_worker('import sys\nfrom pathlib import Path\nargs=sys.argv[1:]\nassert args[0]=="build"\nassert args[args.index("--disc")+1].endswith("second.bin")\nPath(args[args.index("--output")+1]).mkdir()\n')
+        result = subprocess.run([*self.command(), '--disc', second], capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr); self.assertTrue(self.out.is_dir()); self.assertEqual(list(self.cache.iterdir()), [])
+        result = subprocess.run([*self.command(), '--disc', self.source], capture_output=True, text=True, timeout=20)
+        self.assertNotEqual(result.returncode, 0); self.assertIn('duplicate paths', result.stderr)
+
     def test_exported_identity_needs_no_git(self):
         with patch('version.subprocess.run', side_effect=AssertionError('Git must not run inside a kit')):
             self.assertEqual(version.metadata(self.kit), ('0.8.1', json.loads((self.kit / 'build-kit.json').read_text())['BuildVersion'], json.loads((self.kit / 'build-kit.json').read_text())['Commit']))

@@ -38,12 +38,12 @@ def create_iso(path, exe, serial='SLUS_000.01'):
     path.write_bytes(b''.join(raw(s) for s in sectors)); return path
 
 
-def product_exe():
+def product_exe(color=0x2000c0ff):
     # psx-spx, GPU Display Control Commands (GP1), Rendering Attributes (E1h-E6h), Fill Rectangle and Monochrome Polygon: 320x240, a blue background and a gold triangle.
     # Direct MMIO keeps this app fixture entirely our own code; ps1-tests executables contain SDK libraries and may never be packaged in an app (CONTRIBUTING).
     lines = ['mtc0 zero, $12', 'lui t0, 0x1f80', 'ori t0, t0, 0x1810']
     gp1 = [0, 0x08000001, 0x05000000, 0x06c60260, 0x07040010, 0x03000000]
-    gp0 = [0xe1000400, 0xe3000000, 0xe403bd3f, 0xe5000000, 0xe6000000, 0x02281810, 0, 0x00f00140, 0x2000c0ff, 0x0032003c, 0x003c0104, 0x00c800a0]
+    gp0 = [0xe1000400, 0xe3000000, 0xe403bd3f, 0xe5000000, 0xe6000000, 0x02281810, 0, 0x00f00140, color, 0x0032003c, 0x003c0104, 0x00c800a0]
     for offset, words in ((4, gp1), (0, gp0)):
         for word in words: lines += [f'lui t1, {word >> 16}', f'ori t1, t1, {word & 0xffff}', f'sw t1, {offset}(t0)']
     code, _ = program(0x80010000, '\n'.join(lines + ['wait:', 'beq zero, zero, wait', 'nop']))
@@ -125,6 +125,19 @@ class MacBuild(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0); self.assertIn('--scale 2 or 4 needs --renderer metal', result.stderr)
         self.assertNotIn('building the capture host', result.stdout); self.assertFalse(out.exists())
 
+    def test_set_rejects_region_mismatch_and_inputs_inside_output(self):
+        second = create_iso(self.source / 'second.bin', self.exe)
+        data = second.read_bytes().replace(b'Amer  ica ', b'Euro pe   '); second.write_bytes(data)
+        command = [sys.executable, ROOT / 'scripts/muyiunative', 'build', self.data, '--disc', second]
+        result = subprocess.run(command, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0); self.assertIn('same licence region', result.stderr)
+        out = self.tmp / 'Same Game.app'; (out / 'Contents/Resources').mkdir(parents=True)
+        identity = mac_build.build_plan(self.data)['save_id']
+        (out / 'Contents/Info.plist').write_bytes(plistlib.dumps({'CFBundleIdentifier': f'org.muyiunative.game.{identity.lower()}'}))
+        inside = create_iso(out / 'Contents/Resources/second.bin', self.exe)
+        result = subprocess.run([*command[:-1], inside, '--output', out], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0); self.assertIn('contains a source disc', result.stderr); self.assertTrue(inside.is_file())
+
     def test_unknown_game_plan_and_stable_save_identity(self):
         plan = mac_build.build_plan(self.data)
         self.assertEqual((plan['serial'], plan['boot_sha256'], plan['frames'], plan['inputs']), ('SLUS-00001', hashlib.sha256(self.exe).hexdigest(), 2400, []))
@@ -166,6 +179,37 @@ class MacBuild(unittest.TestCase):
 
 @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('codesign'), 'needs macOS and its codesign')
 class MacProduct(unittest.TestCase):
+    def test_four_disc_app_is_native_and_independent_of_all_originals(self):
+        with tempfile.TemporaryDirectory(prefix='muyiunative-disc-set-test-') as directory:
+            root = Path(directory); source = root / 'originals'; source.mkdir(); cues, hashes = [], []
+            for i, color in enumerate((0x2000c0ff, 0x20ff0030, 0x2040ff20, 0x20c080ff), 1):
+                folder = source / f'disc {i}'; folder.mkdir(); image = product_exe(color)
+                create_iso(folder / 'track.bin', image, serial=f'SLUS_000.0{i}'); hashes.append(hashlib.sha256(image).hexdigest())
+                cue = folder / 'disc.cue'; cue.write_text('FILE "track.bin" BINARY\n TRACK 01 MODE2/2352\n INDEX 01 00:00:00\n'); cues.append(cue)
+            playlist = source / 'set.m3u'; playlist.write_text('#EXTM3U\n' + '\n'.join(str(p.relative_to(source)) for p in cues))
+            app = root / 'Four Discs.app'
+            def run(command):
+                r = subprocess.run(list(map(str, command)), capture_output=True, text=True, timeout=300)
+                self.assertEqual(r.returncode, 0, (r.stdout + r.stderr)[-6000:]); return r.stdout
+            built = run([sys.executable, ROOT / 'scripts/muyiunative', 'build', playlist, '--frames', 900, '--output', app])
+            self.assertEqual(built.count('the machines agree'), 4)
+            metadata = plistlib.loads((app / 'Contents/Resources/game.plist').read_bytes())
+            self.assertEqual(metadata['Version'], 2); self.assertEqual([d['BootSHA256'] for d in metadata['Discs']], hashes)
+            self.assertEqual(metadata['SaveID'], mac_build.build_plan(cues[0])['save_id'])
+            info = plistlib.loads((app / 'Contents/Info.plist').read_bytes()); executable = app / 'Contents/MacOS' / info['CFBundleExecutable']
+            moved = root / 'Moved Four Discs.app'; app.rename(moved); executable = moved / executable.relative_to(app); shutil.rmtree(source)
+            frames = []
+            for number in range(1, 5):
+                played = run([executable, '--headless', '--frames', 900, '--disc-number', number, '--lockstep'])
+                self.assertIn('the machines agree', played)
+                counts = re.search(r'host: (\d+) instructions native, (\d+) interpreted', played); self.assertIsNotNone(counts); assert counts is not None
+                self.assertGreater(int(counts[1]), 0); self.assertEqual(int(counts[2]), 0, 'every disc route must run natively in the same executable')
+                frames.append(mac_build.frame_hash(played))
+            self.assertEqual(len(set(frames)), 4, 'the four different native programs draw four different results')
+            bad = subprocess.run([executable, '--headless', '--disc-number', '5'], capture_output=True, text=True)
+            self.assertEqual(bad.returncode, 2)
+            run(['codesign', '--verify', '--strict', moved])
+
     def test_native_app_is_portable_and_cards_survive_restart(self):
         with tempfile.TemporaryDirectory(prefix='muyiunative-product-test-') as directory:
             tmp = Path(directory); executable = product_exe()

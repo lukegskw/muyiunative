@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.dont_write_bytecode = True
 if sys.version_info < (3, 9): raise SystemExit('[RED] build: update Apple Command Line Tools; Python 3.9 or newer is required')
 from build_kit import manifest
+from disc_set import sources
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -43,7 +44,8 @@ def build(args, kit=ROOT):
     try:
         kit = Path(kit).resolve(); manifest(kit)
         source, out, cache = args.disc.resolve(), args.output.resolve(), args.work_root.resolve()
-        if not source.is_file() or source.suffix.lower() not in ('.cue', '.bin'): raise ValueError('choose a CUE or BIN disc image')
+        extra = getattr(args, 'extra_disc', None) or []
+        sources(source, extra)   # validate the complete set before allocating a build workspace
         if out.suffix != '.app': raise ValueError('the output must end in .app')
         if out.is_relative_to(kit) or out.is_relative_to(cache): raise ValueError('the output app must be outside the kit and temporary build cache')
         if cache.is_relative_to(out): raise ValueError('the output app must not contain the build cache')
@@ -53,6 +55,7 @@ def build(args, kit=ROOT):
         env = dict(os.environ, PYTHONDONTWRITEBYTECODE='1', PYTHONNOUSERSITE='1')
         env.pop('PYTHONPATH', None); env.pop('PYTHONHOME', None)
         command = [sys.executable, '-B', copy / 'scripts/muyiunative', 'build', source, '--output', out]
+        for disc in extra: command += ['--disc', disc.resolve()]
         if args.frames is not None: command += ['--frames', str(args.frames)]
         if args.profile is not None: command += ['--profile', args.profile.resolve()]
         if _cancelled: raise Cancelled()
@@ -77,7 +80,8 @@ def build(args, kit=ROOT):
 
 def main():
     ap = argparse.ArgumentParser(description='Build a native game app using the launcher kit and Apple Command Line Tools')
-    ap.add_argument('disc', type=Path); ap.add_argument('--output', type=Path, required=True); ap.add_argument('--work-root', type=Path, required=True)
+    ap.add_argument('disc', type=Path); ap.add_argument('--disc', dest='extra_disc', type=Path, action='append')
+    ap.add_argument('--output', type=Path, required=True); ap.add_argument('--work-root', type=Path, required=True)
     ap.add_argument('--frames', type=int); ap.add_argument('--profile', type=Path)
     args = ap.parse_args()
     try: return build(args)

@@ -42,6 +42,11 @@ int main(void) {
     CHECK(!cue(c, "FILE \"first track.bin\" BINARY\nTRACK 01 MODE1/2352\nINDEX 01 00:00:00\nFILE second.bin BINARY\nTRACK 02 AUDIO\nINDEX 00 00:00:00\nINDEX 01 00:00:01\n") && !disc_open(m, c), "multiple BINs mount with file-relative index times");
     CHECK(m->disc.sectors == 11 && m->disc.track[1].begin == 8 && m->disc.track[1].start == 9 && m->disc.track[0].mode == 1, "multi-file TOC accumulates the complete previous file");
     CHECK(!disc_read(m, 7, raw) && raw[100] == 0x17 && !disc_read(m, 8, raw) && raw[100] == 0x40 && !disc_read(m, 10, raw) && raw[100] == 0x42, "reads cross from shared disc addresses into the correct file offsets");
+    uint64_t identity, changed; off_t position = ftello(m->disc.file[1]);
+    CHECK(!disc_identity(m, &identity) && ftello(m->disc.file[1]) == position, "content identity preserves each stream's sector position");
+    CHECK(!bin(b, 3, 0x50) && !disc_open(other, c) && !disc_identity(other, &changed) && changed != identity,
+          "content identity distinguishes equal TOCs whose separate audio track differs");
+    CHECK(!bin(b, 3, 0x40), "later fixtures retain their original synthetic track bytes");
 
     CHECK(!cue(c, "FILE \"first track.bin\" BINARY\nTRACK 01 MODE2/2352\nINDEX 00 00:00:00\nINDEX 01 00:00:01\nTRACK 02 AUDIO\nINDEX 00 00:00:03\nINDEX 01 00:00:04\n") && !disc_open(m, c), "first track may include stored lead-in pregap");
     CHECK(m->disc.sectors == 7 && m->disc.track[0].start == 0 && m->disc.track[1].start == 3 && !disc_read(m, 0, raw) && raw[100] == 0x11, "INDEX01 of first track is LBA0, including when first BIN stores pregap");

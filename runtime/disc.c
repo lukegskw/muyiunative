@@ -114,7 +114,9 @@ int disc_open(ps1 *m, const char *path) {
         }
     }
     if (bad) { close_disc(&d); RED("disc: cannot mount image (missing, malformed, or unsupported layout)"); return -1; }
-    close_disc(&m->disc); m->disc = d; cd_reset(m); sched_update(m);
+    close_disc(&m->disc); m->disc = d;
+    if (!m->cd.shell_open) cd_reset(m);   // a live replacement with the cover open must retain IRQ masks, mode, volume and the door notification
+    sched_update(m);
     return 0;
 }
 
@@ -130,4 +132,28 @@ int disc_read(ps1 *m, uint32_t lba, uint8_t out[DISC_SECTOR]) {
     const ps1_disc_track *t = &m->disc.track[i]; FILE *f = m->disc.file[t->file];
     off_t at = (off_t)(t->offset + lba - t->begin) * DISC_SECTOR;
     return fseeko(f, at, SEEK_SET) || fread(out, 1, DISC_SECTOR, f) != DISC_SECTOR ? -1 : 0;
+}
+
+int disc_identity(ps1 *m, uint64_t *out) {
+    ps1_disc *d = &m->disc;
+    if (!d->identified) {
+        uint64_t h = UINT64_C(0xcbf29ce484222325); uint8_t bytes[65536];
+        // t_state mounts equal-length discs with different bytes: a TOC alone accepts the wrong disc. Hash all bytes, including later data/audio tracks.
+        for (int i = 0; i < d->nfiles; i++) {
+            FILE *f = d->file[i]; off_t position = ftello(f); uint64_t left = (uint64_t)d->size[i] * DISC_SECTOR; int bad = position < 0;
+            if (!bad && fseeko(f, 0, SEEK_SET)) bad = 1;
+            while (!bad && left) {
+                size_t n = left < sizeof bytes ? (size_t)left : sizeof bytes;
+                if (fread(bytes, 1, n, f) != n) { bad = 1; break; }
+                for (size_t j = 0; j < n; j++) { h ^= bytes[j]; h *= UINT64_C(0x100000001b3); }
+                left -= n;
+            }
+            if (!bad && (fgetc(f) != EOF || ferror(f))) bad = 1;
+            clearerr(f);
+            if (position >= 0 && fseeko(f, position, SEEK_SET)) bad = 1;
+            if (bad) return -1;
+        }
+        d->identity = h; d->identified = 1;
+    }
+    *out = d->identity; return 0;
 }

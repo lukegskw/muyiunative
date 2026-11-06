@@ -2,7 +2,9 @@
 
 [All games](../README.md) · [Build a game app](../../README.md#build-from-the-launcher) · [Profile and input route](game.toml)
 
-**Verified from reset through the first battle in the cargo ship.** The 24,720-frame route includes New Game, the opening movie, lighting the candle and the first encounter. It uses normal pad inputs and empty memory-card slots. Later scenes, the rest of Disc 1, disc changes and normal in-game saving have not been verified.
+**Verified from reset through the first battle in the cargo ship.** The 24,720-frame route includes New Game, the opening movie, lighting the candle and the first encounter. It uses normal pad inputs and empty memory-card slots. Separately, [all three requested disc changes](#requested-disc-changes) pass when loading later-disc memory-card saves. The rest of the story, its end-of-disc handoffs and normal in-game saving have not been verified.
+
+The source launcher can [build the complete disc set into one app](../../README.md#multi-disc-games): Disc 1 first, followed by Discs 2–4, selected together or listed in an M3U. Every disc's boot executable and captured route contribute to the same native binary; the Game menu selects bundled discs without building another app or changing memory cards. The build and controller paths pass synthetic four-disc tests, and the user's four-disc app passes the requested swaps described below. This profile's capture route still describes Disc 1 only; other discs use their own profile if available, otherwise the default capture route. Unseen code uses the interpreter.
 
 | Field           | Value                                                              |
 | --------------- | ------------------------------------------------------------------ |
@@ -36,3 +38,23 @@ The local quick-state bookmark resumes this first battle at frame 24760 after 40
 ## Quick states and audio
 
 On 2026-11-03 the user confirmed saving/loading quick states and, after the playback correction, normal audio following a save. The production AudioQueue adapter also passes 720-field 2×/4× windows covering successful and failed state operations, with no source-sample mismatches, ring drops or queue errors. See [audio-after-save validation](../../docs/development.md#audio-after-saving-a-state). This does not establish normal memory-card save/load or whole-game audio accuracy.
+
+## Requested disc changes
+
+Local checks on 2026-11-05–06 use the user's four-disc app, preview 0.8.1 build 77 based on `f5b88a6f7c09` plus the uncommitted multi-disc changes. The supplied executable SHA-256 is `d02b313486f72c4b3f78e9c7cf0a65dfc327e7530d149bdd51fe6bbb14699bbf`. Discs 1–4 are USA SLUS-01251, SLUS-01295, SLUS-01296 and SLUS-01297. A separately signed copy uses identical compiled code and track contents, but a separate bundle ID and save directory. Executable differences are confined to the signature and its size fields. The original app and player saves are preserved.
+
+Normal NTSC memory cards from [FantasyAnime's FFIX saves](https://fantasyanime.com/finalfantasy/ff9/ff9saves.htm), saves 15, 32 and 49, provide later-disc progress without playing the whole story. Loading each save on the preceding disc reaches FFIX's own “Change to DISC” screen. Only then does the test use **Game → Open Disc Cover**, followed by **Insert Disc** in the same running app.
+
+| Request | Result after inserting the requested disc |
+| ------- | ---------------------------------------- |
+| Disc 1 → 2 | South Gate / Rest Stop loads; Dagger responds to movement. An initial wrong Disc 3 is rejected and the Disc 2 request returns. |
+| Disc 2 → 3 | Alexandria arrival cutscene loads; Cross advances dialogue. |
+| Disc 3 → 4 | Black Mage Village cutscene loads; Cross advances dialogue. |
+
+The first request is reached from native Disc 1 reset. The later requests are initially prepared by booting the correct source disc in the reference interpreter, loading the normal card, and saving a compatible console state; restoring that state in the native app with identical compiled code precedes the menu swap. Independent 10,500-frame runs of the supplied native app then verify both preparations from reset in lockstep: Disc 2 agrees at 70,868,129 stops (99.79% native, display hash `534f77fd0e626432`), and Disc 3 at 70,867,736 stops (99.76% native, `96179efe711d3ee5`). Their final images show the Disc 3 and Disc 4 requests respectively. The interactive swaps themselves are not lockstep runs.
+
+A separate premature swap, made on the memory-card selection menu before a disc request, hangs with repeating audio. Both native execution and an interpreter-only replay reach the same BIOS fatal loop with EPC `801f65a4`. The faulting data occurs one raw sector later on Disc 2 than on Disc 1, consistent with the game retaining file addresses from the previous disc. This is a recorded limitation, not a hardware-verified diagnosis or a runtime fix; the successful tests wait for the game's request.
+
+Quick states before and after each swap, matching cards, provenance and local pictures stay outside the repository. The Disc 1 → 2 state also passes an app restart and restore, leaving the isolated app at the request for an interactive retest. These checks establish memory-card loading and requested media changes on these routes; story-ending handoffs, normal card writes, whole-game coverage and whole-game audio remain unverified.
+
+The user confirmed the swap, then reported that restoring a state from another disc required manual insertion. The host now locates the state's exact disc inside the app before applying it, retaining format-2 compatibility. On 2026-11-06 the updated app resumes actual Disc 2, 3 and 4 states after ordinary Disc 1 launches using only ⌘L; movement or dialogue responds afterward. Restoring the original Disc 1 checkpoint while Disc 2 is mounted also passes. The four-disc rebuild agrees with the interpreter on all capture routes: 177,178,253 stops on Disc 1 and 14,309,615 / 14,310,340 / 14,309,968 on Discs 2–4. The updated Downloads executable SHA-256 is `8709b486f3b70af8d9891e6aebbe439b2fd1fccae8eba7f5c295ca0b4a123874`. Both old app bundles are backed up externally, the original player's save hashes are unchanged, and the isolated test slot now holds the Disc 2 state for a repeatable normal-launch test.

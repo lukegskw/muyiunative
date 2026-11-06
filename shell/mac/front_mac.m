@@ -4,6 +4,7 @@
 #import <ImageIO/ImageIO.h>
 #import <QuartzCore/CAMetalLayer.h>
 #import <GameController/GameController.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #include <os/lock.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -25,6 +26,14 @@ static NSWindow *g_win;
 static NSMenuItem *g_save_state, *g_load_state;
 static atomic_int g_state_request;
 static atomic_bool g_state_enabled, g_state_available, g_state_busy;
+static atomic_bool g_disc_enabled, g_disc_open;
+static NSMenuItem *g_open_disc, *g_close_disc, *g_insert_disc;
+static NSOpenPanel *g_disc_panel;
+static NSArray<NSString *> *g_disc_paths, *g_disc_titles;
+static atomic_int g_current_disc;
+static os_unfair_lock g_disc_lock = OS_UNFAIR_LOCK_INIT;
+static int g_disc_request;
+static char g_disc_path[PATH_MAX];
 static NSString *g_title;
 static BOOL g_quitting;
 static os_unfair_lock g_input_lock = OS_UNFAIR_LOCK_INIT;   // only host input; neither thread shares a ps1
@@ -47,17 +56,45 @@ static uint16_t key_event(NSEvent *e, int down) {
 }
 static void release_keys(void) { front_keyboard_reset(); atomic_store(&g_buttons, 0); }
 static void state_menu_update(void) {
-    BOOL enabled = atomic_load(&g_state_enabled) && !atomic_load(&g_state_busy);
+    BOOL busy = atomic_load(&g_state_busy), open = atomic_load(&g_disc_open);
+    BOOL enabled = atomic_load(&g_state_enabled) && !busy && !open;
     g_save_state.enabled = enabled; g_load_state.enabled = enabled && atomic_load(&g_state_available);
+    enabled = atomic_load(&g_disc_enabled) && !busy;
+    g_open_disc.enabled = enabled && !open; g_close_disc.enabled = g_insert_disc.enabled = enabled && open;
+    for (NSMenuItem *item in g_insert_disc.submenu.itemArray) item.state = item.tag == atomic_load(&g_current_disc) + 1 ? NSControlStateValueOn : NSControlStateValueOff;
 }
 void front_state_menu(int enabled, int available) {
     atomic_store(&g_state_enabled, enabled != 0); atomic_store(&g_state_available, available != 0);
 }
 int front_state_request(void) { return atomic_exchange(&g_state_request, FRONT_STATE_NONE); }
-void front_state_complete(int action, const char *error) { @autoreleasepool {
+void front_disc_menu(int enabled, int open) { atomic_store(&g_disc_enabled, enabled != 0); atomic_store(&g_disc_open, open != 0); }
+void front_disc_catalog(const front_product *product, int current) {
+    NSMutableArray *paths = [NSMutableArray new], *titles = [NSMutableArray new];
+    for (int i = 0; i < product->ndiscs; i++) { [paths addObject:@(product->discs[i])]; [titles addObject:@(product->disc_titles[i])]; }
+    g_disc_paths = paths; g_disc_titles = titles; atomic_store(&g_current_disc, current);
+}
+int front_disc_request(char path[PATH_MAX]) {
+    os_unfair_lock_lock(&g_disc_lock);
+    int action = g_disc_request; g_disc_request = FRONT_DISC_NONE; memcpy(path, g_disc_path, sizeof g_disc_path);
+    os_unfair_lock_unlock(&g_disc_lock); return action;
+}
+static void disc_request(int action, const char *path) {
+    os_unfair_lock_lock(&g_disc_lock);
+    snprintf(g_disc_path, sizeof g_disc_path, "%s", path ? path : ""); g_disc_request = action;
+    os_unfair_lock_unlock(&g_disc_lock);
+}
+void front_disc_complete(int open, int current, const char *error) { @autoreleasepool {
     NSString *message = error ? @(error) : nil;
     dispatch_async(dispatch_get_main_queue(), ^{
-        atomic_store(&g_state_busy, false);
+        atomic_store(&g_disc_open, open != 0); atomic_store(&g_current_disc, current); atomic_store(&g_state_busy, false); state_menu_update();
+        if (message) front_error(message.UTF8String);
+        if (g_quitting) atomic_store(&g_stop, true);
+    });
+} }
+void front_state_complete(int action, int current, const char *error) { @autoreleasepool {
+    NSString *message = error ? @(error) : nil;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        atomic_store(&g_state_busy, false); atomic_store(&g_current_disc, current);
         if (!message && action == FRONT_STATE_SAVE) atomic_store(&g_state_available, true);
         state_menu_update();
         if (message) front_error(message.UTF8String);
@@ -132,10 +169,31 @@ void front_buttons(front_pad pads[2]) {
     if (!atomic_load(&g_state_enabled) || atomic_exchange(&g_state_busy, true)) return;
     release_keys(); atomic_store(&g_state_request, (int)sender.tag); state_menu_update();
 }
+- (void)disc:(NSMenuItem *)sender {
+    if (!atomic_load(&g_disc_enabled) || atomic_exchange(&g_state_busy, true)) return;
+    release_keys(); state_menu_update();
+    if (sender.representedObject) { disc_request(FRONT_DISC_INSERT, [sender.representedObject fileSystemRepresentation]); return; }
+    if (sender.tag != FRONT_DISC_INSERT) { disc_request((int)sender.tag, NULL); return; }
+    NSOpenPanel *panel = NSOpenPanel.openPanel;
+    g_disc_panel = panel;
+    panel.allowedContentTypes = @[[UTType typeWithFilenameExtension:@"cue"], [UTType typeWithFilenameExtension:@"bin"]];
+    panel.canChooseDirectories = NO; panel.allowsMultipleSelection = NO;
+    panel.message = @"Choose the next disc's CUE or raw BIN. Inserting it closes the disc cover.";
+    [panel beginSheetModalForWindow:g_win completionHandler:^(NSModalResponse result) {
+        g_disc_panel = nil;
+        const char *path = panel.URL.path.fileSystemRepresentation;
+        if (result == NSModalResponseOK && path && strlen(path) < PATH_MAX) disc_request(FRONT_DISC_INSERT, path);
+        else {
+            atomic_store(&g_state_busy, false); state_menu_update();
+            if (result == NSModalResponseOK) front_error("The disc path is too long. Move it to a shorter path and try again.");
+            if (g_quitting) atomic_store(&g_stop, true);
+        }
+    }];
+}
 // AppKit's applicationShouldTerminate: contract: NSTerminateLater keeps its event loop alive while the machine thread finishes a save, then replies on the main queue.
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)app {
     (void)app; if (!atomic_load(&g_running)) return NSTerminateNow;
-    g_quitting = YES; if (!atomic_load(&g_state_busy)) atomic_store(&g_stop, true); return NSTerminateLater;
+    g_quitting = YES; [g_disc_panel cancel:nil]; if (!atomic_load(&g_state_busy)) atomic_store(&g_stop, true); return NSTerminateLater;
 }
 @end
 
@@ -207,6 +265,20 @@ void front_run(const char *title, void (*run)(void *arg), void *arg) {
     g_save_state = [game addItemWithTitle:@"Save State" action:@selector(state:) keyEquivalent:@"s"];
     g_load_state = [game addItemWithTitle:@"Load State" action:@selector(state:) keyEquivalent:@"l"];
     g_save_state.tag = FRONT_STATE_SAVE; g_load_state.tag = FRONT_STATE_LOAD; g_save_state.target = g_load_state.target = g_app;
+    [game addItem:NSMenuItem.separatorItem];
+    g_open_disc = [game addItemWithTitle:@"Open Disc Cover" action:@selector(disc:) keyEquivalent:@""];
+    g_insert_disc = [game addItemWithTitle:@"Insert Disc…" action:@selector(disc:) keyEquivalent:@""];
+    g_close_disc = [game addItemWithTitle:@"Close Disc Cover" action:@selector(disc:) keyEquivalent:@""];
+    g_open_disc.tag = FRONT_DISC_OPEN; g_insert_disc.tag = FRONT_DISC_INSERT; g_close_disc.tag = FRONT_DISC_CLOSE;
+    g_open_disc.target = g_insert_disc.target = g_close_disc.target = g_app;
+    if (g_disc_paths.count > 1) {
+        g_insert_disc.title = @"Insert Disc"; NSMenu *choices = [[NSMenu alloc] initWithTitle:@"Insert Disc"]; choices.autoenablesItems = NO;
+        for (NSUInteger i = 0; i < g_disc_paths.count; i++) {
+            NSMenuItem *choice = [choices addItemWithTitle:g_disc_titles[i] action:@selector(disc:) keyEquivalent:@""];
+            choice.tag = i + 1; choice.target = g_app; choice.representedObject = g_disc_paths[i];
+        }
+        g_insert_disc.submenu = choices;
+    }
     NSMenuItem *game_item = [[NSMenuItem alloc] initWithTitle:@"Game" action:nil keyEquivalent:@""]; game_item.submenu = game; [bar addItem:game_item]; state_menu_update();
     g_graphics = [[NSMenu alloc] initWithTitle:@"Graphics"]; g_graphics.autoenablesItems = NO;
     const int scales[] = {0, 1, 2, 4}; NSArray<NSString *> *titles = @[@"Software", @"Metal (1×)", @"Metal (2×)", @"Metal (4×)"];
