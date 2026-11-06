@@ -10,6 +10,7 @@ import argparse, ctypes, os, plistlib, re, shutil, signal, subprocess, sys, temp
 from pathlib import Path
 from xml.parsers.expat import ExpatError
 from version import metadata
+import sparkle
 
 
 def run(cmd):
@@ -29,10 +30,12 @@ def bundle_id(a): return a.bundle_id or 'org.muyiunative.' + (re.sub(r'[^a-z0-9]
 
 def info_plist(a, minos):
     version, build, commit = metadata()
-    return {'CFBundleName': a.name, 'CFBundleDisplayName': a.name, 'CFBundleIdentifier': bundle_id(a), 'CFBundleVersion': build, 'CFBundleShortVersionString': a.version or version,
+    info = {'CFBundleName': a.name, 'CFBundleDisplayName': a.name, 'CFBundleIdentifier': bundle_id(a), 'CFBundleVersion': build, 'CFBundleShortVersionString': a.version or version,
             'MuyiunativeCommit': commit,
             'CFBundlePackageType': 'APPL', 'CFBundleExecutable': a.name, 'CFBundleInfoDictionaryVersion': '6.0', 'LSMinimumSystemVersion': minos,
             'LSArchitecturePriority': ['arm64'], 'NSHighResolutionCapable': True, 'LSApplicationCategoryType': 'public.app-category.games'}
+    if getattr(a, 'sparkle', None): info.update(sparkle.settings())
+    return info
 
 
 def packed_id(app):   # the bundle ID of an existing app; None when it is not one
@@ -54,6 +57,7 @@ def pack(a):
     if out.suffix != '.app': raise SystemExit(f'the output must end in .app: {out}')
     if not exe.is_file(): raise SystemExit(f'no host at {exe}')
     if not a.name.strip() or '/' in a.name: raise SystemExit(f'not a name for an app: {a.name!r}')
+    if getattr(a, 'sparkle', None) and bundle_id(a) != 'org.muyiunative.muyiunative': raise SystemExit('only the generic launcher can embed the updater')
     res = [Path(r).resolve() for r in a.resource]
     for r in res:
         if not r.exists(): raise SystemExit(f'no resource at {r}')
@@ -71,6 +75,7 @@ def pack(a):
             else: shutil.copyfile(r, c / 'Resources' / r.name)
         (c / 'Info.plist').write_bytes(plistlib.dumps(info_plist(a, minos)))
         (c / 'PkgInfo').write_text('APPL????')
+        if getattr(a, 'sparkle', None): sparkle.embed(Path(a.sparkle), c, a.sign, run)
         run(['codesign', '--force', '--options', 'runtime', '--sign', a.sign, tmp])
         replace_directory(tmp, out)
     finally: shutil.rmtree(tmp, ignore_errors=True)
@@ -86,6 +91,7 @@ def parse(argv):
     ap.add_argument('--bundle-id', help='default: org.muyiunative.<name>')
     ap.add_argument('--version', help='release version (default: the version in tools/version.py)')
     ap.add_argument('--sign', default='-', help='codesign identity (default: - = ad-hoc)')
+    ap.add_argument('--sparkle', type=Path, help='Sparkle.framework to embed in the generic launcher only')
     return ap.parse_args(argv)
 
 

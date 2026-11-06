@@ -18,6 +18,8 @@ Follow Apple's prompts for your account, team and app-specific password, or use 
 
 This is a maintainer operation on the Mac holding the signing identity. No signing keys or notarization credentials are bundled in the launcher or copied to GitHub Actions by this flow.
 
+The updater also requires the Sparkle EdDSA key in the local Keychain account `org.muyiunative.updates`. Its public key is pinned in [the Sparkle configuration](../tools/vendor/sparkle/config.json); the initial key was created on the maintainer's Mac on 2026-11-06. Keep a private offline backup through Sparkle's `generate_keys --account org.muyiunative.updates -x <private-local-file>` tool, and restore it through `-f` when moving release machines. Never attach or commit that private file. The tools are fetched by `make -C shell/mac app` into `shell/mac/build/sparkle/bin/`. Keychain may ask the maintainer to allow `sign_update` access. The release command checks that the local public key matches the source configuration before building. See [Sparkle's key setup and signing documentation](https://sparkle-project.org/documentation/).
+
 ## Build and validate a candidate
 
 Use the supported Xcode/Metal toolchain and Python from [Development](development.md#how-it-is-built). Run the required local suites and ensure CI passes. Commit the reviewed release sources first: a distributable must identify a clean, complete source revision. The script refuses a dirty checkout and existing output/checksum paths.
@@ -28,7 +30,7 @@ Choose a new output path and your local identity, for example:
 scripts/release_mac.py \
   --identity 'Developer ID Application: Your Name (TEAMID)' \
   --notary-profile muyiunative-notary \
-  --output /external/output/muyiunative-0.8.1-mac-arm64.zip
+  --output /external/output/muyiunative-0.9.0-mac-arm64.zip
 ```
 
 The command:
@@ -36,18 +38,20 @@ The command:
 1. Checks the local identity and notarization authentication before building.
 2. Builds the launcher and its source kit in a unique ignored workspace, with version/build/commit metadata from the clean checkout.
 3. Checks the kit allowlist, source-built OpenBIOS, precompiled metallib, arm64 executable and bundled 60-frame OpenBIOS boot. A game app or unexpected resource is refused.
-4. Removes debug symbols from the release executable, then signs the complete launcher with Developer ID, hardened runtime and a secure timestamp.
+4. Removes debug symbols from the release executable, then signs Sparkle's installer, relauncher and framework from the inside out, followed by the launcher, with Developer ID, hardened runtime and a secure timestamp.
 5. Submits only the launcher to Apple's notary service, waits for `Accepted`, and staples/validates the ticket on the app. A rejected submission produces no final download.
 6. Creates the final ZIP after stapling, extracts a new copy, and checks its signature, ticket, Gatekeeper assessment, kit and bundled boot again.
-7. Writes the ZIP and adjacent `.zip.sha256`, then removes the temporary workspace. Existing archives are never replaced.
+7. Signs the ZIP with the Sparkle Keychain key, creates and signs the adjacent `.appcast.xml`, then writes the ZIP, `.zip.sha256` and signed appcast as new files. Existing outputs are never replaced.
 
-The app contains one Mach-O executable, system-framework dependencies, the precompiled Metal library, OpenBIOS and the signed source kit. There is no nested Python runtime to sign. The source kit is sealed by the app signature; game data and gallery images are excluded. Notarization uploads the generic launcher only. The ZIP is recreated after stapling so a downloaded copy carries the ticket rather than depending on another online lookup. [Apple's distribution requirements](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution) explain Developer ID, timestamping, hardened runtime and stapling.
+The app contains one arm64 host executable, the pinned Sparkle framework and its two installer/relauncher executables, the precompiled Metal library, OpenBIOS and the signed source kit. Sparkle's unused sandbox XPC services are omitted. Framework symlinks must resolve inside the framework; unexpected Mach-O files are refused. There is no nested Python runtime to sign. The source kit is sealed by the app signature; game data and gallery images are excluded. Notarization uploads the generic launcher only. The ZIP is recreated after stapling so a downloaded copy carries the ticket rather than depending on another online lookup. [Apple's distribution requirements](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution) explain Developer ID, timestamping, hardened runtime and stapling.
 
 The default tests simulate Apple signing/notary commands with synthetic host bytes. They verify accepted/rejected submissions, final-ticket packaging, extracted-copy checks, checksum correctness, source cleanliness and refusal to replace downloads or distribute game resources. Those tests do not claim a real notarization succeeded; record the real candidate's commit, SHA-256 and validation only after it does.
 
 ## Initial private release and player acceptance
 
-The initial `v0.7.0` preview was published privately after candidate review and explicit approval, targeting the exact source commit in the app and marked as a pre-release. For every release, attach **only the generic launcher ZIP and its checksum**. Never attach a game app, generated game code, disc, capture, memory card or save state. Release publication and repository visibility remain separate approval steps.
+The initial `v0.7.0` preview was published privately after candidate review and explicit approval, targeting the exact source commit in the app and marked as a pre-release. New releases attach **the generic launcher ZIP, its checksum and its signed `.appcast.xml`**, using the generated filenames unchanged and a `v<version>` tag. Never attach a game app, generated game code, disc, capture, memory card or save state. Release publication and repository visibility remain separate approval steps.
+
+After publication, [the update-feed workflow](../.github/workflows/updates.yml) selects the published signed appcast with the highest build number, including previews, and copies it verbatim to `appcast.xml` on the dedicated `updates` branch. The launcher's feed URL targets that file; no server or signing secret is required in Actions. The job alone has contents-write permission, and does not write to protected `main`. It runs again when releases are edited/deleted and supports manual dispatch. Releases predating this updater have no appcast and are skipped. With none present, the workflow publishes [the signed empty feed](../updates/empty-appcast.xml). Verify the update-feed job after publishing; until this workflow is merged and a signed release is published, the public updater feed is not active.
 
 Ask the user to complete this check on the Mac with their own disc:
 
@@ -119,3 +123,21 @@ On 2026-11-04 the user confirmed the GT2/WipEout fixes were working and authoriz
 The launcher kit includes the new GT2/WipEout profiles, audio recovery after rendering stalls, Metal triangle optimizations and the title-atlas correction. The gallery's approved game screenshots remain outside the kit and download; only the generic launcher ZIP and checksum are distributed. Local validation passes all 78 tool tests, pinned ruff/pyright, 1,800 runtime checks, 4,670 Mac checks and 8,270 Metal checks, including CLT ASan/UBSan runs. The two gallery captures also pass packaged-app per-frame native VRAM/cache comparisons from reset.
 
 The player's confirmation covers the reported scenes and settings in the rebuilt apps. It does not replace the earlier downloaded-launcher acceptance record or establish whole-game, fresh-Mac or original-reporter M1 Max validation. Existing game apps must be rebuilt with the updated launcher to receive these runtime/shader changes.
+
+## Preview 0.9.0 artifact
+
+On 2026-11-06 the user authorized committing/pushing both feature branches and publishing a new preview with multi-disc apps and launcher updates. The signed launcher prepared for [v0.9.0](https://github.com/lukegskw/muyiunative/releases/tag/v0.9.0) identifies the clean implementation commit below. This subsequent artifact-record commit does not retarget the binary.
+
+| Field | Value |
+| --- | --- |
+| Source commit | `2c6ea81d248eacb070ee337ffbd86f5d585f739b` |
+| App identity | 0.9.0 (build 80), commit `2c6ea81d248e` |
+| Apple submission | `648d5fed-e3c8-4a9b-9d40-321350f389ef`, Accepted |
+| Launcher archive | `muyiunative-0.9.0-mac-arm64.zip` |
+| ZIP SHA-256 | `931cb89c79e851b45b6868a6942baf36108fe2ea9563ec01665a0a855700b92d` |
+| Extracted-copy checks | Signature, stapled ticket, Gatekeeper, kit integrity, arm64 resources and bundled boot |
+| OpenBIOS 60-frame hash | `49d1a17d49708cb1` |
+
+Publication uses the generic launcher ZIP, its checksum and its signed appcast. Normal game apps and game data remain excluded. The updater feed publishes signed metadata from the release, including previews. Existing published 0.8.1 launchers need a manual replacement for this first upgrade; subsequent versions can update from inside the launcher. Game apps continue to require a manual rebuild with the original disc set. Earlier quick states from published versions use an incompatible format; ordinary memory-card saves retain their game identity.
+
+The implementation passes the 92-tool-test suite with the two release-version expectations updated for 0.9.0, pinned ruff and pyright, and isolated UI checks of automatic notification, changed-package rejection and full install/relaunch. The preceding multi-disc checks cover synthetic portable apps and the requested FFIX swaps reached through memory-card loading; they do not establish story-ending handoffs or whole-game compatibility.

@@ -7,6 +7,7 @@
 #include "ps1.h"
 #include "report.h"
 #include "build.h"
+#include "updates.h"
 
 static BOOL copy_string(char *out, size_t cap, id value) {
     if (![value isKindOfClass:NSString.class]) return NO;
@@ -63,6 +64,7 @@ void front_launcher(void) {
     Launcher *l = [Launcher new]; l.prefs = [[NSUserDefaults alloc] initWithSuiteName:@"org.muyiunative"]; app.delegate = l;
     NSMenu *bar = [NSMenu new], *menu = [NSMenu new]; NSMenuItem *item = [NSMenuItem new];
     front_reports_menu((__bridge void *)menu);
+    front_updates_menu((__bridge void *)menu);
     [menu addItemWithTitle:@"Build Game App…" action:@selector(build:) keyEquivalent:@"n"].target = l;
     [menu addItemWithTitle:@"Open Game App…" action:@selector(open:) keyEquivalent:@"o"].target = l;
     [menu addItemWithTitle:@"Quit muyiunative" action:@selector(terminate:) keyEquivalent:@"q"]; item.submenu = menu; [bar addItem:item]; app.mainMenu = bar;
@@ -79,5 +81,6 @@ void front_launcher(void) {
     [l.window.contentView addSubview:l.recent];
     NSButton *open = [NSButton buttonWithTitle:@"Open Game App…" target:l action:@selector(open:)]; open.frame = NSMakeRect(24, 28, 190, 32); [l.window.contentView addSubview:open];
     NSButton *play = [NSButton buttonWithTitle:@"Play Recent" target:l action:@selector(play:)]; play.frame = NSMakeRect(320, 28, 174, 32); play.enabled = l.recent.enabled; [l.window.contentView addSubview:play];
+    front_updates_window((__bridge void *)l.window);
     [l.window center]; [l.window makeKeyAndOrderFront:nil]; [app activate]; [app run];
 }

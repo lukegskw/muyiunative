@@ -1,0 +1,38 @@
+# Publish signed release metadata only. The appcast bytes are copied verbatim; no private signing key or game data enters Actions.
+name: update-feed
+on:
+  release:
+    types: [published, edited, deleted]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: update-feed
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write # only this job publishes the dedicated updates branch; main's protection remains in force
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+      - name: Select the newest published signed appcast
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/update_feed.py "$RUNNER_TEMP/appcast.xml"
+      - name: Publish metadata on the updates branch
+        run: |
+          if git fetch origin updates; then
+            git checkout -B updates origin/updates
+          else
+            git switch --orphan updates
+          fi
+          cp "$RUNNER_TEMP/appcast.xml" appcast.xml
+          git add appcast.xml
+          if ! git diff --cached --quiet; then
+            git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Publish signed launcher update feed'
+            git push origin HEAD:updates
+          fi
