@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><!-- sparkle-sign-warning:
+IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
+--><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+  <channel>
+    <title>muyiunative updates</title>
+    <link>https://github.com/lukegskw/muyiunative/releases</link>
+    <item>
+      <title>muyiunative 0.9.0</title>
+      <pubDate>Fri, 06 Nov 2026 10:35:55 GMT</pubDate>
+      <link>https://github.com/lukegskw/muyiunative/releases/tag/v0.9.0</link>
+      <sparkle:version>80</sparkle:version>
+      <sparkle:shortVersionString>0.9.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <description>After updating the launcher, rebuild your game apps with Build Game App to update them. Existing game apps keep their current version until rebuilt.</description>
+      <enclosure url="https://github.com/lukegskw/muyiunative/releases/download/v0.9.0/muyiunative-0.9.0-mac-arm64.zip" length="2632241" type="application/octet-stream" sparkle:edSignature="jwSplbDjOjjsQFuFUErn+u3zbkJbfEF5bPxVuOE5L31h8ZUM7hs5w4pBbliC+5dVcjmrOokAE2ulstIz45/9CQ=="></enclosure>
+    </item>
+  </channel>
+</rss><!-- sparkle-signatures:
+edSignature: bPYjhkxNIEku0xwwbgX2JBsqZabXhjEgf7U5jCRYs9HcRe8+3OvfqG1m+WRW6R16EekZxbKEsj51l0/3XKnFCQ==
+length: 1371
+-->
