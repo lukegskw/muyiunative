@@ -14,8 +14,8 @@ PYTHON ?= python3
 PREBUILT_METALLIB ?=
 LIB = $(GEN)/ps1gpu.metallib
 RTSRC = $(sort $(wildcard $(RT)/*.c))
-SRC = main.c front_mac.m audio_mac.m keyboard.m product.m catalog.m build.m reports.m log.c report.c saves.c state.c media.c $(GFX)/present.m $(GFX)/renderer.m $(RTSRC) $(GEN)/openbios.c
-HDR = front.h audio.h build.h controllers.h input.h keys.h keyboard.h product.h log.h report.h saves.h state.h media.h $(GEN)/version.h $(GFX)/present.h $(GFX)/renderer.h $(wildcard $(RT)/*.h)
+SRC = main.c front_mac.m audio_mac.m keyboard.m product.m catalog.m build.m reports.m updates.m log.c report.c saves.c state.c media.c $(GFX)/present.m $(GFX)/renderer.m $(RTSRC) $(GEN)/openbios.c
+HDR = front.h audio.h build.h controllers.h input.h keys.h keyboard.h product.h log.h report.h saves.h state.h media.h updates.h $(GEN)/version.h $(GFX)/present.h $(GFX)/renderer.h $(wildcard $(RT)/*.h)
 CODEGEN = $(TOOLS)/codegen.py $(TOOLS)/analyze.py $(TOOLS)/mips.py $(TOOLS)/exe.py $(TOOLS)/overlays.py
 CFLAGS = -arch arm64 -mmacosx-version-min=$(MINOS) -O2 -g -Wall -Wextra -fobjc-arc -I$(RT) -I$(GFX) -I$(GEN)
 FRAMEWORKS = -framework AppKit -framework QuartzCore -framework Metal -framework CoreGraphics -framework ImageIO -framework AudioToolbox -framework UniformTypeIdentifiers -framework GameController
@@ -72,9 +72,12 @@ $(B)/game/muyiunative: $(SRC) $(HDR) $(GAME_O) Makefile | $(LIB)
 	@test -n "$(GAME_C)" || { echo "make game needs GAME_C=<the game's generated C, in build/gen>" >&2; exit 1; }
 	clang $(CFLAGS) -DNATIVE_GAME -o $@ $(SRC) $(GAME_O) $(FRAMEWORKS)
 
-app: $(B)/muyiunative $(wildcard $(BIOS)/*)
+$(B)/sparkle/.archive-sha256: $(TOOLS)/sparkle.py $(TOOLS)/vendor/sparkle/config.json
+	"$(PYTHON)" $(TOOLS)/sparkle.py $(B)/sparkle
+
+app: $(B)/muyiunative $(B)/sparkle/.archive-sha256 $(wildcard $(BIOS)/*)
 	"$(PYTHON)" $(TOOLS)/build_kit.py $(B)/BuildKit --metallib $(LIB)
-	"$(PYTHON)" $(TOOLS)/pack_app.py $(B)/muyiunative.app --exe $(B)/muyiunative --resource $(BIOS) --resource $(LIB) --resource $(B)/BuildKit
+	"$(PYTHON)" $(TOOLS)/pack_app.py $(B)/muyiunative.app --exe $(B)/muyiunative --resource $(BIOS) --resource $(LIB) --resource $(B)/BuildKit --sparkle $(B)/sparkle/Sparkle.framework
 
 clean:
 	rm -rf $(B)

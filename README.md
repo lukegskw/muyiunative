@@ -18,7 +18,9 @@ Choose **Build Game App…** to use your own disc. Keep generated game apps on y
 
 ## Updating
 
-Updates are manual. Quit the launcher and running games, download the new ZIP and replace `muyiunative.app` in Applications. Then use the new launcher's **Build Game App…** with your original CUE/BIN to rebuild each game, choosing its existing app as the output. Each game app contains its own runtime and shaders, so replacing only the launcher does not update previously built games.
+The current source launcher checks for new GitHub releases automatically and shows an **Update Available…** button when it finds one. You can also choose **muyiunative → Check for Updates…**. Choose **Install Update**, then **Install and Relaunch** to replace the launcher. **Automatically Check for Updates** controls background checks; installation always requires your choice. Update packages and the release feed are signed. The published 0.8.1 launcher predates this feature: install the first version that includes it by downloading its ZIP and replacing `muyiunative.app` in Applications.
+
+After updating the launcher, use **Build Game App…** with your original disc set to rebuild each game, choosing its existing app as the output. Each game app contains its own runtime and shaders. **Game apps are rebuilt manually by you**; the launcher updater changes the launcher only.
 
 Normal memory-card saves stay in Application Support and are reused for the same game/revision. Quick states require a compatible runtime format; use normal in-game saves for progress you need to carry between versions. **About muyiunative…** identifies the version, build and commit in each app.
 

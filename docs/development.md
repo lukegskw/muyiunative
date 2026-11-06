@@ -296,7 +296,17 @@ python3 -m venv /path/to/lint-venv && /path/to/lint-venv/bin/pip install -r .git
 /path/to/lint-venv/bin/python3 -m ruff check . && /path/to/lint-venv/bin/python3 -m pyright
 ```
 
-Actions are pinned to commit SHAs, with the tag in a comment: a tag can be moved, a SHA cannot. Each job reads the repository only (`permissions: contents: read`), has a timeout, and is cancelled by a newer run of the same branch.
+Actions are pinned to commit SHAs, with the tag in a comment: a tag can be moved, a SHA cannot. Validation jobs read the repository only (`permissions: contents: read`), have timeouts, and are cancelled by a newer run of the same branch. The release metadata publisher described below has separate, narrowly used write permission.
+
+## Launcher updates
+
+The launcher loads [Sparkle](https://sparkle-project.org/documentation/) 2.10.1 from its sealed `Contents/Frameworks`, starts scheduled checks, and exposes **Check for Updates…** and **Automatically Check for Updates**. Its updater delegate adds an **Update Available…** button beside Build Game App after finding a compatible newer release; clicking it opens Sparkle's regular installer. Installation always follows the user's choice. `updates.m` uses Sparkle's public Objective-C entry point dynamically, so capture/developer hosts and generated game apps neither link nor carry the framework. The source app build downloads the checksum-pinned official archive; player game builds continue using CLT alone and perform no updater download. The pinned public key and complete third-party licenses are under `tools/vendor/sparkle/`; the private EdDSA key remains in Keychain.
+
+The release command signs the final stapled ZIP, generates a one-item appcast and signs that feed. The launcher requires a signed feed and verifies each archive before extraction, with system profiling disabled. Publication selects the highest published build from GitHub releases, including previews, validates that its enclosure matches the release's actual arm64 launcher asset, and copies the signed XML bytes unchanged to the `updates` branch. The initial empty feed is signed too. [Releasing](releasing.md) documents key custody and the first release; no new release or public feed deployment is implied by a local build.
+
+Synthetic tests cover checksum-before-extraction, framework symlinks and inside-out signing, exclusion from game apps, preview/draft/older-release selection, mismatched asset URLs/sizes, damaged metadata, release output preservation and the new release signing sequence. All 92 tool tests, ruff and pyright pass. Local UI tests use a loopback feed, a separate temporary EdDSA key and Developer ID-signed launcher copies with isolated bundle IDs. A one-byte archive mutation is rejected before extraction and preserves the installed version. In `~/Applications`, the valid update installs from fixture 0.8.1/build 78 to 0.8.2/build 79, relaunches automatically, reports the new version in About and reports no further update. These fixture versions are not published releases. A preceding Documents-folder test instead blocked inside the kernel's `renamex_np`; it was cancelled, with diagnostics retained externally. The release instructions continue to install the launcher in Applications.
+
+The final notification UI is also checked after the Mac's window capture becomes accessible again: opening a fresh isolated launcher displays **Update Available…** without a menu check, the update dialog shows the manual game-rebuild notice, and **Remind Me Later** dismisses it cleanly. The loopback server is stopped and temporary fixture apps are archived outside Applications after testing. No public release is published by these checks.
 
 ## House style
 

@@ -7,6 +7,7 @@ from unittest.mock import patch
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 from scripts import release_mac as release
+import sparkle
 
 
 class Release(unittest.TestCase):
@@ -22,14 +23,20 @@ class Release(unittest.TestCase):
                                                      'Files': {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}}))
         shutil.copytree(kit / 'bios/openbios', resources / 'openbios'); shutil.copyfile(kit / 'gfx/metal/ps1gpu.metallib', resources / 'ps1gpu.metallib')
         (contents / 'Info.plist').write_bytes(plistlib.dumps({'CFBundleIdentifier': 'org.muyiunative.muyiunative', 'CFBundleExecutable': 'muyiunative',
-            'CFBundleShortVersionString': self.expected[0], 'CFBundleVersion': self.expected[1], 'MuyiunativeCommit': self.expected[2]}))
+            'CFBundleShortVersionString': self.expected[0], 'CFBundleVersion': self.expected[1], 'MuyiunativeCommit': self.expected[2], 'LSMinimumSystemVersion': '14.0', **sparkle.settings()}))
         (contents / 'MacOS').mkdir(); (contents / 'MacOS/muyiunative').write_bytes(b'\xcf\xfa\xed\xfe' + b'synthetic host')
+        framework = contents / 'Frameworks/Sparkle.framework'
+        for name in sparkle.MACHO:
+            path = framework / name; path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(b'\xcf\xfa\xed\xfe' + b'synthetic updater')
         (self.root / 'shell/mac').mkdir(parents=True)
+        mock = patch.object(sparkle, 'fetch', lambda out: self.root / 'sparkle'); mock.start(); self.addCleanup(mock.stop)
         for name, value in [('ROOT', self.root), ('metadata', lambda: self.expected), ('source_files', lambda: [self.root / n for n in files if n != 'gfx/metal/ps1gpu.metallib']), ('run', self.run_command)]:
             mock = patch.object(release, name, value); mock.start(); self.addCleanup(mock.stop)
 
     def run_command(self, *command):
         c = tuple(map(str, command)); self.calls.append(c)
+        if c[0].endswith('/generate_keys'): return sparkle.CONFIG['public_key'] + '\n'
+        if c[0].endswith('/sign_update'): return 'A' * 86 + '==' if '-p' in c else ''
         if c[0] == 'git': return ' M changed.py' if self.dirty else ''
         if c[0] == 'security': return '  1) ' + 'A' * 40 + ' "Developer ID Application: Example (TEAM)"\n'
         if c[0] == 'make':
@@ -54,6 +61,8 @@ class Release(unittest.TestCase):
         out = self.root / 'downloads/preview.zip'; release.release(out, 'A' * 40, 'local-profile')
         with zipfile.ZipFile(out) as z: self.assertEqual(z.read('muyiunative.app/Contents/ticket'), b'synthetic notarization ticket')
         self.assertEqual(out.with_suffix('.zip.sha256').read_text(), f'{hashlib.sha256(out.read_bytes()).hexdigest()}  preview.zip\n')
+        self.assertTrue(out.with_suffix('.appcast.xml').is_file())
+        self.assertTrue(any(c[0].endswith('/sign_update') and '--verify' in c for c in self.calls))
         signing = next(c for c in self.calls if c[:2] == ('codesign', '--force'))
         self.assertIn('--timestamp', signing); self.assertIn('runtime', signing)
         boots = [c for c in self.calls if c[0].endswith('/MacOS/muyiunative')]
@@ -85,6 +94,12 @@ class Release(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, 'resources differ'): release.verify_app(self.seed, self.expected)
         shader.write_bytes(original); (self.seed / 'Contents/extra').write_bytes(b'\xcf\xfa\xed\xfeunexpected executable')
         with self.assertRaisesRegex(SystemExit, 'exactly one'): release.verify_app(self.seed, self.expected)
+
+    def test_framework_links_must_stay_inside_the_framework(self):
+        framework = self.seed / 'Contents/Frameworks/Sparkle.framework'
+        (framework / 'Sparkle').symlink_to('Versions/B/Sparkle'); release.verify_app(self.seed, self.expected)
+        (framework / 'outside').symlink_to(self.root)
+        with self.assertRaisesRegex(SystemExit, 'symbolic link'): release.verify_app(self.seed, self.expected)
 
 
 if __name__ == '__main__': unittest.main()
