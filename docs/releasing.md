@@ -30,7 +30,7 @@ Choose a new output path and your local identity, for example:
 scripts/release_mac.py \
   --identity 'Developer ID Application: Your Name (TEAMID)' \
   --notary-profile muyiunative-notary \
-  --output /external/output/muyiunative-0.8.1-mac-arm64.zip
+  --output /external/output/muyiunative-0.9.0-mac-arm64.zip
 ```
 
 The command:

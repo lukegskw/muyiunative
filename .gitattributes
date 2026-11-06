@@ -1,0 +1,2 @@
+# Preserve the upstream Sparkle license byte-for-byte, including its whitespace.
+tools/vendor/sparkle/LICENSE -whitespace
