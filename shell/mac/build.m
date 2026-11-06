@@ -34,7 +34,7 @@ static NSString *tool_output(NSString *exe, NSArray<NSString *> *arguments) {
     NSWindow *w = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 760, 510) styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable backing:NSBackingStoreBuffered defer:NO];
     if (!(self = [super initWithWindow:w])) return nil;
     w.title = @"Build Game App"; w.releasedWhenClosed = NO; w.delegate = self;
-    self.status = [NSTextField labelWithString:@"Choose your disc to build a native game app."]; self.status.frame = NSMakeRect(20, 460, 720, 30); [w.contentView addSubview:self.status];
+    self.status = [NSTextField labelWithString:@"Choose your game discs to build one native app."]; self.status.frame = NSMakeRect(20, 460, 720, 30); [w.contentView addSubview:self.status];
     self.progress = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(20, 434, 720, 18)]; self.progress.style = NSProgressIndicatorStyleBar; self.progress.indeterminate = YES; [w.contentView addSubview:self.progress];
     NSScrollView *scroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(20, 70, 720, 350)]; scroll.hasVerticalScroller = YES; scroll.borderType = NSBezelBorder;
     self.log = [[NSTextView alloc] initWithFrame:scroll.bounds]; self.log.editable = NO; self.log.font = [NSFont monospacedSystemFontOfSize:11 weight:NSFontWeightRegular];
@@ -69,7 +69,8 @@ static NSString *tool_output(NSString *exe, NSArray<NSString *> *arguments) {
         [self appendLine:[self.pending subdataWithRange:NSMakeRange(0, n)]]; [self.pending replaceBytesInRange:NSMakeRange(0, n) withBytes:NULL length:0];
     }
 }
-- (void)run:(NSURL *)disc python:(NSString *)python {
+- (void)run:(NSArray<NSURL *> *)discs python:(NSString *)python {
+    NSURL *disc = discs.firstObject;
     NSURL *kit = [NSBundle.mainBundle.resourceURL URLByAppendingPathComponent:@"BuildKit" isDirectory:YES];
     NSURL *entry = [kit URLByAppendingPathComponent:@"tools/player_build.py"];
     if (![NSFileManager.defaultManager isReadableFileAtPath:entry.path]) { self.preparing = NO; front_error("This launcher has no build kit. Build it again with make -C shell/mac app."); return; }
@@ -79,11 +80,11 @@ static NSString *tool_output(NSString *exe, NSArray<NSString *> *arguments) {
     if (!apps || ![NSFileManager.defaultManager createDirectoryAtURL:apps withIntermediateDirectories:YES attributes:nil error:&error]) { self.preparing = NO; front_error("Cannot create your Applications/muyiunative folder."); return; }
     save.directoryURL = apps; save.nameFieldStringValue = [disc.lastPathComponent.stringByDeletingPathExtension stringByAppendingPathExtension:@"app"];
     save.message = @"Choose where to save the native game app.";
-    [save beginSheetModalForWindow:NSApp.mainWindow completionHandler:^(NSModalResponse result) {
-        if (result == NSModalResponseOK) [self startDisc:disc output:save.URL python:python]; else self.preparing = NO;
+    [save beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse result) {
+        if (result == NSModalResponseOK) [self startDiscs:discs output:save.URL python:python]; else self.preparing = NO;
     }];
 }
-- (void)startDisc:(NSURL *)disc output:(NSURL *)output python:(NSString *)python {
+- (void)startDiscs:(NSArray<NSURL *> *)discs output:(NSURL *)output python:(NSString *)python {
     self.preparing = NO;
     NSURL *entry = [NSBundle.mainBundle.resourceURL URLByAppendingPathComponent:@"BuildKit/tools/player_build.py"];
     NSURL *cache = [[NSFileManager.defaultManager URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask].firstObject URLByAppendingPathComponent:@"muyiunative/Builds" isDirectory:YES];
@@ -93,7 +94,9 @@ static NSString *tool_output(NSString *exe, NSArray<NSString *> *arguments) {
     self.log.string = @""; self.showButton.enabled = self.openButton.enabled = NO; self.cancelButton.enabled = YES;
     self.status.stringValue = @"Preparing the build…"; self.progress.indeterminate = YES; [self.progress startAnimation:nil]; [self showWindow:nil]; [self.window makeKeyAndOrderFront:nil];
     NSTask *task = [NSTask new]; NSPipe *pipe = NSPipe.pipe; task.executableURL = [NSURL fileURLWithPath:python];
-    task.arguments = @[@"-B", entry.path, disc.path, @"--output", self.output.path, @"--work-root", cache.path];
+    NSMutableArray *arguments = [@[@"-B", entry.path, discs.firstObject.path, @"--output", self.output.path, @"--work-root", cache.path] mutableCopy];
+    for (NSURL *disc in [discs subarrayWithRange:NSMakeRange(1, discs.count - 1)]) [arguments addObjectsFromArray:@[@"--disc", disc.path]];
+    task.arguments = arguments;
     NSMutableDictionary *env = [NSProcessInfo.processInfo.environment mutableCopy]; [env removeObjectForKey:@"PYTHONPATH"]; [env removeObjectForKey:@"PYTHONHOME"];
     env[@"PYTHONDONTWRITEBYTECODE"] = @"1"; env[@"PYTHONNOUSERSITE"] = @"1"; task.environment = env;
     task.standardOutput = pipe; task.standardError = pipe; self.task = task;
@@ -114,6 +117,8 @@ static NSString *tool_output(NSString *exe, NSArray<NSString *> *arguments) {
 }
 - (void)choose {
     if (self.task) { [self showWindow:nil]; return; } if (self.preparing) return; self.preparing = YES;
+    // The four-disc UI check returned from Open with no order dialog: NSApp.mainWindow can be nil during that transition. Own a visible, stable sheet parent.
+    [self showWindow:nil]; [self.window makeKeyAndOrderFront:nil];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSString *developer = tool_output(@"/usr/bin/xcode-select", @[@"-p"]);
         NSString *python = developer ? tool_output(@"/usr/bin/xcrun", @[@"--find", @"python3"]) : nil;
@@ -122,17 +127,29 @@ static NSString *tool_output(NSString *exe, NSArray<NSString *> *arguments) {
             if (!ready) {
                 NSAlert *a = [NSAlert new]; a.messageText = @"Install Apple Command Line Tools"; a.informativeText = @"Building a game app needs Apple's free Command Line Tools. Install them, then choose Build Game App again.";
                 [a addButtonWithTitle:@"Install Tools"]; [a addButtonWithTitle:@"Cancel"];
-                [a beginSheetModalForWindow:NSApp.mainWindow completionHandler:^(NSModalResponse result) {
+                [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse result) {
                     self.preparing = NO;
                     if (result == NSAlertFirstButtonReturn) { NSTask *install = [NSTask new]; install.executableURL = [NSURL fileURLWithPath:@"/usr/bin/xcode-select"]; install.arguments = @[@"--install"]; NSError *error; if (![install launchAndReturnError:&error]) front_error(error.localizedDescription.UTF8String); }
                 }];
                 return;
             }
-            NSOpenPanel *panel = NSOpenPanel.openPanel; panel.allowedContentTypes = @[[UTType typeWithFilenameExtension:@"cue"] ?: UTTypeData, [UTType typeWithFilenameExtension:@"bin"] ?: UTTypeData]; panel.canChooseDirectories = NO;
+            NSOpenPanel *panel = NSOpenPanel.openPanel; panel.allowedContentTypes = @[[UTType typeWithFilenameExtension:@"cue"] ?: UTTypeData, [UTType typeWithFilenameExtension:@"bin"] ?: UTTypeData,
+                [UTType typeWithFilenameExtension:@"m3u"] ?: UTTypeData, [UTType typeWithFilenameExtension:@"m3u8"] ?: UTTypeData];
+            panel.canChooseDirectories = NO; panel.allowsMultipleSelection = YES;
             // AX calls timed out while runModal held this dispatched main-queue block. Asynchronous sheets leave that queue available to AppKit and accessibility.
-            panel.message = @"Choose a CUE or BIN dump of your own disc.";
-            [panel beginSheetModalForWindow:NSApp.mainWindow completionHandler:^(NSModalResponse result) {
-                if (result == NSModalResponseOK) [self run:panel.URL python:python]; else self.preparing = NO;
+            panel.message = @"Choose your CUE/BIN discs together, or one M3U playlist in disc order. One game app will include the entire set.";
+            [panel beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse result) {
+                if (result != NSModalResponseOK) { self.preparing = NO; return; }
+                NSArray<NSURL *> *discs = [panel.URLs sortedArrayUsingComparator:^NSComparisonResult(NSURL *a, NSURL *b) { return [a.path localizedStandardCompare:b.path]; }];
+                if (discs.count == 1) { [self run:discs python:python]; return; }
+                NSMutableString *order = [NSMutableString stringWithString:@"One app will contain these discs. The first disc determines the app's memory cards.\n\n"];
+                for (NSUInteger i = 0; i < discs.count; i++) [order appendFormat:@"%lu. %@\n", i + 1, discs[i].lastPathComponent];
+                [order appendString:@"\nFor a different order, choose an M3U playlist instead."];
+                NSAlert *confirm = [NSAlert new]; confirm.messageText = @"Disc order"; confirm.informativeText = order;
+                [confirm addButtonWithTitle:@"Build One App"]; [confirm addButtonWithTitle:@"Cancel"];
+                [confirm beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse response) {
+                    if (response == NSAlertFirstButtonReturn) [self run:discs python:python]; else self.preparing = NO;
+                }];
             }];
         });
     });

@@ -1,7 +1,9 @@
 // Mac front end (front_mac.m): one window, whose view is backed by the CAMetalLayer that gfx/metal presents to, and a thread for the machine. The iOS front end (phase 8)
 // implements the same interface
 #pragma once
+#include <limits.h>
 #include <stdint.h>
+#include "media.h"
 // Opens a window titled title, runs run(arg) on a thread of its own and gives the main thread to AppKit. The app quits when run returns, on ⌘Q, or when the window closes
 void front_run(const char *title, void (*run)(void *arg), void *arg);
 int front_stopping(void);   // machine thread: quit requests wait for the machine to flush its memory cards and return
@@ -19,6 +21,11 @@ void front_audio_reset(void);   // machine thread, after loading a state: discar
 enum { FRONT_STATE_NONE, FRONT_STATE_SAVE, FRONT_STATE_LOAD };
 void front_state_menu(int enabled, int available);   // configure per-game quick states before front_run
 int front_state_request(void);   // machine thread: consume one menu request at a frame boundary
-void front_state_complete(int action, const char *error);   // NULL error: success; update menu and show feedback on the main thread
+void front_state_complete(int action, int current, const char *error);   // NULL error: success; update mounted-disc menu and show feedback on the main thread
+void front_disc_menu(int enabled, int open);   // configure before front_run; open/insert/close requests are serialized with quick-state operations
+struct front_product;
+void front_disc_catalog(const struct front_product *product, int current);   // configure bundled choices before front_run; copied into host presentation state
+int front_disc_request(char path[PATH_MAX]);   // machine thread: consume the next request and copy its path at a frame boundary
+void front_disc_complete(int open, int current, const char *error);   // machine thread: update cover/menu state and report errors on the main thread
 // Writes w x h BGRA8 pixels to a PNG file: 0, or -1 after a [RED] line
 int front_write_png(const char *path, const uint32_t *px, int w, int h);

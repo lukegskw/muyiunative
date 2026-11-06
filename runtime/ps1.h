@@ -51,6 +51,7 @@ typedef struct ps1_gpu {
 enum { CD_AUDIO_FRAMES = 16384 };   // 44.1 kHz frames the drive holds for the SPU: one 18.9 kHz mono XA-ADPCM sector makes 9408
 typedef struct ps1_cdrom {
     uint8_t index, param[16], nparam, resp[16], nresp, rpos, hintmsk, hintsts, stat, mode, busy, irq;
+    uint8_t shell_open, shell_pending;   // physical cover switch, distinct from the sticky ShellOpen status; queued door-open INT5
     uint8_t atv[4], atv_next[4], muted, adp_mute;   // ATV0..3 applied and as written (ADPCTL.5 applies them), Mute, ADPCTL.0 (psx-spx, CDROM Controller I/O Ports)
     int pending; uint8_t pending_cmd;   // a command written while an interrupt was unacknowledged waits for it (psx-spx, BUSYSTS flag)
     uint8_t now_int, now_resp[16], now_n; uint64_t next;   // the response on its way, delivered at `next`
@@ -175,6 +176,7 @@ int gpu_hblank_now(ps1 *m);                     // in hblank now; schedules the 
 int gpu_vblank(const ps1 *m);
 uint64_t gpu_dot_fp(const ps1 *m);              // CPU cycles per dotclock tick, 16.16
 void cd_reset(ps1 *m);
+void cd_set_shell(ps1 *m, int open);   // host frame boundary: preserves the running console and controller settings
 uint8_t cd_read(ps1 *m, uint32_t off);
 void cd_write(ps1 *m, uint32_t off, uint8_t v);
 void cd_event(ps1 *m);

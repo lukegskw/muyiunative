@@ -62,7 +62,7 @@ static void test(ps1 *m, int np) {
 }
 
 static void command(ps1 *m, uint8_t c) {
-    uint8_t s = CD->stat; int np = CD->nparam, mounted = m->disc.ntracks != 0;
+    uint8_t s = CD->stat; int np = CD->nparam, mounted = m->disc.ntracks && !CD->shell_open;
     CD->busy = 1;
     // Command Summary: 00h, 17h-18h and 1Fh-FFh answer INT5 with error 40h whatever their parameters; an unsupported 1Fh (VideoCD) leaves those in the FIFO
     if (!c || c == 0x17 || c == 0x18 || c >= 0x1f) {
@@ -75,9 +75,10 @@ static void command(ps1 *m, uint8_t c) {
     // Reset takes any number of parameters and Play an optional track (Control Commands, CD Audio Commands); Test checks its own
     int count = c == 2 ? 3 : c == 0x0d || c == 0x1d ? 2 : c == 0x0e || c == 0x12 || c == 0x14 ? 1 : 0;
     if (c != 0x19 && c != 0x1c && !(c == 3 && np <= 1) && np != count) { error(m, 0x20); return; }
-    if (!mounted && ((c >= 2 && c <= 9) || (c >= 0x0b && c <= 0x0d) || (c >= 0x10 && c <= 0x16) || c == 0x1b || c == 0x1d)) { error(m, 0x80); return; }
+    if ((!mounted && ((c >= 2 && c <= 9) || (c >= 0x0b && c <= 0x0d) || (c >= 0x10 && c <= 0x16) || c == 0x1b || c == 0x1d)) ||
+        (CD->shell_open && c == 0x1a)) { error(m, 0x80); return; }
     switch (c) {
-    case 0x01: reply(m, 3, &s, 1, FIRST); CD->stat &= (uint8_t)~0x10; break;
+    case 0x01: reply(m, 3, &s, 1, FIRST); if (!CD->shell_open) CD->stat &= (uint8_t)~0x10; break;
     case 0x02: {
         int mm = unbcd(CD->param[0]), ss = unbcd(CD->param[1]), ff = unbcd(CD->param[2]);
         if (mm < 0 || ss < 0 || ss >= 60 || ff < 0 || ff >= 75) { error(m, 0x10); break; }
@@ -124,7 +125,7 @@ static void command(ps1 *m, uint8_t c) {
     }
     case 0x0a:
         stop_read(m); CD->mode = CD->size_mode = 0x20; CD->filter_file = CD->filter_channel = 0; CD->data_n = CD->data_pos = CD->have_sector = CD->have_header = 0;
-        reply(m, 3, &s, 1, FIRST_INIT); s = mounted ? 2 : 0; CD->complete_stat = s;
+        reply(m, 3, &s, 1, FIRST_INIT); s = CD->shell_open ? 0x10 : mounted ? 2 : 0; CD->complete_stat = s;
         reply_later(m, 2, &s, 1, mounted ? period(m) : SECOND); if (mounted) mechanics(m); break;
     case 0x0b: case 0x0c: CD->muted = c == 0x0b; reply(m, 3, &s, 1, FIRST); break;   // CD audio out at volume zero, while its sectors are still processed
     case 0x0d: CD->filter_file = CD->param[0]; CD->filter_channel = CD->param[1]; reply(m, 3, &s, 1, FIRST); break;
@@ -207,7 +208,8 @@ static void command(ps1 *m, uint8_t c) {
 static void queued(ps1 *m) {
     if (CD->hintsts & 7 || CD->next != NEVER) return;
     if (CD->data_pending && CD->filter_drop) CD->data_pending = 0;   // a later delivery attempt checks file and channel (Data/ADPCM Sector Filtering/Delivery)
-    if (CD->later) { CD->later = 0; reply(m, CD->later_int, CD->later_resp, CD->later_n, CD->later_delay); }
+    if (CD->shell_pending) { const uint8_t r[2] = {0x11, 8}; CD->shell_pending = 0; reply(m, 5, r, 2, FIRST); }
+    else if (CD->later) { CD->later = 0; reply(m, CD->later_int, CD->later_resp, CD->later_n, CD->later_delay); }
     else if (CD->pending) { CD->pending = 0; command(m, CD->pending_cmd); }
     else if (CD->report_n) { reply(m, 1, CD->report, CD->report_n, FIRST); CD->report_n = 0; }
     else if (CD->data_pending) { uint8_t s = read_stat(m) | 0x22; reply(m, 1, &s, 1, FIRST); }   // controller mainloop delay leaves time for ACK-before-BFRD
@@ -225,10 +227,32 @@ static void ack(ps1 *m, uint8_t v) {
     irq_check(m); queued(m);
 }
 void cd_reset(ps1 *m) {
-    memset(CD, 0, sizeof *CD); CD->next = CD->sector_next = NEVER; CD->complete_stat = -1;
-    CD->stat = m->disc.ntracks ? 2 : 0; CD->target = 150; CD->zz_six = 6;
+    uint8_t open = CD->shell_open;
+    memset(CD, 0, sizeof *CD); CD->shell_open = open; CD->next = CD->sector_next = NEVER; CD->complete_stat = -1;
+    CD->stat = open ? 0x10 : m->disc.ntracks ? 2 : 0; CD->target = 150; CD->zz_six = 6;
     CD->atv[0] = CD->atv[2] = CD->atv_next[0] = CD->atv_next[2] = 0x80;   // normal stereo; psx-spx gives no power-up values
-    CD->region = licence(m); CD->scex = CD->region != 0;
+    CD->region = open ? 0 : licence(m); CD->scex = CD->region != 0;
+}
+void cd_set_shell(ps1 *m, int open) {
+    open = open != 0; if (open == CD->shell_open) return;
+    CD->shell_open = (uint8_t)open;
+    // Observation: disc_open used cd_reset, losing IRQ masks and never notifying a waiting game. psx-spx, CDROM Status Commands (Status code/Nop): opening sends
+    // unsolicited INT5(error 08h), stops the disc, and latches ShellOpen until Nop after closure. Keep any delivered response until ACK (Mainloop/Responses).
+    if (open) {
+        stop_read(m); CD->stat = 0x10; CD->region = CD->scex = 0; CD->later = 0; CD->complete_stat = -1;
+        CD->data_n = CD->data_pos = CD->have_sector = CD->have_header = CD->setloc = 0;
+        CD->audio_n = CD->audio_read = CD->audio_xa = 0;
+        memset(CD->xa_old, 0, sizeof CD->xa_old); memset(CD->xa_older, 0, sizeof CD->xa_older); memset(CD->zz, 0, sizeof CD->zz);
+        CD->zz_p = 0; CD->zz_six = 6; CD->target = 150; CD->lba = CD->last_lba = 0;
+        // A command's first response remains ordered before the door notification; cancel undelivered sector/completion responses from the removed disc.
+        if (CD->next != NEVER && CD->now_int != 3) CD->next = NEVER;
+        CD->shell_pending = 1; queued(m);
+    } else {
+        CD->stat = (CD->stat & 0x10) | (m->disc.ntracks ? 2 : 0);
+        CD->region = licence(m); CD->scex = CD->region != 0;
+        // As with startup mounting, TOC/licence detection completes here. Physical spin-up timing remains unmeasured; reads retain mechanics()' approximation.
+    }
+    sched_update(m);
 }
 void cd_event(ps1 *m) {
     CD->next = NEVER;

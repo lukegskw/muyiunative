@@ -6,10 +6,39 @@
 # and, at the end of a block, a device event, an interrupt or an exit that is due. A block whose delay slot holds a branch stops before it, for the interpreter. Each
 # function lists the guest code it was made from, which the runtime compares with memory before running it. The C goes to a build folder, never into the repository
 # (plan.md, decision log). Usage: python3 tools/codegen.py <file.exe|disc.cue> --name <set> -o <file.c> [--profile profiles/<serial>/game.toml]
-import argparse, re, sys
+from __future__ import annotations
+import argparse, hashlib, re, sys
+from dataclasses import dataclass
 from pathlib import Path
 
 import analyze, exe, mips, overlays
+
+
+@dataclass
+class FrozenImage:
+    words: dict; digest: str
+
+    def word(self, address): return self.words.get(address)
+
+
+@dataclass
+class FrozenFunction(analyze.Function):
+    image: FrozenImage | None = None
+
+
+def merge(programs):
+    # Discs can load different instructions at the same address. Freeze each function's own words and control flow; one byte-guarded native set retains all versions.
+    # Evidence: the four-disc product test uses the same entry point with four different constants. Merging by PC alone silently compiles only the last disc.
+    functions, notes = {}, []
+    for word, program in programs:
+        notes.extend(program.notes)
+        for f in program.functions.values():
+            reader = f.image.word if getattr(f, 'image', None) else word
+            words = {a: reader(a) for lo, hi in runs(f) for a in range(lo, hi, 4)}
+            flow = [(b.start, b.end, b.exit, b.succs, b.call) for b in f.blocks.values()]
+            digest = hashlib.sha256(repr((flow, sorted(words.items()))).encode('ascii')).hexdigest()
+            functions[f.start, digest] = FrozenFunction(f.start, f.blocks, FrozenImage(words, digest))
+    return analyze.Program(functions, notes)
 
 
 def runs(fn):   # the function's guest code: its blocks' addresses as runs of [start, end)

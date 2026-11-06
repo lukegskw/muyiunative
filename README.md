@@ -69,6 +69,8 @@ For a first test pass, follow the [game testing guide](docs/testing-games.md). T
 
 Open muyiunative and choose **Build Game App…** (⌘N). Choose a `.cue` or `.bin` dump of your own disc, then choose where to save the app. The Save dialog starts in `~/Applications/muyiunative/`. Follow the current build step and live output in the build window; **Cancel Build** stops the build and removes its temporary files. On success, Finder reveals the app, and **Open Game App** starts it.
 
+The current source launcher also accepts a game's discs together, or one ordered `.m3u` playlist, and builds one app containing the whole set. Multiple selected files are sorted by name/path and their order is shown before building. Put Disc 1 first to keep the existing app's memory-card identity. The published 0.8.1 launcher predates this feature.
+
 Player builds need only Apple's free Command Line Tools. If they are missing, the launcher offers **Install Tools**; finish Apple's installation, then choose Build Game App again. The launcher carries its sources, tools, profiles, OpenBIOS and precompiled Metal library. It uses the CLT's Python 3.9 or newer, with the MIT-licensed Tomli backport included; no separate Python, full Xcode or Metal compiler is needed for player builds. Temporary files go in `~/Library/Caches/muyiunative/Builds/` and are removed after success, failure or cancellation. Finder runs keep the build output in the [run log](#version-and-problem-reports).
 
 The [downloaded launcher](#install) carries everything except Apple's Command Line Tools. To build the launcher from source instead, use the commands below. Playing a completed game app needs no developer tools.
@@ -103,6 +105,21 @@ open shell/mac/build/muyiunative.app
 
 Game apps connect two memory cards and save them in `~/Library/Application Support/muyiunative/Saves/<serial>-<boot-sha256>/card1.mcr` and `card2.mcr`. They are raw 128 KB images, created only when missing, saved once per emulated second when dirty and again before quitting. Moving or rebuilding the same game app preserves its saves. Close the game before backing up or replacing its cards; a second copy cannot use the same save folder simultaneously. Invalid cards are reported and kept intact.
 
+### Multi-disc games
+
+Source builds accept up to 16 discs in one app. Select the game's CUE/BIN images together in the launcher, or supply an M3U with one local CUE/BIN path per line, in disc order. Paths in a playlist are relative to that playlist; blank lines and `#` comments are ignored. Choose discs from the same game and region/release. The command-line equivalents are:
+
+```sh
+scripts/muyiunative build /external/path/FinalFantasyIX.m3u --output /path/FinalFantasyIX.app
+scripts/muyiunative build /external/path/disc1.cue --disc /external/path/disc2.cue --disc /external/path/disc3.cue --disc /external/path/disc4.cue
+```
+
+The build analyzes each boot executable, captures each disc's route, compiles their code versions into one binary and checks every route against the interpreter before packaging. All images are copied inside the signed app; the finished app works after moving or removing the original dumps. The first disc determines the shared app/card identity, so rebuilding an existing Disc 1 app with the full set retains its normal saves. Unseen code still uses the interpreter, as with a single-disc build; capturing the start of every disc does not establish whole-game native coverage or compatibility.
+
+When the game asks for the next disc, choose **Game → Open Disc Cover**, let the game recognize the open cover, then choose **Game → Insert Disc → Disc 2**, or the requested bundled disc. Insertion closes the cover and continues the same running console; it never builds or launches another app. **Close Disc Cover** closes it with the current disc. Single-disc/developer apps retain the external CUE/BIN picker.
+
+Each launch starts with Disc 1. When loading a normal memory-card save for a later disc, wait for the game's disc request before swapping; changing discs early in FFIX's card menu can hang. **Load State (⌘L) selects the state's disc automatically from the app**, so restoring later-disc progress needs no manual insertion or special launch option. A bundled app can also start with `--disc-number 2` for developer checks. Four synthetic discs are checked in one portable native app; [FFIX's three requested swaps](profiles/SLUS-01251/README.md#requested-disc-changes) also pass when loading later-disc saves, while its story-ending handoffs remain unverified. Existing game apps must be rebuilt with the full set and updated source launcher; the published preview 0.8.1 does not include this feature.
+
 ### Quick states
 
 In a built game app, choose **Game → Save State** (⌘S) to keep the current point, and **Game → Load State** (⌘L) to resume it, including after closing and reopening the app. There is one quick state per game; saving replaces it. The window title briefly confirms success. Load State becomes available once a state exists.
@@ -110,6 +127,8 @@ In a built game app, choose **Game → Save State** (⌘S) to keep the current p
 The game and audio pause during the state operation, then resume automatically.
 
 The file is `quick.ps1state` beside that game's memory cards in Application Support. Loading keeps the current memory-card contents and graphics choice. A busy card transaction, damaged file, different game/BIOS/disc or incompatible runtime format is reported without loading it. State compatibility across future runtime changes is not guaranteed; ordinary in-game saves remain separate. States stay outside the app and repository.
+
+States require a closed disc cover and the exact disc used to save them; equal track layouts alone do not establish a match. Bundled apps locate that disc by its contents before restoring; a missing or different revision leaves the running game intact. Developer hosts using external images require the correct disc to be mounted manually. The multi-disc update changes the state format, so older quick states must be replaced; automatic disc selection also accepts states already saved with that update. Normal memory-card saves are unaffected.
 
 ### Version and problem reports
 

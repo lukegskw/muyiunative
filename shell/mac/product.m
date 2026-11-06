@@ -1,4 +1,4 @@
-// Phase 5's double-click path: game.plist identifies a bundled, read-only disc and its persistent cards; the generic app opens previously built game apps.
+// Phase 5's double-click path: game.plist identifies a bundled, read-only disc set and its persistent cards; the generic app opens previously built game apps.
 // Foundation locates Application Support (File System Programming Guide, Accessing Files and Directories); no path depends on Finder's working directory.
 #import <Cocoa/Cocoa.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
@@ -14,22 +14,8 @@ static BOOL copy_string(char *out, size_t cap, id value) {
     memcpy(out, s, strlen(s) + 1); return YES;
 }
 int front_product_load(front_product *p) {
-    NSURL *url = [NSBundle.mainBundle URLForResource:@"game" withExtension:@"plist"];
-    if (!url) return 0;
-    NSDictionary *d = [NSDictionary dictionaryWithContentsOfURL:url]; NSString *save = d[@"SaveID"];
-    NSCharacterSet *allowed = [NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-"];
-    NSURL *disc = [NSBundle.mainBundle.resourceURL URLByAppendingPathComponent:@"disc/disc.cue"];
-    if (![d[@"Version"] isEqual:@1] || ![d[@"Disc"] isEqual:@"disc/disc.cue"] || ![save isKindOfClass:NSString.class] || !save.length ||
-        [save rangeOfCharacterFromSet:allowed.invertedSet].location != NSNotFound || !copy_string(p->save_id, sizeof p->save_id, save) ||
-        !copy_string(p->title, sizeof p->title, d[@"Title"]) || !copy_string(p->disc, sizeof p->disc, disc.path) || ![NSFileManager.defaultManager isReadableFileAtPath:disc.path]) {
-        RED("host: invalid or incomplete bundled game metadata"); return -1;
-    }
-    id renderer = d[@"Renderer"], scale = d[@"RenderScale"];
-    if ((renderer && ![renderer isEqual:@"software"] && ![renderer isEqual:@"metal"]) ||
-        (scale && ![scale isEqual:@1] && ![scale isEqual:@2] && ![scale isEqual:@4])) { RED("host: invalid bundled renderer settings"); return -1; }
-    p->render_scale = [renderer isEqual:@"metal"] ? (scale ? [scale intValue] : 1) : 0;
-    if (d[@"Serial"] && !copy_string(p->serial, sizeof p->serial, d[@"Serial"])) { RED("host: invalid bundled game serial"); return -1; }
-    return 1;
+    const char *resources = NSBundle.mainBundle.resourceURL.path.fileSystemRepresentation;
+    return resources ? front_product_read(p, resources) : 0;
 }
 int front_save_directory(char *out, size_t cap, const char *id) {
     NSURL *base = [NSFileManager.defaultManager URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject;

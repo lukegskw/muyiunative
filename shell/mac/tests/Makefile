@@ -4,7 +4,7 @@ B = build
 SAN ?=
 RT = ../../../runtime
 CFLAGS = -O1 -g -Wall -Wextra -I$(RT) $(SAN)
-TESTS = t_keyboard t_controllers t_replay t_audio t_audio_output t_saves t_state t_log t_report
+TESTS = t_keyboard t_controllers t_replay t_audio t_audio_output t_saves t_state t_state_discs t_media t_catalog t_log t_report
 OBJ = $(patsubst $(RT)/%.c,$(B)/rt/%.o,$(sort $(wildcard $(RT)/*.c)))
 .DEFAULT_GOAL := run
 .SECONDARY: $(OBJ)
@@ -24,9 +24,21 @@ $(B)/t_saves: t_saves.c ../saves.c ../saves.h $(OBJ) Makefile
 	@mkdir -p $(@D)
 	clang $(CFLAGS) -o $@ t_saves.c ../saves.c $(OBJ)
 
-$(B)/t_state: t_state.c ../state.c ../state.h $(OBJ) Makefile
+$(B)/t_state: t_state.c ../state.c ../state.h ../product.h $(OBJ) Makefile
 	@mkdir -p $(@D)
 	clang $(CFLAGS) -o $@ t_state.c ../state.c $(OBJ)
+
+$(B)/t_state_discs: t_state_discs.c ../state.c ../state.h ../product.h $(OBJ) Makefile
+	@mkdir -p $(@D)
+	clang $(CFLAGS) -o $@ t_state_discs.c ../state.c $(OBJ)
+
+$(B)/t_media: t_media.c ../media.c ../media.h $(OBJ) Makefile
+	@mkdir -p $(@D)
+	clang $(CFLAGS) -o $@ t_media.c ../media.c $(OBJ)
+
+$(B)/t_catalog: t_catalog.m ../catalog.m ../product.h Makefile
+	@mkdir -p $(@D)
+	clang $(CFLAGS) -fobjc-arc -framework Foundation -o $@ t_catalog.m ../catalog.m
 
 $(B)/t_audio_output: t_audio_output.m ../audio_mac.m ../audio.h ../front.h $(wildcard $(RT)/*.h) Makefile
 	@mkdir -p $(@D)

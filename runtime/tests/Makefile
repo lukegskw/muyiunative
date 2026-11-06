@@ -3,7 +3,7 @@
 B = build
 SAN ?=
 CFLAGS = -O1 -g -Wall -Wextra -I.. $(SAN)
-TESTS = t_mem t_cpu t_cycles t_native t_overlays t_render t_lockstep t_dma t_timers t_gpu t_texture t_gte t_spu t_sio t_mdec t_cdrom t_disc t_cdread t_cdaudio t_homebrew t_boot t_ps1tests
+TESTS = t_mem t_cpu t_cycles t_native t_overlays t_render t_lockstep t_dma t_timers t_gpu t_texture t_gte t_spu t_sio t_mdec t_cdrom t_disc t_cdswap t_cdread t_cdaudio t_homebrew t_boot t_ps1tests
 RT = $(sort $(wildcard ../*.c))
 OBJ = $(patsubst ../%.c,$(B)/rt/%.o,$(RT))
 BIOS = $(abspath ../../bios/openbios/openbios.bin)

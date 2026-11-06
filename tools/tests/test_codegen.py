@@ -8,7 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'tools'))
-import analyze, codegen, mips
+import analyze, codegen, exe, mips
 from asm import program
 from test_exe import make
 
@@ -70,6 +70,37 @@ class Codegen(unittest.TestCase):
         self.assertIn('void demo_f80010028(ps1 *m); extern const uint32_t demo_r80010028[][2], demo_w80010028[];', files[2])
         self.assertIn('    {demo_f80010000, 0x80010000u, demo_r80010000, 1, demo_w80010000},', files[2])
         self.assertNotIn('static void', ''.join(files))
+
+    def test_disc_set_keeps_four_native_versions_at_the_same_pc(self):
+        programs, payloads = [], []
+        for value in (11, 22, 33, 44):
+            payload = program(B, f'addiu a0, zero, {value}\njr ra\nnop')[0]; payloads.append(payload)
+            reader = codegen.memory(exe=exe.parse(make(payload)))
+            programs.append((reader, analyze.analyze(reader, [B])))
+        merged = codegen.merge([*programs, programs[0]])
+        self.assertEqual(len(merged.functions), 4, 'only identical functions are deduplicated')
+        with tempfile.TemporaryDirectory(prefix='muyiunative-native-set-') as directory:
+            root = Path(directory); generated = root / 'game.c'; generated.write_text(codegen.generate(None, merged, 'game'))
+            arrays = ',\n'.join('{' + ','.join(str(b) for b in payload) + '}' for payload in payloads)
+            harness = root / 'main.c'; harness.write_text('''#include "native.h"
+#include <string.h>
+extern const ps1_native_set native_game;
+int main(void) {
+    const unsigned char code[4][12] = {''' + arrays + '''};
+    ps1 *m = ps1_new(); if (!m || ps1_native_add(m, &native_game)) return 1;
+    for (int i = 0; i < 4; i++) {
+        memcpy(m->ram + 0x10000, code[i], 12); m->cpu.pc = 0x80010000; m->cpu.next_pc = m->cpu.pc + 4;
+        m->cpu.r[31] = 0x80011000; m->next_event = m->cycles + 100;
+        unsigned long long before = m->native_steps;
+        if (!native_run(m) || m->cpu.r[4] != (unsigned)(11 * (i + 1)) || m->native_steps - before != 3 || m->interp_steps) return 2;
+    }
+    ps1_free(m); return 0;
+}
+''')
+            result = subprocess.run(['clang', '-O1', '-I', str(ROOT / 'runtime'), str(harness), str(generated),
+                                     *map(str, sorted((ROOT / 'runtime').glob('*.c'))), '-o', str(root / 'check')], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(subprocess.run([root / 'check']).returncode, 0)
 
     def test_names_match_the_runtime(self):
         listed = re.search(r'#define CPU_OPS\(X\)(.*?)\nenum', (ROOT / 'runtime' / 'cpu_ops.h').read_text(), re.S)

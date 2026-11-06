@@ -27,6 +27,7 @@ typedef struct host {
     ps1 *m, *ref; ps1_lockstep ls; int diverged;   // ref: the interpreting machine of --lockstep
     uint32_t *px; int w, h, interactive; unsigned long frame; input *input; size_t ninput, input_pos; uint16_t buttons;
     front_saves saves; int saving; const char *state_game;
+    const front_product *product; int disc_index;
     metal_renderer *renderer; const char *shaders; int choice, capscale, verify_renderer, graphics_failed;
 } host;
 extern const ps1_native_set native_openbios;
@@ -46,8 +47,9 @@ static int quick_state_data(host *h, int action, char error[FRONT_STATE_ERROR]) 
         }
         int result = front_state_save(h->saves.dir_fd, h->state_game, h->m, h->frame, scale, fine, error); free(fine); return result;
     }
-    front_snapshot *s = front_state_read(h->saves.dir_fd, h->state_game, h->m, error); if (!s) return -1;
+    front_snapshot *s = front_state_read_bundled(h->saves.dir_fd, h->state_game, h->m, h->product, h->disc_index, error); if (!s) return -1;
     metal_renderer_free(h->renderer); h->renderer = NULL; front_state_apply(h->m, s); h->frame = (unsigned long)s->frame;
+    h->disc_index = s->disc_index;
     if (h->interactive) h->choice = front_renderer();
     if (h->choice) {
         h->renderer = metal_renderer_new(h->m, h->shaders, h->choice);
@@ -114,11 +116,27 @@ static void run(void *arg) {   // the machine's thread: a frame, shown, then a w
     uint64_t saved = h->m->cycles;
     for (;;) {
       while (!h->m->exit_requested && !front_stopping() && !h->graphics_failed) {
+        char disc_path[PATH_MAX], disc_error[FRONT_DISC_ERROR]; int disc_action = front_disc_request(disc_path);
+        if (disc_action) {
+            int result = front_audio_pause(1);
+            if (result) snprintf(disc_error, sizeof disc_error, "Could not pause audio for this disc operation.");
+            else {
+                result = front_disc_apply(h->m, disc_action, disc_path, disc_error);
+                if (!result && disc_action == FRONT_DISC_INSERT) {
+                    h->disc_index = -1;
+                    if (h->product) for (int i = 0; i < h->product->ndiscs; i++) if (!strcmp(disc_path, h->product->discs[i])) h->disc_index = i;
+                }
+                if (front_audio_pause(0) && !result) { snprintf(disc_error, sizeof disc_error, "The disc operation finished, but audio could not resume."); result = -1; }
+            }
+            if (result) RED("disc: %s", disc_error); else LOG("disc: cover %s", h->m->cd.shell_open ? "opened" : "closed");
+            front_disc_complete(h->m->cd.shell_open, h->disc_index, result ? disc_error : NULL);
+            t0 = mach_absolute_time(); c0 = saved = h->m->cycles;
+        }
         int action = front_state_request();
         if (action) {
             char error[FRONT_STATE_ERROR]; int result = quick_state(h, action, error);
             if (result) RED("state: %s", error); else LOG("state: %s at frame %lu", action == FRONT_STATE_SAVE ? "saved" : "loaded", h->frame);
-            front_state_complete(action, result ? error : NULL);
+            front_state_complete(action, h->disc_index, result ? error : NULL);
             // Restoring rewinds guest cycles. Rebase both pacing and the card-flush deadline; file I/O pauses do not become catch-up frames.
             t0 = mach_absolute_time(); c0 = saved = h->m->cycles;
         }
@@ -150,7 +168,7 @@ static const char *default_bios(char *buf, size_t cap) {   // in the app's Resou
 }
 
 static int usage(void) {
-    fputs("usage: muyiunative [--bios <file>] [--disc <file.cue|file.bin>] [--exe <file.exe>] [--interpret] [--save-dir <directory>] "
+    fputs("usage: muyiunative [--bios <file>] [--disc <file.cue|file.bin> | --disc-number <n>] [--exe <file.exe>] [--interpret] [--save-dir <directory>] "
           "[--renderer software|metal] [--scale 1|2|4] [--verify-renderer] [--shaders <offline.metallib>] "
           "[--headless [--frames <n>] [--input <frame>:<hex-buttons>] [--input-file <file>] [--png <file>] [--lockstep | --capture <out>]]\n", stderr);
     return 2;
@@ -181,10 +199,14 @@ int main(int argc, char **argv) {
     const char *bios = NULL, *png = NULL, *disc = NULL, *exe = NULL, *capture = NULL, *save_dir = NULL;
     const char *shaders = NULL; int renderer = -1, scale = 0, verify_renderer = 0;
     input *inputs = NULL; size_t ninput = 0, input_cap = 0;
-    int headless = 0, interpret = 0, lockstep = 0; long frames = 300;
+    int headless = 0, interpret = 0, lockstep = 0, disc_number = 1, selected_disc = 0; long frames = 300;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--bios") && i + 1 < argc) bios = argv[++i];
         else if (!strcmp(argv[i], "--disc") && i + 1 < argc) disc = argv[++i];
+        else if (!strcmp(argv[i], "--disc-number") && i + 1 < argc) {
+            char *end; long value = strtol(argv[++i], &end, 10);
+            if (*end || value < 1 || value > FRONT_DISC_MAX) return usage(); disc_number = (int)value; selected_disc = 1;
+        }
         else if (!strcmp(argv[i], "--exe") && i + 1 < argc) exe = argv[++i];
         else if (!strcmp(argv[i], "--save-dir") && i + 1 < argc) save_dir = argv[++i];
         else if (!strcmp(argv[i], "--renderer") && i + 1 < argc) { const char *r = argv[++i]; if (!strcmp(r, "metal")) renderer = 1; else if (!strcmp(r, "software")) renderer = 0; else return usage(); }
@@ -206,7 +228,8 @@ int main(int argc, char **argv) {
     front_reports_start(headless);
     front_product product = {0}; int bundled = front_product_load(&product);
     if (bundled < 0) { if (!headless) front_error("This game app is incomplete. Build it again from your disc."); return 1; }
-    if (disc || exe) bundled = 0; else if (bundled) disc = product.disc;
+    if (selected_disc && (!bundled || disc || exe || disc_number > product.ndiscs)) return usage();
+    if (disc || exe) bundled = 0; else if (bundled) disc = product.discs[disc_number - 1];
     if (!headless && !disc && !exe && !bios) { free(inputs); front_launcher(); return 0; }
     front_reports_game(bundled ? product.serial : "");
     if (renderer < 0) renderer = !headless && bundled && product.render_scale;
@@ -222,6 +245,7 @@ int main(int argc, char **argv) {
     int capscale = headless ? (renderer ? scale : 1) : 4;
     host h = {.m = ps1_new(), .ref = lockstep ? ps1_new() : NULL, .ls = {.step = 64}, .px = malloc(sizeof *h.px * MAX_W * MAX_H * capscale * capscale), .interactive = !headless,
               .ninput = ninput, .input = inputs, .saves = {-1, -1}, .state_game = bundled ? product.save_id : NULL,
+              .product = bundled ? &product : NULL, .disc_index = bundled ? disc_number - 1 : -1,
               .shaders = shaders, .choice = renderer ? scale : 0, .capscale = capscale, .verify_renderer = verify_renderer};
     if (!h.m || !h.px || (lockstep && !h.ref)) { RED("host: no memory for the machine"); free(h.input); free(h.px); ps1_free(h.m); ps1_free(h.ref); return 1; }
     if (ps1_load_bios(h.m, bios) || (disc && disc_open(h.m, disc)) || (exe && load_exe(h.m, exe)) ||
@@ -251,6 +275,8 @@ int main(int argc, char **argv) {
     LOG("host: BIOS %s%s%s", bios, interpret ? ", interpreted" : ", OpenBIOS as native code", lockstep ? ", in lockstep with the interpreter" : "");
     if (!headless) {
         front_renderer_set(h.choice); front_state_menu(h.state_game && h.saving, h.saving && front_state_exists(h.saves.dir_fd));
+        front_disc_menu(disc != NULL, h.m->cd.shell_open);
+        if (bundled) front_disc_catalog(&product, h.disc_index);
         front_run(bundled ? product.title : "muyiunative", run, &h); return 0;
     }
     long n = 0;
