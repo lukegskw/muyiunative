@@ -141,3 +141,21 @@ On 2026-11-06 the user authorized committing/pushing both feature branches and p
 Publication uses the generic launcher ZIP, its checksum and its signed appcast. Normal game apps and game data remain excluded. The updater feed publishes signed metadata from the release, including previews. Existing published 0.8.1 launchers need a manual replacement for this first upgrade; subsequent versions can update from inside the launcher. Game apps continue to require a manual rebuild with the original disc set. Earlier quick states from published versions use an incompatible format; ordinary memory-card saves retain their game identity.
 
 The implementation passes the 92-tool-test suite with the two release-version expectations updated for 0.9.0, pinned ruff and pyright, and isolated UI checks of automatic notification, changed-package rejection and full install/relaunch. The preceding multi-disc checks cover synthetic portable apps and the requested FFIX swaps reached through memory-card loading; they do not establish story-ending handoffs or whole-game compatibility.
+
+## Preview 0.9.1 artifact
+
+On 2026-11-06 the user confirmed the Final Fantasy VII movie fixes, requested its README gallery entry and authorized committing, merging and publishing the next preview. The signed launcher prepared for [v0.9.1](https://github.com/lukegskw/muyiunative/releases/tag/v0.9.1) identifies the clean implementation commit below. This subsequent artifact-record commit does not retarget the binary.
+
+| Field | Value |
+| --- | --- |
+| Source commit | `dbb66903d96b76d3f2cb57438723318268b45304` |
+| App identity | 0.9.1 (build 84), commit `dbb66903d96b` |
+| Apple submission | `28a5923e-5390-47fd-9d69-96dd588d0d93`, Accepted |
+| Launcher archive | `muyiunative-0.9.1-mac-arm64.zip` |
+| ZIP SHA-256 | `42df3e55958c2aed92dd7ec901dc5b77dcfbcfd7b3b288d4b3ef9d5b4c6b4071` |
+| Extracted-copy checks | Signature, stapled ticket, Gatekeeper, kit integrity, arm64 resources and bundled boot |
+| OpenBIOS 60-frame hash | `49d1a17d49708cb1` |
+
+The launcher kit includes the shared MDEC reset/processing corrections and the new SCES-00867 opening profile. The requested gameplay PNG is presentation only, with [capture provenance](images/README.md#final-fantasy-vii), and is excluded from the launcher kit and download. The release distributes the generic launcher ZIP, checksum and signed appcast; no game data is uploaded to Apple or GitHub.
+
+Local verification passes runtime and Mac host tests normally and under CLT ASan/UBSan, all 92 tool tests, pinned ruff/pyright, 8,270 Metal checks and the documented FF VII interpreter/Metal/audio routes. The user confirmed the corrected movie and game locally; this does not establish later battles, disc-change handoffs or whole-game compatibility. Decoder processing time remains an explicit approximation informed by public console measurements. Existing game apps require a manual rebuild to receive the changes. Older quick states use an incompatible runtime layout; normal memory-card saves retain their game identity. The signed appcast and extracted archive pass local verification.
