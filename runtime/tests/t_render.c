@@ -10,7 +10,9 @@ static int checks, fails;
 #define CHECK(c, msg) do { checks++; if (!(c)) { fails++; fprintf(stderr, "FAIL: %s\n", msg); } } while (0)
 #define V(x,y) ((uint32_t)(uint16_t)(y) << 16 | (uint16_t)(x))
 #define UV(u,v,clut) ((uint32_t)(clut) << 16 | (uint32_t)(v) << 8 | (u))
-typedef struct recording { ps1 *m; ps1_render_op op[128]; uint16_t before[128]; unsigned n; } recording;
+typedef struct recording { ps1 *m; ps1_render_op op[128]; uint16_t before[128]; unsigned n, syncs; } recording;
+static int sync_record(void *ctx) { recording *r = ctx; r->syncs++; r->m->gpu.vram[0] = 0x1234; return 0; }
+static int failed_sync(void *ctx) { (void)ctx; return -1; }
 static void record(void *ctx, const ps1_render_op *op) {
     recording *r = ctx;
     if (r->n < sizeof r->op / sizeof *r->op) { r->op[r->n] = *op; r->before[r->n] = r->m->gpu.vram[0]; }
@@ -92,6 +94,18 @@ int main(void) {
     CHECK(separate.n == 1 && separate.op[0].type == RENDER_FILL && r.n == n && a->gpu.vram[0] == saved, "another machine owns an independent operation stream and VRAM");
     a->on_render = NULL; GP0(0x020000ff, 0, V(16,1));
     CHECK(r.n == n && !memcmp(&a->gpu, &b->gpu, sizeof a->gpu), "detaching the consumer restores ordinary reference execution");
+    a->on_render = record; a->render_sync = sync_record; a->render_external = 1;
+    uint64_t software_ops = a->gpu_software_ops;
+    a->gpu.vram[0] = 0;
+    gpu_gp0(a, 0x020000ff); gpu_gp0(a, 0); gpu_gp0(a, V(16,1));
+    CHECK(!a->gpu.vram[0] && a->gpu_software_ops == software_ops && a->gpu_external_ops, "external rasterization emits operations without duplicate software writes");
+    gpu_gp0(a, 0xc0000000); gpu_gp0(a, 0); gpu_gp0(a, V(1,1));
+    CHECK(gpu_read(a) == 0x1234 && r.syncs == 1, "VRAM-to-CPU transfer synchronizes its external source before returning data");
+    uint32_t image[256 * 240]; int width, height;
+    ps1_display(a, image, 256, 240, &width, &height);
+    CHECK(r.syncs == 2, "software display materializes an external renderer's native VRAM");
+    a->render_sync = failed_sync;
+    CHECK(gpu_sync(a) < 0 && a->exit_requested && a->exit_code == 4, "failed external synchronization requests an error exit instead of using stale pixels");
     ps1_free(a); ps1_free(b); ps1_free(other);
     printf("render: %d checks, %d failed\n", checks, fails); return fails != 0;
 }

@@ -2,6 +2,11 @@
 name = "Final Fantasy IX"
 serial = "SLUS-01251"
 
+[native]
+# Required program-RAM coverage after executable entry; capture all routes before compiling their union. This is an acceptance policy, not a whole-game claim.
+min_percent = 100
+routes = ["validation", "title", "load_menu"]
+
 [disc]
 licence = "SCEA"
 boot = 'SLUS_012.51'
@@ -10,9 +15,10 @@ tracks = [
   { number = 1, mode = "MODE2/2352", sectors = 314930, sha256 = "d5d14f338179bd9dd15ec9e0997462c28643ef84268f3db86c1b3742dbabc6bc" },
 ]
 
-# Capture/build route from reset with empty memory-card slots. This is the observed scope, not a completed level or full-game compatibility claim.
+# From reset with empty card slots. The decoder update shifted battle timing: unchanged baseline d24ac2f and the current interpreter both execute 7,886,101,666
+# instructions and end on 2dd095d09325b1c6 at frame 24720, still in the first battle. The old 1f8773f9f941218a predates that update; no runtime behavior was bent to restore it.
 [validation]
-date = "2026-11-03"
+date = "2026-11-09"
 screen = "first battle in the cargo ship"
 frames = 24720
 inputs = [
@@ -47,26 +53,30 @@ inputs = [
 ]
 width = 320
 height = 218
-frame_hash_fnv1a64 = "1f8773f9f941218a"
+frame_hash_fnv1a64 = "2dd095d09325b1c6"
 
-native_instructions = 7904116658
-lockstep_stops = 177178253
+native_instructions = 7886101666
+interpreted_instructions = 0
+lockstep_stops = 1243432335
 
 [title]
-date = "2026-11-02"
+date = "2026-11-09"
 screen = "title/main menu"
 frames = 4800
 inputs = []
 width = 320
 height = 224
 frame_hash_fnv1a64 = "cff7e85f12d90d7c"
+native_instructions = 1402433840
+interpreted_instructions = 0
+lockstep_stops = 233335709
 
 [validation.metal_4x]
-date = "2026-11-03"
+date = "2026-11-08"
 scale = 4
 width = 1280
 height = 872
-frame_hash_fnv1a64 = "e96e2c2a5c0ac791"
+frame_hash_fnv1a64 = "6c690ea9966a18ed"
 native_vram_cache_match_every_frame = true
 
 # Continue validation with port 1 released. Compare this static crate region every fourth field after 40 warmup fields; captures stay outside the repository.
@@ -93,3 +103,98 @@ width = 1280
 height = 872
 frame_hash_fnv1a64 = "07328e9697fefcb9"
 exact_replay_fields = 120
+
+# Enter Continue from the title, select slot 1 and stop on the file list. Cards are freshly formatted outside the checkout for every replay.
+[load_menu]
+date = "2026-11-09"
+screen = "load-game memory-card slot selection with fresh cards"
+frames = 7200
+width = 320
+height = 224
+frame_hash_fnv1a64 = "ead9564d8f7e01ea"
+memory_cards = true
+inputs = ["4860:4000", "4866:0", "5400:4000", "5406:0", "6120:4000", "6126:0"]
+
+# The selected file and destination depend on the supplied normal card. Its bytes are never embedded; the report retains seed hashes and the observed frame hash.
+native_instructions = 2073465608
+interpreted_instructions = 0
+lockstep_stops = 326398440
+
+[load_progress]
+date = "2026-11-09"
+screen = "South Gate field after loading the isolated Disc-2 training save"
+frames = 10500
+requires_card_seed = true
+inputs = ["4860:4000", "4866:0", "5400:4000", "5406:0", "6120:4000", "6126:0", "7200:4000", "7206:0"]
+native_instructions = 2988994762
+interpreted_instructions = 0
+lockstep_stops = 410523453
+
+[analysis]
+# Observed in the isolated Disc-2 card-load/save route. All 47 callback entries and their captured block bytes match the shared e30e4074 boot executable;
+# the first-battle/title capture and static call graph did not reach these entries. Addresses only: no game bytes or memory-card contents.
+functions = [
+  0x80024000, 0x80028204, 0x80028720, 0x8002886c, 0x80028994, 0x8002aa04,
+  0x8002b56c, 0x8002dc54, 0x8002de10, 0x8002e31c, 0x8002eef0, 0x8002ef58,
+  0x80032628, 0x80032634, 0x8003563c, 0x8003579c, 0x80038910, 0x80039eb0,
+  0x8003b2bc, 0x8003b338, 0x8003b728, 0x8003b88c, 0x80048ad8, 0x8004cc40,
+  0x8004cd70, 0x8004d54c, 0x8004d58c, 0x8004e404, 0x8004e4c8, 0x8004f288,
+  0x8005234c, 0x8005729c, 0x8005fd70, 0x8005fe4c, 0x8006071c, 0x80062824,
+  0x80063108, 0x80065238, 0x80065e60, 0x80065e70, 0x80065e80, 0x80065ea0,
+  0x80065eb0, 0x80065ec0, 0x8006605c, 0x80066160, 0x80066170,
+]
+
+# Native coverage/offload acceptance evidence. Counts start at the executable entry; ordinary CPU acceptance compares every block.
+[validation.native_coverage]
+date = "2026-11-09"
+cpu_step_cycles = 1
+lockstep_stops = 1243432335
+program_native = 7616665395
+program_interpreted = 0
+kernel_native = 154948327
+bios_rom_native = 9398620
+full_console_comparison_every_frame = true
+gpu_offload_date = "2026-11-09"
+gpu_offload = [
+  { scale = 1, frame_hash_fnv1a64 = "2dd095d09325b1c6", cpu_step_cycles = 64, lockstep_stops = 178575958, software_ops = 0, external_ops = 282040452 },
+  { scale = 2, frame_hash_fnv1a64 = "d1f79b12a627beb6", cpu_step_cycles = 64, lockstep_stops = 178575958, software_ops = 0, external_ops = 282040452 },
+  { scale = 4, frame_hash_fnv1a64 = "6c690ea9966a18ed", cpu_step_cycles = 64, lockstep_stops = 178575958, software_ops = 0, external_ops = 282040452 },
+]
+gpu_validation_note = "GPU/runtime sources are unchanged; the primary trace GPU certificate precedes adding the extra seeded card capture. All primary CPU traces were reverified per block after that addition."
+
+[title.native_coverage]
+date = "2026-11-09"
+cpu_step_cycles = 1
+lockstep_stops = 233335709
+program_native = 1262994409
+program_interpreted = 0
+kernel_native = 32411262
+bios_rom_native = 1938845
+full_console_comparison_every_frame = true
+
+[load_menu.native_coverage]
+date = "2026-11-09"
+cpu_step_cycles = 1
+lockstep_stops = 326398440
+program_native = 1912541709
+program_interpreted = 0
+kernel_native = 49033754
+bios_rom_native = 6800821
+full_console_comparison_every_frame = true
+
+[load_progress.native_coverage]
+date = "2026-11-09"
+cpu_step_cycles = 1
+lockstep_stops = 410523453
+program_native = 2824769118
+program_interpreted = 0
+kernel_native = 50412924
+bios_rom_native = 8723440
+full_console_comparison_every_frame = true
+captured_disc_serial = "SLUS-01295"
+frames = 10500
+frame_hash_fnv1a64 = "ed77e17fb476269e"
+gpu_offload_date = "2026-11-09"
+gpu_offload = [
+  { scale = 1, frame_hash_fnv1a64 = "ed77e17fb476269e", cpu_step_cycles = 64, lockstep_stops = 70932296, software_ops = 0, external_ops = 3538492 },
+]

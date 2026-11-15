@@ -1,5 +1,5 @@
 // The GPU (psx-spx, Graphics Processing Unit): GP0 commands draw into the 1 MB VRAM and move rectangles in and out of it, GP1 commands set up the display, and GPUSTAT
-// reports both. Drawing is done in software as each command completes: textured/untextured polygons (flat or gouraud), lines and polylines, rectangles, fills and copies, with
+// reports both. Drawing uses the software reference, or an attached external rasterizer: textured/untextured polygons (flat or gouraud), lines and polylines, rectangles, fills and copies, with
 // semi-transparency, dithering and the mask bit. The video timing (GPU Timings) drives the scanline events: hblanks for timer 1, the blanks the timers synchronize to,
 // the vertical blank IRQ, the end of a frame. Flat-rectangle occupancy follows measured v2 drawing timings; other drawing costs and FIFO word timing remain open.
 // Public reference: https://psx-spx.consoledev.net/graphicsprocessingunitgpu/ . Not modelled:
@@ -25,6 +25,20 @@ static void render(ps1 *m, ps1_render_op *op) {
     op->texpage = g->texpage; op->texwin = g->texwin; op->mask = g->mask;
     op->ax1 = g->ax1; op->ay1 = g->ay1; op->ax2 = g->ax2; op->ay2 = g->ay2;
     m->on_render(m->render_ctx, op);
+    if (m->render_external) m->gpu_external_ops++;
+}
+
+// The audit found every Metal operation followed by the same CPU pixel loop. External drawing now skips those loops; GPUREAD must first see all prior draws.
+// psx-spx, GPU Memory Transfer Commands / VRAM to CPU blitting: GP0(C0h) returns framebuffer data, including masked uploads and earlier VRAM copies.
+int gpu_sync(ps1 *m) {
+    if (!m->render_external) return 0;
+    if (m->on_render && m->render_sync && !m->render_sync(m->render_ctx)) return 0;
+    RED("gpu: external rasterizer could not synchronize VRAM and caches"); m->exit_requested = 1; m->exit_code = 4; return -1;
+}
+
+static int software(ps1 *m) {
+    if (m->render_external) return 0;
+    m->gpu_software_ops++; return 1;
 }
 
 // 24-bit colour to the 15-bit framebuffer format, dithered by a 4x4 pattern of offsets when asked (psx-spx, 24bit RGB to 15bit RGB Dithering)
@@ -114,6 +128,7 @@ static void triangle(ps1 *m, ps1_vtx a, ps1_vtx b, ps1_vtx c, int gouraud, int s
         op.flags = (tex ? RENDER_TEXTURE : 0) | (gouraud ? RENDER_GOURAUD : 0) | (semi ? RENDER_SEMI : 0) | (raw ? RENDER_RAW : 0) | (dither ? RENDER_DITHER : 0);
         render(m, &op);
     }
+    if (!software(m)) return;
     uint16_t flat = rgb15(0, 0, a.r, a.g, a.b, 0);
     int64_t bx = b.x - a.x, by = b.y - a.y, cx = c.x - a.x, cy = c.y - a.y, dx[5], dy[5];
     const int fa[5] = {a.r, a.g, a.b, a.u, a.v}, fb[5] = {b.r, b.g, b.b, b.u, b.v}, fc[5] = {c.r, c.g, c.b, c.u, c.v};
@@ -152,6 +167,7 @@ static void line(ps1 *m, const ps1_vtx *a, const ps1_vtx *b, int gouraud, int se
         ps1_render_op op = {0}; op.type = RENDER_LINE; op.a = *a; op.b = *b;
         op.flags = (gouraud ? RENDER_GOURAUD : 0) | (semi ? RENDER_SEMI : 0) | (dither ? RENDER_DITHER : 0); render(m, &op);
     }
+    if (!software(m)) return;
     if (!n) { dot(g, a->x, a->y, a->r, a->g, a->b, semi, dither); return; }
     int xmajor = abs(dx) >= abs(dy), d = xmajor ? dy : dx, sx = dx < 0 ? -1 : 1, sy = dy < 0 ? -1 : 1;
     for (int i = 0; i <= n; i++) {
@@ -205,6 +221,7 @@ static void rectangle(ps1 *m, uint32_t c, uint64_t at) {
         uint64_t clocks = 50 + (uint64_t)rows * (semi ? 8u : width < 8 ? 5u : 2u) + (pixels * (semi ? 78u : 53u) + 99) / 100;
         g->draw_until = (g->draw_until > at ? g->draw_until : at) + clocks;
     }
+    if (!software(m)) return;
     // GP0(E1h) bits 12/13 flip rectangles' textures. The hardware VRAM of ps1-tests gpu/texture-flip shows U running u0+1, u0, u0-1... across an X-flipped rectangle
     // and V running v0, v0-1... down a Y-flipped one; polygons ignore both bits
     for (int y = MAX(v.y, g->ay1); y <= MIN(v.y + h - 1, g->ay2); y++)
@@ -240,7 +257,7 @@ static void pixel_in(ps1 *m, uint16_t v) {
     ps1_gpu *g = &m->gpu;
     uint16_t *p = xfer_at(g);
     if (m->on_render) { ps1_render_op op = {0}; op.type = RENDER_UPLOAD; op.p[0] = (uint32_t)(p - g->vram); op.p[1] = v; op.p[2] = g->xi; render(m, &op); }
-    if (!(g->mask & 2 && *p & 0x8000)) *p = v | (uint16_t)((g->mask & 1) << 15);
+    if (software(m) && !(g->mask & 2 && *p & 0x8000)) *p = v | (uint16_t)((g->mask & 1) << 15);
     if (++g->xi == (uint32_t)g->xw * g->xh) g->xfer = 0;
 }
 
@@ -254,6 +271,7 @@ static uint16_t pixel_out(ps1_gpu *g) {   // after the last pixel, the rest of t
 static void copy(ps1 *m, const uint32_t *w) {
     ps1_gpu *g = &m->gpu;
     if (m->on_render) { ps1_render_op op = {0}; op.type = RENDER_COPY; op.p[0] = w[1]; op.p[1] = w[2]; op.p[2] = w[3]; render(m, &op); }
+    if (!software(m)) return;
     int sx = w[1] & 0x3ff, sy = w[1] >> 16 & 0x1ff, dx = w[2] & 0x3ff, dy = w[2] >> 16 & 0x1ff;
     int cw = (int)((((w[3] & 0xffff) - 1) & 0x3ff) + 1), ch = (int)((((w[3] >> 16) - 1) & 0x1ff) + 1);
     uint16_t row[VRAM_W];
@@ -271,6 +289,7 @@ static void copy(ps1 *m, const uint32_t *w) {
 static void fill(ps1 *m, const uint32_t *w) {   // in 16-pixel steps, ignoring the mask setting and the drawing area (psx-spx, Quick Rectangle Fill)
     ps1_gpu *g = &m->gpu;
     if (m->on_render) { ps1_render_op op = {0}; op.type = RENDER_FILL; op.p[0] = w[0] & 0xffffff; op.p[1] = w[1]; op.p[2] = w[2]; render(m, &op); }
+    if (!software(m)) return;
     int x0 = w[1] & 0x3f0, y0 = w[1] >> 16 & 0x1ff, fw = ((w[2] & 0x3ff) + 0xf) & ~0xfu, fh = w[2] >> 16 & 0x1ff;
     uint16_t c = rgb15(0, 0, w[0] & 0xff, w[0] >> 8 & 0xff, w[0] >> 16 & 0xff, 0);
     for (int y = 0; y < fh; y++)
@@ -425,7 +444,7 @@ void gpu_gp1(ps1 *m, uint32_t w) {
 
 uint32_t gpu_read(ps1 *m) {
     ps1_gpu *g = &m->gpu;
-    if (g->xfer == 2) { uint32_t lo = pixel_out(g); g->read = lo | (uint32_t)pixel_out(g) << 16; }
+    if (g->xfer == 2) { if (gpu_sync(m)) return 0; uint32_t lo = pixel_out(g); g->read = lo | (uint32_t)pixel_out(g) << 16; }
     return g->read;
 }
 
@@ -489,7 +508,8 @@ static uint32_t expand5(uint32_t v) { return v << 3 | v >> 2; }
 
 // The display area at its nominal size: 256, 320, 368, 512 or 640 pixels by GP1(07h)'s line count (at most 240 or 288), doubled in 480-line mode. The horizontal range
 // of GP1(06h) only places the picture on a TV, so it does not crop it here
-void ps1_display(const ps1 *m, uint32_t *out, int cap_w, int cap_h, int *w, int *h) {
+void ps1_display(ps1 *m, uint32_t *out, int cap_w, int cap_h, int *w, int *h) {
+    if (gpu_sync(m)) { *w = *h = 0; return; }
     static const int widths[4] = {256, 320, 512, 640};
     const ps1_gpu *g = &m->gpu;
     uint32_t d = g->dmode;

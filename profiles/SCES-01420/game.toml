@@ -2,6 +2,11 @@
 name = "Crash Bandicoot 3 - Warped (Europe, Australia)"
 serial = "SCES-01420"
 
+[native]
+# Required program-RAM coverage after executable entry; capture all routes before compiling their union. This is an acceptance policy, not a whole-game claim.
+min_percent = 100
+routes = ["validation", "title"]
+
 [disc]
 licence = "SCEE"
 boot = 'SCES_014.20'
@@ -12,7 +17,7 @@ tracks = [
 
 # Capture/build route from reset with empty memory-card slots. This is the observed scope, not a completed level or full-game compatibility claim.
 [validation]
-date = "2026-11-03"
+date = "2026-11-08"
 screen = "Time Twister hub after the opening cutscene"
 frames = 14400
 inputs = [
@@ -23,10 +28,11 @@ height = 256
 frame_hash_fnv1a64 = "e324179600831c56"
 
 native_instructions = 5904716904
-lockstep_stops = 128675248
+lockstep_stops = 848087952
+interpreted_instructions = 0
 
 [title]
-date = "2026-11-02"
+date = "2026-11-08"
 screen = "title/main menu"
 frames = 3600
 inputs = []
@@ -35,6 +41,10 @@ height = 256
 frame_hash_fnv1a64 = "60d6110e99f2670b"
 
 # Rechecked after the shared CPU dispatcher issues interrupted GTE commands before IRQ entry; native equality alone had missed this reference bug.
+native_instructions = 1350505658
+interpreted_instructions = 0
+lockstep_stops = 187477046
+
 [validation.metal_4x]
 date = "2026-11-03"
 scale = 4
@@ -51,3 +61,30 @@ buttons = 0
 scales = [2, 4]
 max_transient_black_background_native_pixels = 0
 native_vram_cache_match_every_frame = true
+
+# Native coverage/offload acceptance evidence. Counts start at the executable entry; ordinary CPU acceptance compares every block.
+[validation.native_coverage]
+date = "2026-11-08"
+cpu_step_cycles = 1
+lockstep_stops = 848087952
+program_native = 5612694356
+program_interpreted = 0
+kernel_native = 192201576
+bios_rom_native = 5482233
+full_console_comparison_every_frame = true
+gpu_offload_date = "2026-11-08"
+gpu_offload = [
+  { scale = 1, frame_hash_fnv1a64 = "e324179600831c56", cpu_step_cycles = 1, lockstep_stops = 848087952, software_ops = 0, external_ops = 10731558 },
+  { scale = 2, frame_hash_fnv1a64 = "c61b018befdd810d", cpu_step_cycles = 1, lockstep_stops = 848087952, software_ops = 0, external_ops = 10731558 },
+  { scale = 4, frame_hash_fnv1a64 = "40bcd031370c01b6", cpu_step_cycles = 1, lockstep_stops = 848087952, software_ops = 0, external_ops = 10731558 },
+]
+
+[title.native_coverage]
+date = "2026-11-08"
+cpu_step_cycles = 1
+lockstep_stops = 187477046
+program_native = 1211753308
+program_interpreted = 0
+kernel_native = 43041387
+bios_rom_native = 1372224
+full_console_comparison_every_frame = true

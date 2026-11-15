@@ -73,9 +73,9 @@ int main(void) {
     CHECK(ps1_lockstep_frame(a, b, &ls) && ls.stops == 1 && strstr(ls.report, "after the native block at 80010000 (function 80010000): v0 00000001, native 00000002"),
           "a wrong register is reported at the first stop: %s", ls.report);
     ps1_free(a); ps1_free(b);
-    a = bare(NULL); b = bare(&wrong_store_set); ls = (ps1_lockstep){.full_every = 1};
+    a = bare(NULL); b = bare(&wrong_store_set); ls = (ps1_lockstep){0};
     CHECK(ps1_lockstep_frame(a, b, &ls) && ls.stops == 1 && strstr(ls.report, "RAM at 000100: 00000001, native 00000000"),
-          "a wrong store is reported at the first stop when memory is compared at each: %s", ls.report);
+          "default lockstep catches a wrong store at the first block, before a frame comparison: %s", ls.report);
     ps1_free(a); ps1_free(b);
 
     // OpenBIOS reaches its shell at frame 37 (t_ps1tests.c); 50 frames take it into the shell's loop

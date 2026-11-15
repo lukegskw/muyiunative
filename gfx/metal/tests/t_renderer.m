@@ -22,6 +22,7 @@ static void words(fixture *t, const uint32_t *w, size_t n) {
 static fixture create(int scale) {
     fixture t = {.m = ps1_new(), .scale = scale};
     if (t.m) t.r = metal_renderer_new(t.m, METALLIB_PATH, scale);
+    if (t.r) CHECK(!metal_renderer_reference(t.r, 1), "%dx differential fixture enables an independent software reference", scale);
     CHECK(t.m && t.r, "a separate %dx renderer attaches to its machine", scale); return t;
 }
 static void drop(fixture *t) { metal_renderer_free(t->r); ps1_free(t->m); *t = (fixture){0}; }
@@ -163,6 +164,8 @@ static void asynchronous_frames(int scale) {
         for (unsigned x = 0; x < 256; x++) texture[x] = (uint16_t)(1 + (x * 71 + y * 137) % 65535);
         upload(&a, 768, 300 + y, texture, 256); upload(&b, 768, 300 + y, texture, 256);
     }
+    CHECK(!metal_renderer_reference(a.r, 0), "%dx asynchronous renderer switches to GPU-only rasterization", scale);
+    uint64_t software_ops = a.m->gpu_software_ops;
     int cap_w = 640 * scale, cap_h = 576 * scale, previous_w[2] = {0}, previous_h[2] = {0};
     size_t capacity = (size_t)cap_w * cap_h * sizeof(uint32_t);
     uint32_t *expected = malloc(capacity), *previous = malloc(capacity * 2), *actual = malloc(capacity);
@@ -192,14 +195,50 @@ static void asynchronous_frames(int scale) {
               "%dx asynchronous frame %u returns the complete image and dimensions from two frames earlier", scale, n);
         memcpy(saved, expected, (size_t)sw * sh * sizeof *expected); previous_w[slot] = sw; previous_h[slot] = sh;
     }
-    equal(&a); equal(&b);
+    CHECK(!gpu_sync(a.m) && !memcmp(&a.m->gpu, &b.m->gpu, sizeof a.m->gpu), "%dx GPU-only asynchronous state matches the independent software machine", scale);
+    CHECK(a.m->gpu_software_ops == software_ops && a.m->gpu_external_ops > 0, "%dx asynchronous draws perform no duplicate CPU rasterization", scale);
+    equal(&b);
     if (expected && actual) {
         int w, h, sw, sh;
-        CHECK(!metal_renderer_frame(a.r, actual, cap_w, cap_h, &w, &h, 1) && !metal_renderer_frame(b.r, expected, cap_w, cap_h, &sw, &sh, 1) &&
+        CHECK(!metal_renderer_frame(a.r, actual, cap_w, cap_h, &w, &h, 0) && !metal_renderer_frame(b.r, expected, cap_w, cap_h, &sw, &sh, 1) &&
               w == sw && h == sh && !memcmp(actual, expected, (size_t)w * h * sizeof *actual), "%dx synchronous readback drains a pending asynchronous frame", scale);
         CHECK(!metal_renderer_frame_async(a.r, actual, cap_w, cap_h, &w, &h) && !w && !h, "%dx asynchronous submission restarts after synchronous readback", scale);
     }
     free(expected); free(previous); free(actual); drop(&a); drop(&b);   // destruction also waits for an outstanding submission
+}
+
+static void offload_transfers(int scale) {
+    fixture t = create(scale), ref = create(scale);
+    if (!t.r || !ref.r) { drop(&t); drop(&ref); return; }
+    drawing(&t); drawing(&ref);
+    CHECK(!metal_renderer_reference(t.r, 0), "%dx transfer fixture enables GPU-only drawing", scale);
+    uint64_t software_ops = t.m->gpu_software_ops;
+    const uint32_t stream[] = {
+        0x020020ff, V(0,0), V(32,8), 0xe6000001,
+        0xa0000000, V(1023,511), V(3,1), 0x22221111, 0xdead3333,
+        0xe6000002, 0xa0000000, V(1023,511), V(1,1), 0x4444,
+        0x80000000, V(1023,511), V(1022,510), V(3,2),
+        0xe6000000, 0x480000ff, V(1,1), V(4,1), V(4,4), 0x50005000,
+        0x2000ff00, V(8,1), V(12,1), V(8,5), 0x600000ff, V(15,1), V(4,3),
+        0xc0000000, V(1022,510), V(3,2)
+    };
+    for (size_t i = 0; i < sizeof stream / sizeof *stream; i++) { gpu_gp0(t.m, stream[i]); gpu_gp0(ref.m, stream[i]); }
+    CHECK(!t.m->gpu.vram[0] && ref.m->gpu.vram[0], "%dx pending external draws do not run the software pixel loops", scale);
+    for (int i = 0; i < 3; i++) CHECK(gpu_read(t.m) == gpu_read(ref.m), "%dx GPUREAD synchronizes masked and wrapping transfers, word %d", scale, i);
+    CHECK(!memcmp(&t.m->gpu, &ref.m->gpu, sizeof t.m->gpu), "%dx CPU readback preserves complete native GPU state and caches", scale);
+    BATCH(&t, 0x0200ff00, V(32,0), V(16,8)); BATCH(&ref, 0x0200ff00, V(32,0), V(16,8));
+    size_t count = (size_t)VRAM_W * VRAM_H * scale * scale;
+    uint16_t *fine = malloc(count * sizeof *fine);
+    CHECK(fine && !metal_renderer_save_state(t.r, fine, count) && !memcmp(&t.m->gpu, &ref.m->gpu, sizeof t.m->gpu),
+          "%dx saving fine state also materializes native VRAM/cache", scale);
+    free(fine);
+    gpu_reset(t.m); gpu_reset(ref.m);
+    BATCH(&t, 0x020000ff, V(64,0), V(16,8)); BATCH(&ref, 0x020000ff, V(64,0), V(16,8));
+    metal_renderer_free(t.r); t.r = NULL;
+    CHECK(!memcmp(&t.m->gpu, &ref.m->gpu, sizeof t.m->gpu), "%dx detach completes pending draws and reset without losing VRAM", scale);
+    CHECK(t.m->gpu_software_ops == software_ops && t.m->gpu_external_ops > 0 && !t.m->render_external && !t.m->render_sync,
+          "%dx GPU-only transfers retain zero software draws and detach their synchronization hook", scale);
+    drop(&t); drop(&ref);
 }
 
 static void triangle_batches(int scale) {
@@ -786,10 +825,12 @@ static void quick_states(int scale) {
     CHECK(!metal_renderer_frame_async(t.r, after, 2560, 2304, &aw, &ah), "%dx a later image remains pending before load", scale);
     CHECK(metal_renderer_load_state(t.r, fine, scale) < 0, "%dx importing into an in-flight renderer is refused", scale);
     metal_renderer_free(t.r); t.m->gpu = *gpu; t.r = metal_renderer_new(t.m, METALLIB_PATH, scale);
+    CHECK(!metal_renderer_reference(t.r, 1), "%dx restored differential fixture enables its reference", scale);
     CHECK(!metal_renderer_load_state(t.r, fine, scale) && !metal_renderer_frame(t.r, after, 2560, 2304, &aw, &ah, 1), "%dx a fresh renderer restores and verifies", scale);
     CHECK(w == aw && h == ah && !memcmp(before, after, (size_t)w * h * sizeof *before), "%dx loading preserves every fine color and mask sample", scale);
     int other = scale == 2 ? 4 : 2;
     metal_renderer_free(t.r); t.r = metal_renderer_new(t.m, METALLIB_PATH, other);
+    CHECK(!metal_renderer_reference(t.r, 1), "%dx switched differential fixture enables its reference", other);
     CHECK(!metal_renderer_load_state(t.r, fine, scale) && !metal_renderer_frame(t.r, after, 2560, 2304, &aw, &ah, 1), "%dx state loads under a %dx graphics choice", scale, other);
     int bad = 0; for (int y = 0; y < ah; y++) for (int x = 0; x < aw; x++) bad += after[y * aw + x] != before[(y * scale / other) * w + x * scale / other];
     CHECK(!bad, "%dx to %dx state conversion preserves the saved sample grid and native anchors", scale, other);
@@ -812,6 +853,7 @@ int main(void) { @autoreleasepool {
     drop(&a); drop(&b); large_rectangles(1); large_rectangles(2); large_rectangles(4);
     framebuffer_copies(1); framebuffer_copies(2); framebuffer_copies(4);
     asynchronous_frames(1); asynchronous_frames(2); asynchronous_frames(4);
+    offload_transfers(1); offload_transfers(2); offload_transfers(4);
     triangle_batches(1); triangle_batches(2); triangle_batches(4);
     triangle_batch_partitions(1); triangle_batch_partitions(2); triangle_batch_partitions(4);
     thin_triangle_interpolation();

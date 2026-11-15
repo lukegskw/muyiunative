@@ -36,7 +36,7 @@ The profile records the first-mission checks on 2026-11-01 and the later boot/me
 - Whole-route live audio accuracy and retail-game save/load checks.
 - Broader hardware timing and compatibility gaps documented in [Development](../../docs/development.md#phase-2-hardware-breadth).
 
-The final public-preview acceptance check also remains pending: build from a downloaded launcher without a terminal, then play with a controller. A source-built launcher or one screenshot does not complete that check.
+The user completed the downloaded-launcher check on 2026-11-02: build without a terminal and play with the Xbox Bluetooth controller. This meets the Mac preview exit criterion recorded in the [plan](../../plan.md#4-phases-and-exit-criteria).
 
 ## Report a result
 

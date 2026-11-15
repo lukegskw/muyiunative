@@ -2,6 +2,11 @@
 name = "Metal Slug X"
 serial = "SLUS-01212"
 
+[native]
+# Required program-RAM coverage after executable entry; capture all routes before compiling their union. This is an acceptance policy, not a whole-game claim.
+min_percent = 100
+routes = ["first_level", "validation"]
+
 [disc]
 licence = "SCEA"
 boot = 'SLUS_012.12'
@@ -14,7 +19,7 @@ tracks = [
 # 8680bf2 and a0d26af both reach this frame; on the way the game twice draws a GPU list that comes back on itself (docs/development.md, phase 2). With the runtime of
 # commit 52cedd3, scripts/native_game.py made the boot executable 723 functions of native code, which agree with the interpreter in lockstep to this frame (phase 3)
 [validation]
-date = "2026-11-02"
+date = "2026-11-08"
 screen = "title/main menu"
 frames = 2400
 inputs = ["1800:8", "1806:0"]
@@ -23,6 +28,10 @@ height = 240
 frame_hash_fnv1a64 = "a3d45a4b667b9f54"
 
 # Boot latency regression: the OpenBIOS animation uses large untextured triangles, followed by the game's first startup screen.
+native_instructions = 637628006
+interpreted_instructions = 0
+lockstep_stops = 68752276
+
 [startup]
 date = "2026-11-02"
 screen = "game startup after OpenBIOS animation"
@@ -57,7 +66,7 @@ measure_frames = 180
 # Revalidated after drawing waits: 6,553,267,283 native instructions, none interpreted, and 161,859,326 lockstep stops.
 # Phase 4 acceptance route, from reset through Mission 1 to its prisoner-recapture results. Normal pad inputs only, including five continues; no save state or patch.
 [first_level]
-date = "2026-11-01"
+date = "2026-11-08"
 screen = "Mission 1 clear / recaptured prisoner"
 frames = 22985
 width = 320
@@ -65,7 +74,7 @@ height = 240
 frame_hash_fnv1a64 = "a3d22ce034bdb516"
 continues = 5
 native_instructions = 6553267283
-lockstep_stops = 161859326
+lockstep_stops = 852607383
 inputs = [
   "1800:8", "1806:0", "2450:8", "2456:0", "2600:4000", "2606:0",
   "3400:4000", "3406:0", "4200:4000", "4206:0", "5300:20", "6050:80",
@@ -165,21 +174,25 @@ pulses = [
 ]
 
 # Phase 6: native Metal VRAM and texture/CLUT caches agree with software at every frame of the same first-level route. The scaled picture stays local.
+interpreted_instructions = 0
+
+# The old fine hashes predate the later atlas corrections. Unchanged baseline d24ac2f, with independent software rendering and the identical metallib,
+# reproduces 393ef85793874095 at 2x and 1e325e2a451d0245 at 4x; native VRAM/cache agree every frame and the native image hash is unchanged.
 [first_level.metal_2x]
-date = "2026-11-02"
+date = "2026-11-09"
 scale = 2
 width = 640
 height = 480
-frame_hash_fnv1a64 = "3a397f1616c14095"
+frame_hash_fnv1a64 = "393ef85793874095"
 native_vram_cache_match_every_frame = true
 
 # Rechecked after shared textured rasterization and measured flat-rectangle DMA waits, across the complete first-level route.
 [first_level.metal_4x]
-date = "2026-11-01"
+date = "2026-11-09"
 scale = 4
 width = 1280
 height = 960
-frame_hash_fnv1a64 = "d5498cb34b5b0245"
+frame_hash_fnv1a64 = "1e325e2a451d0245"
 native_vram_cache_match_every_frame = true
 timing_machine = "Apple M4 Pro"
 timing_mode = "headless, reference checks outside timed sections"
@@ -187,3 +200,30 @@ mean_frame_ms = 3.043
 p95_frame_ms = 5.954
 max_frame_ms = 11.460
 frames_above_16_7_ms = 0
+
+# Native coverage/offload acceptance evidence. Counts start at the executable entry; ordinary CPU acceptance compares every block.
+[first_level.native_coverage]
+date = "2026-11-08"
+cpu_step_cycles = 1
+lockstep_stops = 852607383
+program_native = 6345698089
+program_interpreted = 0
+kernel_native = 93171622
+bios_rom_native = 18138663
+full_console_comparison_every_frame = true
+gpu_offload_date = "2026-11-09"
+gpu_offload = [
+  { scale = 1, frame_hash_fnv1a64 = "a3d22ce034bdb516", cpu_step_cycles = 64, lockstep_stops = 161859326, software_ops = 0, external_ops = 12242469 },
+  { scale = 2, frame_hash_fnv1a64 = "393ef85793874095", cpu_step_cycles = 64, lockstep_stops = 161859326, software_ops = 0, external_ops = 12242469 },
+  { scale = 4, frame_hash_fnv1a64 = "1e325e2a451d0245", cpu_step_cycles = 64, lockstep_stops = 161859326, software_ops = 0, external_ops = 12242469 },
+]
+
+[validation.native_coverage]
+date = "2026-11-08"
+cpu_step_cycles = 1
+lockstep_stops = 68752276
+program_native = 531507761
+program_interpreted = 0
+kernel_native = 8387575
+bios_rom_native = 1473761
+full_console_comparison_every_frame = true

@@ -66,6 +66,7 @@ typedef struct ps1_cdrom {
 
 typedef struct ps1_native_fn ps1_native_fn;
 typedef struct ps1_native_set ps1_native_set;   // native code generated for some guest code (native.h)
+typedef struct ps1_coverage ps1_coverage;
 
 typedef struct ps1 {
     uint8_t ram[RAM_SIZE];           // main RAM; the BIOS kernel keeps the first 64 KB
@@ -93,6 +94,11 @@ typedef struct ps1 {
     uint32_t native_pc, native_fn;   // where native code was last entered, and its guest function (for lockstep reports)
     int frame_done, exit_requested, exit_code;
     unsigned red, unmapped;          // [RED] reports already made: features (RED_ONCE bits), and unmapped accesses (a count)
+    // Append host bookkeeping so existing format-2 console-field offsets remain readable. These fields are never serialized or compared as console state.
+    int (*render_sync)(void *ctx); int render_external;   // external rasterizer: materialize VRAM/cache before a CPU read, snapshot or comparison
+    uint64_t gpu_software_ops, gpu_external_ops;
+    ps1_coverage *coverage; unsigned native_miss;
+    uint64_t memory_dirty[8]; int memory_watch, scratch_dirty;   // lockstep-only 4 KB RAM write sets
 } ps1;
 
 // The machine (ps1.c)
@@ -106,7 +112,8 @@ void ps1_exe_start(ps1 *m);
 void tty_putc(ps1 *m, char c);                   // the debug console: written through 0x1F802080 or the kernel's std_out_putchar
 void ps1_run_frame(ps1 *m);                     // runs to the next vertical blank (or to an exit request through the debug port)
 // The picture the console shows now, as BGRA8 pixels (0xAARRGGBB words) into out (cap_w x cap_h at most): its size in *w, *h (gpu_sw.c)
-void ps1_display(const ps1 *m, uint32_t *out, int cap_w, int cap_h, int *w, int *h);
+void ps1_display(ps1 *m, uint32_t *out, int cap_w, int cap_h, int *w, int *h);
+int gpu_sync(ps1 *m);   // synchronize an external rasterizer's VRAM/cache; no guest cycles; failure requests a host-error exit
 uint64_t ps1_frame_hash(const uint32_t *px, int w, int h);   // FNV-1a over the pixels: frame comparisons keep hashes, never pictures (AGENTS.md)
 
 // Memory as the CPU sees it, by virtual address (mem.c). Alignment is the CPU's to check (an address error); an unaligned access here reaches nothing
@@ -133,11 +140,12 @@ void cpu_run(ps1 *m);                           // runs until the end of a block
 void cpu_exception(ps1 *m, uint32_t code);
 int ps1_native_add(ps1 *m, const ps1_native_set *set);   // 0, or -1 after a [RED] line when the machine has no room for more
 void native_written(ps1 *m, uint32_t addr, unsigned n);   // CPU or synchronous DMA wrote RAM/scratchpad while native code was running
+void mem_written(ps1 *m, uint32_t addr, unsigned n);   // RAM/scratchpad mutation: native invalidation and optional lockstep write tracking
 int native_run(ps1 *m);                         // runs native code from the CPU's pc, where some matches memory: 1 if it ran
 
 // The lockstep comparison (lockstep.c): two machines from the same state, ref interpreting and nat with native code, stop together at the end of the first block
-// `step` cycles on (0 or 1: every block); the CPU is compared at each stop, all memory and the devices every full_every stops (0: only at the end of each frame)
-typedef struct ps1_lockstep { uint64_t stops; unsigned step, full_every; char report[400]; } ps1_lockstep;
+// `step` cycles on (0 or 1: every block); CPU, changed RAM and scratchpad are compared at every stop. All devices/VRAM are compared every full_every stops and frame.
+typedef struct ps1_lockstep { uint64_t stops; unsigned step, full_every; int initialized; char report[400]; } ps1_lockstep;
 int ps1_lockstep_frame(ps1 *ref, ps1 *nat, ps1_lockstep *ls);   // one frame in step: 0 while they agree, else -1 with the first difference in ls->report
 
 // The capture (capture.c): interpreted blocks and their versions, call targets and final RAM, for tools/codegen.py --capture; the host's, not machine state

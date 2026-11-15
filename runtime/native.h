@@ -5,6 +5,8 @@
 // another program) selects another captured version or runs in the interpreter
 #pragma once
 #include "cpu_ops.h"
+#include "coverage.h"
+_Static_assert(CPU_NOPS <= 128, "native coverage operation mask");
 
 struct ps1_native_fn {
     void (*run)(ps1 *m); uint32_t start;   // start: the guest function's address
@@ -15,6 +17,6 @@ struct ps1_native_set { const char *name; const ps1_native_fn *fns; unsigned nfn
 
 // One instruction of native code: its fetch's cycles, the operation, the load in flight landing; back to the dispatcher after an exception or a store into its code
 #define NATIVE_OP(name, pc, op) do { \
-    m->native_steps++; cpu_ld l_ = cpu_begin(m, pc, mem_fetch_cycles(pc)); int x_ = op_##name(m, &l_, op, mem_fetch_cycles(pc)); cpu_end(m, l_); if (x_ || m->native_dirty) return; } while (0)
+    m->native_steps++; coverage_native(m, pc, CPU_##name); cpu_ld l_ = cpu_begin(m, pc, mem_fetch_cycles(pc)); int x_ = op_##name(m, &l_, op, mem_fetch_cycles(pc)); cpu_end(m, l_); if (x_ || m->native_dirty) return; } while (0)
 // At the end of a block: go on to the next block, unless the dispatcher has a device event, an interrupt or an exit to see to
 #define NATIVE_GO (m->cycles < m->next_event && !m->exit_requested && !cpu_irq_due(m))

@@ -19,6 +19,7 @@
 #include "ps1.h"
 #include "renderer.h"
 #include "report.h"
+#include "coverage.h"
 
 enum { MAX_W = 640, MAX_H = 576 };   // the largest picture: 640 pixels by 2 x 288 lines (PAL, 480-line mode)
 
@@ -53,6 +54,7 @@ static int quick_state_data(host *h, int action, char error[FRONT_STATE_ERROR]) 
     if (h->interactive) h->choice = front_renderer();
     if (h->choice) {
         h->renderer = metal_renderer_new(h->m, h->shaders, h->choice);
+        if (h->renderer && h->verify_renderer && metal_renderer_reference(h->renderer, 1)) { metal_renderer_free(h->renderer); h->renderer = NULL; }
         if (h->renderer && s->fine && metal_renderer_load_state(h->renderer, s->fine, s->scale)) {
             metal_renderer_free(h->renderer); h->renderer = NULL;
         }
@@ -84,6 +86,7 @@ static void frame(host *h) {
     if (h->interactive && front_renderer() != h->choice) {
         h->choice = front_renderer(); metal_renderer_free(h->renderer); h->renderer = NULL;
         if (h->choice) h->renderer = metal_renderer_new(h->m, h->shaders, h->choice);
+        if (h->renderer && h->verify_renderer && metal_renderer_reference(h->renderer, 1)) { metal_renderer_free(h->renderer); h->renderer = NULL; }
         if (h->choice && !h->renderer) { RED("host: Metal could not start; keeping the software renderer"); h->choice = 0; front_renderer_set(0); }
     }
     while (h->input_pos < h->ninput && h->input[h->input_pos].frame <= h->frame) h->buttons = h->input[h->input_pos++].buttons;
@@ -170,7 +173,8 @@ static const char *default_bios(char *buf, size_t cap) {   // in the app's Resou
 static int usage(void) {
     fputs("usage: muyiunative [--bios <file>] [--disc <file.cue|file.bin> | --disc-number <n>] [--exe <file.exe>] [--interpret] [--save-dir <directory>] "
           "[--renderer software|metal] [--scale 1|2|4] [--verify-renderer] [--shaders <offline.metallib>] "
-          "[--headless [--frames <n>] [--input <frame>:<hex-buttons>] [--input-file <file>] [--png <file>] [--lockstep | --capture <out>]]\n", stderr);
+          "[--headless [--frames <n>] [--input <frame>:<hex-buttons>] [--input-file <file>] [--png <file>] [--lockstep | --lockstep-strict | --capture <out>] "
+          "[--lockstep-step <cycles>] [--coverage <report.json>] [--coverage-start <hex-pc>]]\n", stderr);
     return 2;
 }
 
@@ -196,10 +200,12 @@ static int load_exe(ps1 *m, const char *path) {   // the whole file, handed to t
 }
 
 int main(int argc, char **argv) {
-    const char *bios = NULL, *png = NULL, *disc = NULL, *exe = NULL, *capture = NULL, *save_dir = NULL;
+    const char *bios = NULL, *png = NULL, *disc = NULL, *exe = NULL, *capture = NULL, *save_dir = NULL, *coverage_path = NULL;
+    uint32_t coverage_entry = 0;
+    unsigned lockstep_step = 1;
     const char *shaders = NULL; int renderer = -1, scale = 0, verify_renderer = 0;
     input *inputs = NULL; size_t ninput = 0, input_cap = 0;
-    int headless = 0, interpret = 0, lockstep = 0, disc_number = 1, selected_disc = 0; long frames = 300;
+    int headless = 0, interpret = 0, lockstep = 0, strict = 0, disc_number = 1, selected_disc = 0; long frames = 300;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--bios") && i + 1 < argc) bios = argv[++i];
         else if (!strcmp(argv[i], "--disc") && i + 1 < argc) disc = argv[++i];
@@ -216,6 +222,16 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--headless")) headless = 1;
         else if (!strcmp(argv[i], "--interpret")) interpret = 1;
         else if (!strcmp(argv[i], "--lockstep")) lockstep = 1;
+        else if (!strcmp(argv[i], "--lockstep-strict")) lockstep = strict = 1;
+        else if (!strcmp(argv[i], "--lockstep-step") && i + 1 < argc) {
+            char *end; const char *value = argv[++i]; errno = 0; unsigned long step = strtoul(value, &end, 10);
+            if (!*value || *value == '-' || *end || errno || step < 1 || step > UINT_MAX) return usage(); lockstep_step = (unsigned)step;
+        }
+        else if (!strcmp(argv[i], "--coverage") && i + 1 < argc) coverage_path = argv[++i];
+        else if (!strcmp(argv[i], "--coverage-start") && i + 1 < argc) {
+            char *end; const char *value = argv[++i]; errno = 0; unsigned long entry = strtoul(value, &end, 16);
+            if (!*value || *value == '-' || *end || errno || entry > UINT32_MAX || entry & 3) return usage(); coverage_entry = (uint32_t)entry;
+        }
         else if (!strcmp(argv[i], "--capture") && i + 1 < argc) capture = argv[++i];
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc) { char *end; frames = strtol(argv[++i], &end, 10); if (*end || frames < 1) return usage(); }
         else if (!strcmp(argv[i], "--png") && i + 1 < argc) png = argv[++i];
@@ -223,8 +239,10 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--input-file") && i + 1 < argc) { if (front_input_file(&inputs, &ninput, &input_cap, argv[++i])) { free(inputs); return usage(); } }
         else if (strncmp(argv[i], "-psn_", 5)) return usage();   // Finder's legacy process-serial argument
     }
-    if ((ninput || lockstep || capture) && !headless) return usage();
+    if ((ninput || lockstep || capture || coverage_path) && !headless) return usage();
+    if (coverage_entry && !coverage_path) return usage();
     if (lockstep && (interpret || capture)) return usage();
+    if ((lockstep_step != 1 && !lockstep) || (strict && lockstep_step != 1)) return usage();
     front_reports_start(headless);
     front_product product = {0}; int bundled = front_product_load(&product);
     if (bundled < 0) { if (!headless) front_error("This game app is incomplete. Build it again from your disc."); return 1; }
@@ -243,7 +261,7 @@ int main(int argc, char **argv) {
     }
     if (!bios && !(bios = default_bios(path, sizeof path))) { RED("host: no BIOS in the app's Resources or the repository's bios/openbios: give one with --bios"); return 1; }
     int capscale = headless ? (renderer ? scale : 1) : 4;
-    host h = {.m = ps1_new(), .ref = lockstep ? ps1_new() : NULL, .ls = {.step = 64}, .px = malloc(sizeof *h.px * MAX_W * MAX_H * capscale * capscale), .interactive = !headless,
+    host h = {.m = ps1_new(), .ref = lockstep ? ps1_new() : NULL, .ls = {.step = lockstep_step, .full_every = strict ? 1u : 0u}, .px = malloc(sizeof *h.px * MAX_W * MAX_H * capscale * capscale), .interactive = !headless,
               .ninput = ninput, .input = inputs, .saves = {-1, -1}, .state_game = bundled ? product.save_id : NULL,
               .product = bundled ? &product : NULL, .disc_index = bundled ? disc_number - 1 : -1,
               .shaders = shaders, .choice = renderer ? scale : 0, .capscale = capscale, .verify_renderer = verify_renderer};
@@ -269,7 +287,12 @@ int main(int argc, char **argv) {
     if (renderer && !(h.renderer = metal_renderer_new(h.m, shaders, scale))) {
         front_saves_close(&h.saves); free(h.input); free(h.px); ps1_free(h.m); ps1_free(h.ref); return 1;
     }
+    if (h.renderer && verify_renderer && metal_renderer_reference(h.renderer, 1)) {
+        metal_renderer_free(h.renderer); front_saves_close(&h.saves); free(h.input); free(h.px); ps1_free(h.m); ps1_free(h.ref); return 1;
+    }
     ps1_capture cap;
+    ps1_coverage coverage = {.entry = coverage_entry};
+    if (coverage_path) h.m->coverage = &coverage;
     if (capture) ps1_capture_start(h.m, &cap);
     if (disc) LOG("host: external disc mounted read-only");
     LOG("host: BIOS %s%s%s", bios, interpret ? ", interpreted" : ", OpenBIOS as native code", lockstep ? ", in lockstep with the interpreter" : "");
@@ -287,7 +310,10 @@ int main(int argc, char **argv) {
            (unsigned long long)h.m->interp_steps, 100.0 * h.m->native_steps / (h.m->native_steps + h.m->interp_steps + 1));
     if (h.ref) printf("host: lockstep: %s, %llu stops\n", h.diverged ? "the machines differ" : "the machines agree", (unsigned long long)h.ls.stops);
     if (h.renderer) printf("host: Metal renderer, %dx, %ld frames%s\n", scale, n, verify_renderer && !h.graphics_failed ? ", native VRAM/cache agree with software every frame" : "");
+    printf("host: GPU operations: %llu software, %llu external\n", (unsigned long long)h.m->gpu_software_ops, (unsigned long long)h.m->gpu_external_ops);
     int r = h.diverged ? 3 : h.graphics_failed ? 4 : h.m->exit_requested ? h.m->exit_code : png && h.w && front_write_png(png, h.px, h.w, h.h) ? 1 : 0;
+    if (coverage_path && ps1_coverage_write(&coverage, coverage_path)) { RED("host: cannot write the native coverage report"); if (!r) r = 1; }
+    ps1_coverage_free(&coverage); h.m->coverage = NULL;
     if (capture && ps1_capture_write(h.m, &cap, capture)) r = 1;
     // A failed lockstep comparison can include rejected card writes; preserve the last good save and divergence exit code.
     if (h.saving && !h.diverged && !h.graphics_failed && front_saves_flush(&h.saves, h.m)) r = 1;

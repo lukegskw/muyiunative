@@ -11,6 +11,32 @@ static int checks, fails;
 #define CHECK(c, msg) do { checks++; if (!(c)) { fails++; fprintf(stderr, "FAIL: %s\n", msg); } } while (0)
 static void sink(void *ctx, const char *line) { (void)ctx; (void)line; }
 static const ps1_native_set native = {.name = "synthetic"};
+// The immediately preceding public runtime, d24ac2f, has this 64-bit ps1 size. New host bookkeeping must stay beyond its byte-compatible console prefix.
+_Static_assert(offsetof(ps1, render_sync) == 4575520, "format-2 console prefix remains compatible");
+typedef struct state_header {
+    char magic[8]; uint32_t version, bytes, scale, fine_bytes;
+    uint64_t layout, bios, media, frame, checksum; char game[128];
+} state_header;
+static uint64_t bytes_hash(uint64_t h, const void *data, size_t n) {
+    const uint8_t *p = data; while (n--) { h ^= *p++; h *= UINT64_C(0x100000001b3); } return h;
+}
+static int previous_format(const char *path) {
+    FILE *f = fopen(path, "rb"); state_header h;
+    if (!f) return -1;
+    if (fread(&h, sizeof h, 1, f) != 1) { fclose(f); return -1; }
+    size_t bytes = h.bytes; uint8_t *payload = malloc(bytes + h.fine_bytes);
+    if (!payload || fread(payload, bytes + h.fine_bytes, 1, f) != 1) { free(payload); fclose(f); return -1; } fclose(f);
+    h.version = 2; h.bytes = 4575520; h.checksum = 0;
+    uint64_t hash = bytes_hash(UINT64_C(0xcbf29ce484222325), &h, sizeof h);
+    hash = bytes_hash(hash, payload, h.bytes); h.checksum = bytes_hash(hash, payload + bytes, h.fine_bytes);
+    f = fopen(path, "wb");
+    int bad = !f || fwrite(&h, sizeof h, 1, f) != 1 || fwrite(payload, h.bytes, 1, f) != 1 ||
+              (h.fine_bytes && fwrite(payload + bytes, h.fine_bytes, 1, f) != 1);
+    if (f && fclose(f)) bad = 1; free(payload); return bad ? -1 : 0;
+}
+static void external_emit(void *ctx, const ps1_render_op *op) { (void)ctx; (void)op; }
+static int external_sync(void *ctx) { ps1 *m = ctx; m->gpu.vram[42] = 0x4567; return 0; }
+static int failed_sync(void *ctx) { (void)ctx; return -1; }
 static uint64_t file_hash(const char *path) {
     FILE *f = fopen(path, "rb"); uint64_t h = 0xcbf29ce484222325ULL; int c;
     if (!f) return 0; while ((c = fgetc(f)) != EOF) { h ^= (unsigned)c; h *= 0x100000001b3ULL; } fclose(f); return h;
@@ -46,6 +72,7 @@ int main(void) {
     m->tty_out = sink; m->tty_ctx = m; ps1_native_add(m, &native);
     CHECK(!front_state_save(directory, "synthetic-A", m, 99, 0, NULL, error), "a complete console state saves");
     CHECK(front_state_exists(directory), "the saved slot becomes available");
+    CHECK(!previous_format(path), "a synthetic state can be encoded with the preceding public format-2 layout");
     front_snapshot *s = front_state_read(directory, "synthetic-A", m, error);
     CHECK(s && s->frame == 99 && !s->scale && !s->fine, "a native state reloads with its frame index");
     if (s) {
@@ -107,6 +134,7 @@ int main(void) {
     if (fine) {
         for (size_t i = 0; i < words; i++) fine[i] = (uint16_t)(i ^ (i >> 12));
         CHECK(!front_state_save(directory, "synthetic-A", m, 123, 2, fine, error), "a 2x fine framebuffer saves with console state");
+        CHECK(!previous_format(path), "format-2 compatibility also retains a fine framebuffer payload");
         s = front_state_read(directory, "synthetic-A", m, error);
         CHECK(s && s->scale == 2 && s->frame == 123 && !memcmp(s->fine, fine, words * sizeof *fine), "every fine sample is retained on disk");
         front_state_free(s); free(fine);
@@ -121,6 +149,15 @@ int main(void) {
     CHECK(file_hash(path) == before && !disc_read(m, 39, sector) && sector[2000] == 0x22, "wrong-disc rejection keeps the state file and current media intact");
     CHECK(!disc_open(m, disc1), "original disc can be reinserted"); s = front_state_read(directory, "synthetic-A", m, error);
     CHECK(s && s->frame == 456, "reinserting the saved disc permits loading again"); front_state_free(s);
+    m->on_render = external_emit; m->render_ctx = m; m->render_sync = external_sync; m->render_external = 1;
+    CHECK(!front_state_save(directory, "synthetic-A", m, 456, 0, NULL, error), "saving synchronizes an external renderer before serializing console state");
+    s = front_state_read(directory, "synthetic-A", m, error);
+    CHECK(s && s->machine->gpu.vram[42] == 0x4567 && !s->machine->render_sync && !s->machine->render_external,
+          "external pixels survive the snapshot without serializing renderer hooks"); front_state_free(s);
+    before = file_hash(path); m->render_sync = failed_sync;
+    CHECK(front_state_save(directory, "synthetic-A", m, 456, 0, NULL, error) < 0 && file_hash(path) == before,
+          "a failed GPU readback preserves the previous quick state");
+    m->on_render = NULL; m->render_ctx = NULL; m->render_sync = NULL; m->render_external = 0; m->exit_requested = m->exit_code = 0;
     cd_set_shell(m, 1);
     CHECK(front_state_save(directory, "synthetic-A", m, 500, 0, NULL, error) < 0 && !front_state_read(directory, "synthetic-A", m, error) && file_hash(path) == before,
           "open-cover states cannot silently restore a physical disc mismatch"); cd_set_shell(m, 0);

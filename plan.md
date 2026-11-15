@@ -42,7 +42,7 @@ flowchart LR
   - CD-ROM drive (including XA audio and CD music)
   - MDEC (video decoder), controllers and memory cards
 - **Lookup table**: maps an address to its native function; if none exists, the **interpreter** runs that code.
-- **Graphics**: the software renderer keeps canonical console VRAM. An independent Metal command renderer matches it at native resolution and supplies 2×/4× geometry; the software renderer remains the reference and the default.
+- **Graphics**: Software remains the reference and default. Ordinary Metal execution draws once on the GPU, synchronizing VRAM/cache to the console struct for CPU reads, states and renderer changes. Verification mode independently draws the same commands in software. Metal supplies 1×/2×/4× geometry.
 - **App shells**: AppKit/SwiftUI on Mac; UIKit with touch controls and Game Controller support on iOS.
 - **BIOS**: OpenBIOS (MIT), bundled and itself recompiled.
 
@@ -64,6 +64,8 @@ muyiunative/
 ```
 
 ## 4. Phases and exit criteria
+
+On 2026-11-09 the Mac native-execution audit closes its coverage and GPU-offload gaps: builds combine all selected captures and enforce 100% program-RAM native execution by default. Twelve routes in six profiles pass CPU/RAM comparison after every block; all six primary routes pass GPU-only Metal at 1×/2×/4× with full console/VRAM/cache agreement every frame and zero duplicate CPU raster operations. [Development](docs/development.md#native-coverage-and-gpu-offload) records the measurements and their scope. The user selected Mac completion first; this does not begin iOS or establish whole-game compatibility.
 
 Phases 0–7 have met their exit criteria. Phase 2's homebrew tests are the hardware test programs of [ps1-tests](tests/ps1-tests/README.md), which pass in CI, and its [first game](profiles/SLUS-01212/game.toml) reaches its title menu, checked again on 2026-10-30 with the runtime of commit a0d26af. [Development](docs/development.md#phase-2-hardware-breadth) records the checks and the remaining gaps. Phase 3's main executable, the first game's, runs as native code and agrees with the interpreter in lockstep through the same route, on 2026-10-30 with the runtime of commit 52cedd3 ([Development](docs/development.md#phase-3-the-recompiler)). Its performance profile found the time in a looping GPU DMA list executing without guest time passing. Phase 4 schedules those packets in guest time and preserves overwritten code versions by content hash. On 2026-10-30 the first game clears Mission 1 entirely natively and agrees with the interpreter through the results screen: 22,985 frames and 6,553,245,179 instructions, with normal pad inputs and five continues. [Development](docs/development.md#phase-4-overlays-and-profiles) records the route, the lockstep comparison and the remaining hardware-timing gaps. On 2026-10-31 phase 5 builds its signed, double-clickable Mac app from the disc, rechecking the same route in lockstep, with persistent cards in Application Support, keyboard remapping and a launcher. The tool tests also boot a synthetic app independently of its original input disc ([Development](docs/development.md#phase-5-the-mac-product)).
 
@@ -183,3 +185,4 @@ Dump it with an accurate ripping tool (e.g. redumper) to `.cue`/`.bin`.
 | Publish the repository after the successful downloaded-launcher/controller check                  | Continue private testing                | User confirmed the release flow and authorized public visibility, description and topics on 2026-11-02                                                            |
 | Quick states in built game apps | In-game saves only; replay the opening | User approved 2026-11-03: resume a chosen point directly when testing scenes such as FF IX's first battle |
 | Notify about GitHub releases and update the launcher from inside the app | Manual launcher ZIP replacement | User requested 2026-11-06; rebuilding existing game apps remains the user's responsibility |
+| Ordinary Metal rasterizes on the GPU; CPU reads/states/detach synchronize VRAM and caches; verification retains software drawing | Always rasterize in both CPU and GPU | User requested closing the Mac GPU offload gap on 2026-11-08, retaining correct readbacks and an independent reference |

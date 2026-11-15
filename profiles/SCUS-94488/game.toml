@@ -2,6 +2,11 @@
 name = "Gran Turismo 2 - Simulation Mode (USA, v1.2)"
 serial = "SCUS-94488"
 
+[native]
+# Required program-RAM coverage after executable entry; capture all routes before compiling their union. This is an acceptance policy, not a whole-game claim.
+min_percent = 100
+routes = ["validation", "attract"]
+
 [disc]
 licence = "SCEA"
 boot = 'SCUS_944.88'
@@ -12,7 +17,7 @@ tracks = [
 
 # Empty memory-card slots. Start Game -> Go Race -> GT League -> Japan Nationals -> Midfield Raceway's replay icon.
 [validation]
-date = "2026-11-04"
+date = "2026-11-08"
 screen = "Midfield Raceway replay, Suzuki Alto Works RS/Z '98"
 frames = 9000
 inputs = [
@@ -35,7 +40,8 @@ width = 320
 height = 240
 frame_hash_fnv1a64 = "cc81227fd6b9259e"
 native_instructions = 2944191223
-lockstep_stops = 71531402
+lockstep_stops = 478989237
+interpreted_instructions = 0
 
 [validation.metal_2x]
 date = "2026-11-04"
@@ -51,7 +57,7 @@ frame_hash_fnv1a64 = "f2bb9657bbec112f"
 
 # Original audio-investigation route; no inputs from reset.
 [attract]
-date = "2026-11-03"
+date = "2026-11-08"
 screen = "attract-mode race replay"
 frames = 6000
 inputs = []
@@ -59,4 +65,32 @@ width = 320
 height = 240
 frame_hash_fnv1a64 = "6afd38fe08789ab1"
 native_instructions = 1974878704
-lockstep_stops = 45604383
+lockstep_stops = 303226071
+interpreted_instructions = 0
+
+# Native coverage/offload acceptance evidence. Counts start at the executable entry; ordinary CPU acceptance compares every block.
+[validation.native_coverage]
+date = "2026-11-08"
+cpu_step_cycles = 1
+lockstep_stops = 478989237
+program_native = 2796905015
+program_interpreted = 0
+kernel_native = 50067965
+bios_rom_native = 938486
+full_console_comparison_every_frame = true
+gpu_offload_date = "2026-11-08"
+gpu_offload = [
+  { scale = 1, frame_hash_fnv1a64 = "cc81227fd6b9259e", cpu_step_cycles = 64, lockstep_stops = 71531402, software_ops = 0, external_ops = 21568521 },
+  { scale = 2, frame_hash_fnv1a64 = "79fed437d3bdfcbf", cpu_step_cycles = 64, lockstep_stops = 71531402, software_ops = 0, external_ops = 21568521 },
+  { scale = 4, frame_hash_fnv1a64 = "f2bb9657bbec112f", cpu_step_cycles = 64, lockstep_stops = 71531402, software_ops = 0, external_ops = 21568521 },
+]
+
+[attract.native_coverage]
+date = "2026-11-08"
+cpu_step_cycles = 1
+lockstep_stops = 303226071
+program_native = 1840222562
+program_interpreted = 0
+kernel_native = 37740610
+bios_rom_native = 635775
+full_console_comparison_every_frame = true

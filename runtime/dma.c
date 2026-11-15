@@ -39,7 +39,7 @@ void dma_resume(ps1 *m) {
         if (chosen < 0) return;
         ps1_dma *d = &m->dma[chosen];
         if (!chosen) mdec_write(m, 0, *ram32(m, d->addr));
-        else { int32_t offset = mdec_dma_offset(m); *ram32(m, d->addr + (uint32_t)offset) = mdec_dma_read(m); if (m->native_active) native_written(m, (d->addr + (uint32_t)offset) & 0x1ffffc, 4); }
+        else { int32_t offset = mdec_dma_offset(m); *ram32(m, d->addr + (uint32_t)offset) = mdec_dma_read(m); if (m->native_active || m->memory_watch) mem_written(m, (d->addr + (uint32_t)offset) & 0x1ffffc, 4); }
         d->addr = (d->addr + (d->chcr & 2 ? (uint32_t)-4 : 4)) & 0xffffff;
         d->left--; d->block_left--; m->cycles++;
         if (!d->block_left) {
@@ -119,12 +119,12 @@ static void run(ps1 *m, int ch) {
     uint32_t mode = d->chcr >> 9 & 3, addr = d->madr & 0x1ffffc, step = d->chcr & 2 ? (uint32_t)-4 : 4, words = 0;
     if (ch == 6) {   // an empty ordering table: each entry points to the one before it, the first holds the end code (psx-spx, GPU Depth Ordering)
         uint32_t n = d->bcr & 0xffff ? d->bcr & 0xffff : 0x10000;
-        for (uint32_t i = 0; i < n; i++, addr -= 4) { *ram32(m, addr) = i == n - 1 ? 0xffffff : (addr - 4) & 0x1fffff; if (m->native_active) native_written(m, addr & 0x1ffffc, 4); }
+        for (uint32_t i = 0; i < n; i++, addr -= 4) { *ram32(m, addr) = i == n - 1 ? 0xffffff : (addr - 4) & 0x1fffff; if (m->native_active || m->memory_watch) mem_written(m, addr & 0x1ffffc, 4); }
         words = n;
     } else if (mode >= 2) { RED_ONCE(m, RED_DMA_MODE, "dma: linked-list mode is only supported on the GPU channel"); return;
     } else {
         uint32_t n = mode == 0 ? (d->bcr & 0xffff ? d->bcr & 0xffff : 0x10000) : (d->bcr & 0xffff) * (d->bcr >> 16);
-        for (uint32_t i = 0; i < n; i++, addr += step) { if (d->chcr & 1) to_device(m, ch, *ram32(m, addr)); else { *ram32(m, addr) = from_device(m, ch); if (m->native_active) native_written(m, addr & 0x1ffffc, 4); } }
+        for (uint32_t i = 0; i < n; i++, addr += step) { if (d->chcr & 1) to_device(m, ch, *ram32(m, addr)); else { *ram32(m, addr) = from_device(m, ch); if (m->native_active || m->memory_watch) mem_written(m, addr & 0x1ffffc, 4); } }
         words = n;
         if (mode == 1) { d->madr = addr & 0xffffff; d->bcr &= 0xffff; }
     }
