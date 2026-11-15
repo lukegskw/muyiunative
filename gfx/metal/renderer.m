@@ -1,5 +1,5 @@
-// Independent Metal command rendering (plan.md, phase 6; issue #11). Software VRAM remains the console's CPU-visible reference; this renderer owns its own VRAM and
-// caches and draws the ordered GPU operations, never the software frame. Retaining the reference has a CPU cost, measured in docs/development.md.
+// Metal command rendering: draw once on the GPU, materializing the console's VRAM/cache for CPU reads, states and detach. Reference mode independently draws the
+// same operations in software for verification. The audit observed unconditional duplicate CPU rasterization; ordinary Metal execution no longer pays that cost.
 // Apple Metal resource synchronization: tracked shared buffers plus explicit encoder barriers preserve command order; wait for completion before CPU readback.
 // The metallib is compiled by xcrun at build time and loaded with newLibraryWithURL:error:, never newLibraryWithSource:.
 #import <Metal/Metal.h>
@@ -10,7 +10,7 @@
 #include "renderer.h"
 
 struct metal_renderer {
-    ps1 *m; int scale, failed;
+    ps1 *m; int scale, failed, cpu_dirty, reference;
     id<MTLCommandQueue> queue;
     id<MTLComputePipelineState> native, scaled, upload, display, flat, copy, sprites, triangles, texture_prepare, texture_track, texture_draw, texture_finish, triangle_prepare, triangle;
     id<MTLBuffer> vram, hires, cache, scratch, output;
@@ -20,6 +20,7 @@ struct metal_renderer {
 };
 _Static_assert(sizeof(ps1_render_op) == 140, "shared shader operation ABI");
 _Static_assert(offsetof(ps1_gpu, ax1) - offsetof(ps1_gpu, texcache) == sizeof(ps1_render_cache), "shared shader cache ABI");
+static int synchronize(void *ctx);
 
 static void emit(void *ctx, const ps1_render_op *op) {
     metal_renderer *r = ctx;
@@ -31,6 +32,7 @@ static void emit(void *ctx, const ps1_render_op *op) {
         r->ops = p; r->cap = cap;
     }
     r->ops[r->n++] = *op;
+    r->cpu_dirty = 1;
 }
 
 static id<MTLComputePipelineState> pipeline(id<MTLDevice> dev, id<MTLLibrary> lib, NSString *name) {
@@ -69,6 +71,7 @@ metal_renderer *metal_renderer_new(ps1 *m, const char *path, int scale) {
         uint16_t *h = r->hires.contents;
         for (int y = 0; y < 512 * scale; y++) for (int x = 0; x < 1024 * scale; x++) h[y * 1024 * scale + x] = m->gpu.vram[y / scale * 1024 + x / scale];
         m->render_ctx = r; m->on_render = emit;
+        m->render_sync = synchronize; m->render_external = 1;
         LOG("metal: %s, %dx internal resolution, offline shaders", dev.name.UTF8String, scale);
         return r;
     }
@@ -76,7 +79,10 @@ metal_renderer *metal_renderer_new(ps1 *m, const char *path, int scale) {
 
 void metal_renderer_free(metal_renderer *r) {
     if (!r) return;
-    if (r->m && r->m->render_ctx == r) { r->m->on_render = NULL; r->m->render_ctx = NULL; }
+    if (r->m && r->m->render_ctx == r) {
+        gpu_sync(r->m);   // renderer changes and state restores must not discard commands that have not reached a frame boundary
+        r->m->on_render = NULL; r->m->render_ctx = NULL; r->m->render_sync = NULL; r->m->render_external = 0;
+    }
     for (int i = 0; i < 2; i++) { [r->pending[i] waitUntilCompleted]; r->pending[i] = nil; r->frames[i] = nil; }
     r->queue = nil; r->native = r->scaled = r->upload = r->display = nil;
     r->flat = r->copy = nil;
@@ -324,10 +330,31 @@ static int flush(metal_renderer *r) {
     @autoreleasepool { id<MTLCommandBuffer> cb = [r->queue commandBuffer]; return encode(r, cb) ? -1 : finish(r, cb); }
 }
 
+static int synchronize(void *ctx) {
+    metal_renderer *r = ctx;
+    if (r->failed) return -1;
+    if (!r->cpu_dirty) return 0;
+    if (flush(r)) return -1;
+    memcpy(r->m->gpu.vram, r->vram.contents, sizeof r->m->gpu.vram);
+    memcpy(r->m->gpu.texcache, r->cache.contents, sizeof(ps1_render_cache));
+    r->cpu_dirty = 0; return 0;
+}
+
+int metal_renderer_reference(metal_renderer *r, int enabled) {
+    if (!r || (enabled != 0 && enabled != 1) || r->failed) return -1;
+    if (enabled == r->reference) return 0;
+    if (!r->reference && synchronize(r)) return -1;
+    if (r->reference && metal_renderer_check(r)) return -1;
+    r->reference = enabled; r->m->render_external = !enabled;
+    r->m->render_sync = enabled ? NULL : synchronize;
+    return 0;
+}
+
 const uint16_t *metal_renderer_vram(metal_renderer *r) { return r && !flush(r) ? r->vram.contents : NULL; }
 
 int metal_renderer_save_state(metal_renderer *r, uint16_t *fine, size_t words) {
     if (!r || !fine || words != (size_t)VRAM_W * VRAM_H * r->scale * r->scale || flush(r)) return -1;
+    if (!r->reference && synchronize(r)) return -1;
     memcpy(fine, r->hires.contents, words * sizeof *fine); return 0;
 }
 
@@ -343,6 +370,7 @@ int metal_renderer_load_state(metal_renderer *r, const uint16_t *fine, int sourc
 
 int metal_renderer_check(metal_renderer *r) {
     if (!r || flush(r)) return -1;
+    if (!r->reference) { RED("metal: independent comparison requires software reference mode"); return -1; }
     const uint16_t *v = r->vram.contents;
     if (memcmp(v, r->m->gpu.vram, sizeof r->m->gpu.vram)) {
         size_t p = 0; while (v[p] == r->m->gpu.vram[p]) p++;

@@ -1,9 +1,10 @@
 """Mac product inputs (plan.md, phases 5–6): a portable copy of shared and separate raw tracks keeps its indexes and bytes, including stored pregaps and colliding source
 names. Build plans validate profiles and expand their routes before compilation. Inputs are synthetic PS-X EXEs and ISO9660 volumes; no game data or GPU is needed.
 The packaged program is assembled here, without an SDK or third-party executable; Metal preferences and offline shaders do not make headless defaults require a GPU."""
-import hashlib, plistlib, re, shutil, struct, subprocess, sys, tempfile, unittest
+import hashlib, json, plistlib, re, shutil, struct, subprocess, sys, tempfile, unittest
 from contextlib import chdir
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'tools'))
@@ -158,6 +159,75 @@ class MacBuild(unittest.TestCase):
         self.assertEqual((plan['frames'], plan['inputs']), (6, ['1:40', '3:0']))
         with self.assertRaises(SystemExit): mac_build.build_plan(self.data, profile, route='absent', frames=5)
 
+    def test_multiple_routes_and_native_policy(self):
+        profile = self.profile('[native]\nroutes = ["validation", "battle"]\nmin_percent = 99\n[validation]\nframes = 2\nframe_hash_fnv1a64 = "0123456789abcdef"\n'
+                               '[battle]\nframes = 3\nmin_native_percent = 100\ninputs = ["1:8"]\n')
+        plans = mac_build.build_routes(self.data, profile)
+        self.assertEqual([(p['route'], p['frames'], p['min_native_percent']) for p in plans], [('validation', 2, 99), ('battle', 3, 100)])
+        self.assertEqual(plans[0]['entry'], 0x80010000)
+        self.assertEqual(plans[0]['expected_hash'], '0123456789abcdef')
+        override = mac_build.build_routes(self.data, profile, ['battle'], 6, ['0:0'], 98)[0]
+        self.assertEqual((override['frames'], override['min_native_percent'], override['expected_hash']), (6, 98, None))
+        for routes in ([], ['battle', 'battle'], ['absent'], [1], 1):
+            with self.subTest(routes=routes), self.assertRaises(SystemExit): mac_build.build_routes(self.data, profile, routes)
+        for limit in (-1, 101, True, float('nan')):
+            with self.subTest(limit=limit), self.assertRaises(SystemExit): mac_build.build_plan(self.data, profile, min_native=limit)
+        with self.assertRaisesRegex(SystemExit, 'requested frame count'): mac_build.completed('host: 1 frames, frame hash 0123456789abcdef', plans[0])
+        with self.assertRaisesRegex(SystemExit, 'recorded'): mac_build.completed('host: 2 frames, frame hash 0000000000000000', plans[0])
+
+    def test_repository_profiles_select_real_routes(self):
+        for path in (ROOT / 'profiles').glob('*/game.toml'):
+            with self.subTest(profile=path.parent.name):
+                game = mac_build.tomllib.loads(path.read_text()); selected = game['native']['routes']
+                self.assertEqual(len(selected), len(set(selected))); self.assertTrue(selected)
+                self.assertTrue(all(route in game and type(game[route].get('frames')) is int and game[route]['frames'] > 0 for route in selected))
+                self.assertEqual(game['native']['min_percent'], 100)
+
+    def test_card_training_replays_isolated_identical_seeds(self):
+        folder = self.tmp / 'initial cards'; folder.mkdir()
+        for i in (1, 2): (folder / f'card{i}.mcr').write_bytes(bytes([i]) * (128 * 1024))
+        seed = mac_build.read_card_seed(folder)
+        assert seed is not None
+        profile = self.profile('[validation]\nframes = 3\nframe_hash_fnv1a64 = "0123456789abcdef"\n')
+        plan = mac_build.build_plan(self.data, profile, card_seed=seed)
+        self.assertTrue(plan['memory_cards']); self.assertIsNone(plan['expected_hash'])
+        previous = None
+        for _ in range(2):
+            with mac_build.route_cards(plan) as flags:
+                temporary = Path(flags[1]); self.assertEqual(flags[0], '--save-dir'); self.assertNotEqual(temporary, folder)
+                self.assertEqual((temporary / 'card1.mcr').read_bytes(), seed['card1.mcr'])
+                (temporary / 'card1.mcr').write_bytes(bytes(128 * 1024)); previous = temporary
+            self.assertFalse(previous.exists(), 'training cards are removed on every run')
+        self.assertEqual(mac_build.read_card_seed(folder), seed, 'capture and replay cannot modify the originals')
+        (folder / 'card2.mcr').write_bytes(b'broken')
+        with self.assertRaisesRegex(ValueError, '128 KB'): mac_build.read_card_seed(folder)
+        blank = mac_build.build_plan(self.data, self.profile('[validation]\nframes = 3\nmemory_cards = true\n'))
+        with mac_build.route_cards(blank) as flags: self.assertEqual(list(Path(flags[1]).iterdir()), [], 'the runtime formats fresh synthetic cards when no seed is supplied')
+        required = self.profile('[validation]\nframes = 3\nrequires_card_seed = true\n')
+        with self.assertRaisesRegex(SystemExit, 'requires --card-seed'): mac_build.build_plan(self.data, required)
+        self.assertTrue(mac_build.build_plan(self.data, required, card_seed=seed)['memory_cards'])
+
+    def test_gpu_acceptance_requires_independent_agreement_and_zero_cpu_rasterization(self):
+        profile = self.profile('[validation]\nframes = 2\n[validation.metal_4x]\nframe_hash_fnv1a64 = "aaaaaaaaaaaaaaaa"\n')
+        plan = mac_build.build_plan(self.data, profile); work = self.tmp / 'work'; (work / 'gen').mkdir(parents=True)
+        report = work / 'native-report.json'; report.write_text(json.dumps(dict(routes=[{}])))
+        records = [dict(plan=plan, command=[], expected='0123456789abcdef', disc=1)]
+        def checked(label, command, software=0):
+            self.assertIn('--lockstep', command); self.assertIn('metal', command); self.assertNotIn('--verify-renderer', command)
+            self.assertEqual(command[command.index('--lockstep-step') + 1], 64)
+            scale = command[command.index('--scale') + 1]; target = command[command.index('--coverage') + 1]
+            regions = {key: dict(native=0, interpreted=0) for key in ('program_ram', 'kernel_ram', 'bios_rom', 'other')}; regions['program_ram']['native'] = 10
+            Path(target).write_text(json.dumps(dict(version=1, entry='80010000', started=True, regions=regions, fallbacks=[])))
+            frame = '0123456789abcdef' if scale == 1 else 'aaaaaaaaaaaaaaaa'
+            return f'host: 2 frames, frame hash {frame}\nhost: GPU operations: {software} software, 7 external\nhost: lockstep: the machines agree, 42 stops\n'
+        with patch('mac_build.run', side_effect=checked): mac_build.check_metal(records, work, [1, 4, 4])
+        evidence = json.loads(report.read_text())['routes'][0]['metal']
+        self.assertEqual([r['scale'] for r in evidence], [1, 4]); self.assertTrue(all(r['software_ops'] == 0 and r['acceptance']['percent'] == 100 for r in evidence))
+        before = report.read_bytes()
+        with patch('mac_build.run', side_effect=lambda label, cmd: checked(label, cmd, software=1)), self.assertRaisesRegex(SystemExit, 'zero duplicate'):
+            mac_build.check_metal(records, work, [1])
+        self.assertEqual(report.read_bytes(), before, 'failed verification cannot replace prior acceptance evidence')
+
     def test_wrong_executable_is_refused_before_build(self):
         profile = self.profile('[validation]\nframes = 12\n')
         profile.write_text(profile.read_text().replace(hashlib.sha256(self.exe).hexdigest(), '0' * 64))
@@ -214,7 +284,8 @@ class MacProduct(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='muyiunative-product-test-') as directory:
             tmp = Path(directory); executable = product_exe()
             source = create_iso(tmp / 'source disc.bin', executable); profile = tmp / 'game.toml'; digest = hashlib.sha256(executable).hexdigest()
-            profile.write_text(f'name = "Synthetic Triangle"\n[disc]\nboot_sha256 = "{digest}"\n[validation]\nframes = 900\ninputs = []\n')
+            profile.write_text(f'name = "Synthetic Triangle"\n[disc]\nboot_sha256 = "{digest}"\n[native]\nroutes = ["validation", "alternate"]\n'
+                               '[validation]\nframes = 900\ninputs = []\n[alternate]\nframes = 901\ninputs = []\nmemory_cards = true\n')
             app = tmp / 'Native Triangle.app'
 
             def run(command, timeout=300):
@@ -231,12 +302,24 @@ class MacProduct(unittest.TestCase):
             self.assertEqual((manifest['Renderer'], manifest['RenderScale']), ('metal', 2))
             shaders = app / 'Contents/Resources/ps1gpu.metallib'; self.assertTrue(shaders.is_file()); self.assertGreater(shaders.stat().st_size, 0)
             self.assertIn(digest, manifest['SaveID']); exe = app / 'Contents/MacOS' / info['CFBundleExecutable']
+            evidence = json.loads((app / 'Contents/Resources/native-report.json').read_text())
+            self.assertEqual([route['route'] for route in evidence['routes']], ['validation', 'alternate'])
+            self.assertTrue(all(route['acceptance']['percent'] == 100 and route['coverage']['started'] for route in evidence['routes']))
             source.rename(tmp / 'original moved away.bin')
             default_cards = Path.home() / 'Library/Application Support/muyiunative/Saves' / manifest['SaveID']; existed = default_cards.exists()
             playback = run([exe, '--headless', '--frames', 900, '--lockstep'])
             self.assertIn('frame hash a2fa0b6d358e04a3', playback.stdout); self.assertIn('the machines agree', playback.stdout)
             self.assertIn('900 frames, 320x240,', playback.stdout); self.assertNotIn('Metal renderer', playback.stdout)
             self.assertNotRegex(playback.stdout + playback.stderr, r'(?m)^metal:')
+            strict = run([exe, '--headless', '--frames', 1, '--lockstep-strict'])
+            self.assertIn('the machines agree', strict.stdout)
+            periodic = run([exe, '--headless', '--frames', 1, '--lockstep', '--lockstep-step', 64])
+            self.assertIn('the machines agree', periodic.stdout)
+            for flags in (['--lockstep-step', 64], ['--lockstep-strict', '--lockstep-step', 64],
+                          ['--lockstep', '--lockstep-step', 0], ['--lockstep', '--lockstep-step', -1],
+                          ['--lockstep', '--lockstep-step', 4294967296]):
+                rejected = subprocess.run([str(exe), '--headless', *map(str, flags)], capture_output=True, text=True)
+                self.assertEqual(rejected.returncode, 2, flags)
             software = run([exe, '--headless', '--frames', 1, '--renderer', 'software'])
             self.assertIn('host: 1 frames,', software.stdout); self.assertNotIn('Metal renderer', software.stdout)
             self.assertNotRegex(software.stdout + software.stderr, r'(?m)^metal:')

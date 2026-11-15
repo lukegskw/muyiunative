@@ -2,6 +2,11 @@
 name = "WipEout 3 - Special Edition (Europe)"
 serial = "SCES-02845"
 
+[native]
+# Required program-RAM coverage after executable entry; capture all routes before compiling their union. This is an acceptance policy, not a whole-game claim.
+min_percent = 100
+routes = ["validation", "title"]
+
 [disc]
 licence = "SCEE"
 boot = 'SCES_028.45'
@@ -23,9 +28,10 @@ tracks = [
   { number = 14, mode = "AUDIO", sectors = 18691, sha256 = "b2c7a8c8b3249ee93f74115ecef618aeb64ffcaf4bfa8848acca6f3c86d20573" },
 ]
 
+# Unchanged baseline d24ac2f and the current interpreter both end on e351d610f779f51b with 6,583,164,768 instructions; the old hash predates the decoder update.
 # Empty memory-card slots. This route records the audio investigation, not a completed race or full-game compatibility.
 [validation]
-date = "2026-11-03"
+date = "2026-11-09"
 screen = "Porto Kora single race, Vector class"
 frames = 18000
 inputs = [
@@ -62,21 +68,25 @@ inputs = [
 ]
 width = 512
 height = 256
-frame_hash_fnv1a64 = "a7d6732f640dc3e2"
+frame_hash_fnv1a64 = "e351d610f779f51b"
 
-native_instructions = 6704686462
-lockstep_stops = 147810794
+native_instructions = 6583164768
 
 # No inputs from reset; the title remains visible after the language prompt/opening movie.
+interpreted_instructions = 0
+lockstep_stops = 984018475
+
 [title]
-date = "2026-11-03"
+date = "2026-11-09"
 screen = "title screen with clean atlas glyph edges"
 frames = 7920
 inputs = []
-native_instructions = 3057679807
+native_instructions = 2936359480
 width = 512
 height = 256
 frame_hash_fnv1a64 = "e6812973c7d7f201"
+interpreted_instructions = 0
+lockstep_stops = 500446825
 
 [title.metal_2x]
 date = "2026-11-03"
@@ -89,3 +99,30 @@ date = "2026-11-03"
 width = 2048
 height = 1024
 frame_hash_fnv1a64 = "1153f3867aa48467"
+
+# Native coverage/offload acceptance evidence. Counts start at the executable entry; ordinary CPU acceptance compares every block.
+[validation.native_coverage]
+date = "2026-11-09"
+cpu_step_cycles = 1
+lockstep_stops = 984018475
+program_native = 6367648362
+program_interpreted = 0
+kernel_native = 94173249
+bios_rom_native = 19336790
+full_console_comparison_every_frame = true
+gpu_offload_date = "2026-11-09"
+gpu_offload = [
+  { scale = 1, frame_hash_fnv1a64 = "e351d610f779f51b", cpu_step_cycles = 64, lockstep_stops = 149887519, software_ops = 0, external_ops = 224195767 },
+  { scale = 2, frame_hash_fnv1a64 = "01fe3ff9b72a8f1b", cpu_step_cycles = 64, lockstep_stops = 149887519, software_ops = 0, external_ops = 224195767 },
+  { scale = 4, frame_hash_fnv1a64 = "6bfa39f3ebc17781", cpu_step_cycles = 64, lockstep_stops = 149887519, software_ops = 0, external_ops = 224195767 },
+]
+
+[title.native_coverage]
+date = "2026-11-09"
+cpu_step_cycles = 1
+lockstep_stops = 500446825
+program_native = 2773008859
+program_interpreted = 0
+kernel_native = 57906432
+bios_rom_native = 3437822
+full_console_comparison_every_frame = true

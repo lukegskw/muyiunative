@@ -4,12 +4,14 @@
 // plus a load's wait (mem.c); MULT and DIV run on beside the CPU, and MFHI/MFLO wait for them. This interpreter is the reference native code is checked against
 // (AGENTS.md); cpu_run is the dispatcher between the two
 #include "cpu_ops.h"
+#include "coverage.h"
 
 void cpu_step(ps1 *m) {   // one instruction, or the exception its fetch raises: an address error for a misaligned PC, a bus error where nothing executable is mapped
     ps1_cpu *c = &m->cpu;
     uint32_t op;
     if (!(c->pc & 3) && mem_fetch(m, c->pc, &op)) {
         uint32_t pc = c->pc;
+        if (m->coverage) coverage_interpreted(m, pc);
         m->interp_steps++; cpu_exec(m, op, mem_fetch_cycles(pc));
         if (m->on_step) m->on_step(m, pc, op);
         return;
@@ -42,6 +44,7 @@ void cpu_run(ps1 *m) {
             if ((p == 0xa0 && c->r[9] == 0x3c) || (p == 0xb0 && c->r[9] == 0x3d)) tty_putc(m, (char)c->r[4]);
             else if (m->exe && ps1_exe_due(m)) ps1_exe_start(m);
         }
-        if (c->branch || !native_run(m)) cpu_step(m);
+        if (c->branch) { m->native_miss = FALLBACK_DELAY; cpu_step(m); }
+        else if (!native_run(m)) cpu_step(m);
     }
 }

@@ -2,6 +2,11 @@
 name = "Final Fantasy VII"
 serial = "SCES-00867"
 
+[native]
+# Required program-RAM coverage after executable entry; capture all routes before compiling their union. This is an acceptance policy, not a whole-game claim.
+min_percent = 100
+routes = ["validation"]
+
 [disc]
 licence = "SCEE"
 boot = 'SCES_008.67'
@@ -12,7 +17,7 @@ tracks = [
 
 # Empty memory-card slots, from reset. The opening route does not establish later battles, disc changes or whole-game compatibility.
 [validation]
-date = "2026-11-06"
+date = "2026-11-08"
 screen = "opening movie and first field dialogue"
 frames = 12051
 inputs = ["2500:4000", "2506:0", "3500:10", "3512:0", "3560:2000", "3572:0"]
@@ -20,10 +25,10 @@ width = 320
 height = 240
 frame_hash_fnv1a64 = "d592ed0f68b5b7ea"
 
-# Measured with the earlier 2400-frame capture plus static boot analysis, before this longer capture route was added.
-native_instructions = 4209310383
-interpreted_instructions = 299921161
-lockstep_stops = 97145525
+# Full route capture, per-block CPU/RAM acceptance; unlike the earlier 2400-frame capture, no instruction falls back to the interpreter.
+native_instructions = 4509231544
+interpreted_instructions = 0
+lockstep_stops = 746148119
 
 [movie_train]
 date = "2026-11-06"
@@ -40,3 +45,20 @@ width = 320
 height = 240
 frame_hash_fnv1a64 = "6079b9c062a4b036"
 native_vram_cache_match_every_frame = true
+
+# Native coverage/offload acceptance evidence. Counts start at the executable entry; ordinary CPU acceptance compares every block.
+[validation.native_coverage]
+date = "2026-11-08"
+cpu_step_cycles = 1
+lockstep_stops = 746148119
+program_native = 4249553621
+program_interpreted = 0
+kernel_native = 160543130
+bios_rom_native = 4367750
+full_console_comparison_every_frame = true
+gpu_offload_date = "2026-11-08"
+gpu_offload = [
+  { scale = 1, frame_hash_fnv1a64 = "d592ed0f68b5b7ea", cpu_step_cycles = 1, lockstep_stops = 746148119, software_ops = 0, external_ops = 380339616 },
+  { scale = 2, frame_hash_fnv1a64 = "cab716cff85e36bd", cpu_step_cycles = 1, lockstep_stops = 746148119, software_ops = 0, external_ops = 380339616 },
+  { scale = 4, frame_hash_fnv1a64 = "995ff1d04d82168e", cpu_step_cycles = 1, lockstep_stops = 746148119, software_ops = 0, external_ops = 380339616 },
+]

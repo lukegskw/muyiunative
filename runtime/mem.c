@@ -116,7 +116,24 @@ static void wr(ps1 *m, uint32_t a, uint32_t v, unsigned n) {
     uint32_t p = ps1_phys(a);
     if (p - BIOS_BASE < BIOS_SIZE || p - EXP1_BASE < EXP1_SIZE) return;   // ROM, and the empty expansion port
     uint8_t *d = at(m, a);
-    if (d) { memcpy(d, &v, n); if (m->native_active) native_written(m, a, n); } else io_write(m, p, v, n);
+    if (d) { memcpy(d, &v, n); if (m->native_active || m->memory_watch) mem_written(m, a, n); } else io_write(m, p, v, n);
+}
+
+// Default game lockstep previously checked RAM only at frame ends, allowing a wrong temporary store to disappear before comparison. Track all writers, including
+// DMA and EXE loading, and compare the union of changed pages after each block. Mirrors name the same physical page (psx-spx, Memory Map / Memory Mirrors).
+void mem_written(ps1 *m, uint32_t addr, unsigned n) {
+    if (m->native_active) native_written(m, addr, n);
+    if (!m->memory_watch || !n) return;
+    uint32_t p = ps1_phys(addr);
+    if (p < RAM_WINDOW) {
+        if (n >= RAM_SIZE) { memset(m->memory_dirty, 0xff, sizeof m->memory_dirty); return; }
+        while (n) {
+            unsigned page = (p & (RAM_SIZE - 1)) >> 12, bytes = 4096 - (p & 4095);
+            m->memory_dirty[page / 64] |= UINT64_C(1) << (page % 64);
+            if (bytes >= n) break;
+            p += bytes; n -= bytes;
+        }
+    } else if (p - SCRATCH_BASE < SCRATCH_SIZE && addr >> 29 != 5) m->scratch_dirty = 1;
 }
 
 uint8_t mem_read8(ps1 *m, uint32_t a) { return (uint8_t)rd(m, a, 1); }

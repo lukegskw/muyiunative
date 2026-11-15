@@ -8,4 +8,6 @@ The title-screen dots and thin lines at Metal 2×/4× were traced to neighboring
 
 On 2026-11-04 the user confirmed that the updated games were working. The remaining blockiness of this title screen's small lettering is present in the supplied correct reference: its small headings use four-texel-high bitmap strips, while copyright glyphs use eight-texel-high cells. Metal 2×/4× retains those source bitmaps; their low resolution is expected.
 
+On 2026-11-09, both the race and title routes pass CPU/RAM comparison after every block, with 100% program-RAM native execution and no fallback. The refreshed race hash is `e351d610f779f51b`: unchanged baseline `d24ac2f` and the current interpreter produce the same result after the earlier decoder update. The title hash remains `e6812973c7d7f201`.
+
 Reaching this race does not establish a completed lap or event. Broader visual accuracy remains unverified. Normal memory-card saving, controllers, other tracks and whole-game audible accuracy remain unverified for this disc. Local captures, compiled game code and checkpoints stay outside the checkout.

@@ -36,12 +36,14 @@ void native_written(ps1 *m, uint32_t addr, unsigned n) {
 int native_run(ps1 *m) {
     uint32_t pc = m->cpu.pc;
     uint64_t at = m->cycles;
+    m->native_miss = FALLBACK_NO_ENTRY;
     for (int k = 0; k < m->nnative; k++) {
         const ps1_native_set *s = m->native[k];
         unsigned lo = 0, hi = s->nentries;
         while (lo < hi) { unsigned mid = lo + (hi - lo) / 2; if (s->entries[mid].pc < pc) lo = mid + 1; else hi = mid; }
         for (; lo < s->nentries && s->entries[lo].pc == pc; lo++) {   // run: at least one instruction runs, unless the set's table is wrong
             const ps1_native_fn *f = &s->fns[s->entries[lo].fn];
+            m->native_miss = FALLBACK_CHANGED;
             if (matches(m, f)) { m->native_runs++; m->native_pc = pc; m->native_fn = f->start; m->native_active = f; m->native_dirty = 0; f->run(m); m->native_active = NULL; return m->cycles != at; }
         }
     }

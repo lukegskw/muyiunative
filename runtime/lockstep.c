@@ -2,7 +2,7 @@
 // state, ref interpreting everything and nat running native code where it has some, and stop together: next_event is `step` cycles ahead, so each cpu_run returns
 // at the end of the first block past it, where both take the same device events and interrupts (plan.md, decision log: interrupts at the end of a block). A step of
 // 1 stops at every block; a longer one lets native code go on from block to block by itself, as it does outside the comparison.
-// The CPU and the cycle count are compared at every stop; memory and the devices every full_every stops and at the end of each frame. The first difference is
+// CPU, cycles, changed RAM pages and scratchpad are compared at every stop; all devices/VRAM every full_every stops and at each frame. The first difference is
 // reported by name (a register, a COP0 or GTE register, a RAM address or a VRAM pixel, a device), with the native block that ran last on nat, or "interpreted".
 // Not compared: what differs by design (the native code attached, the counters of what ran natively), and the host's side (the disc's files, the tty sink)
 #include "native.h"
@@ -33,7 +33,8 @@ static const struct { const char *name; size_t at, n; } parts[] = {
     PART(exit_requested), PART(exit_code), PART(red), PART(unmapped)};
 #undef PART
 
-static int full_differ(const ps1 *a, const ps1 *b, char *out, size_t n) {
+static int full_differ(ps1 *a, ps1 *b, char *out, size_t n) {
+    if (gpu_sync(a) || gpu_sync(b)) return snprintf(out, n, "external rasterizer synchronization failed"), 1;
     if (cpu_differ(a, b, out, n)) return 1;
     for (size_t i = 0; i < sizeof parts / sizeof *parts; i++) {
         const uint8_t *x = (const uint8_t *)a + parts[i].at, *y = (const uint8_t *)b + parts[i].at;
@@ -48,6 +49,25 @@ static int full_differ(const ps1 *a, const ps1 *b, char *out, size_t n) {
     return 0;
 }
 
+static int memory_differ(ps1 *a, ps1 *b, char *out, size_t n) {
+    for (unsigned i = 0; i < 8; i++) {
+        uint64_t pages = a->memory_dirty[i] | b->memory_dirty[i];
+        while (pages) {
+            unsigned bit = (unsigned)__builtin_ctzll(pages); size_t at = (i * 64 + bit) * 4096;
+            if (memcmp(a->ram + at, b->ram + at, 4096)) {
+                size_t k = 0; while (a->ram[at + k] == b->ram[at + k]) k++; k &= ~(size_t)3;
+                uint32_t x, y; memcpy(&x, a->ram + at + k, 4); memcpy(&y, b->ram + at + k, 4);
+                return snprintf(out, n, "RAM at %06zx: %08x, native %08x", at + k, x, y), 1;
+            }
+            pages &= pages - 1;
+        }
+        a->memory_dirty[i] = b->memory_dirty[i] = 0;
+    }
+    if ((a->scratch_dirty || b->scratch_dirty) && memcmp(a->scratch, b->scratch, sizeof a->scratch))
+        return snprintf(out, n, "scratchpad differs after the block"), 1;
+    a->scratch_dirty = b->scratch_dirty = 0; return 0;
+}
+
 static int report(const ps1 *a, const ps1 *b, ps1_lockstep *ls, int native, const char *what) {
     char where[160];
     if (native) snprintf(where, sizeof where, "after the native block at %08x (function %08x)", b->native_pc, b->native_fn);
@@ -59,6 +79,11 @@ static int report(const ps1 *a, const ps1 *b, ps1_lockstep *ls, int native, cons
 
 int ps1_lockstep_frame(ps1 *a, ps1 *b, ps1_lockstep *ls) {
     char what[200];
+    if (!ls->initialized) {
+        if (full_differ(a, b, what, sizeof what)) return report(a, b, ls, 0, what);
+        memset(a->memory_dirty, 0, sizeof a->memory_dirty); memset(b->memory_dirty, 0, sizeof b->memory_dirty);
+        a->memory_watch = b->memory_watch = ls->initialized = 1; a->scratch_dirty = b->scratch_dirty = 0;
+    }
     a->frame_done = b->frame_done = 0;
     while (!a->frame_done && !a->exit_requested) {
         uint64_t stop = a->cycles + (ls->step ? ls->step : 1), runs = b->native_runs;
@@ -66,7 +91,8 @@ int ps1_lockstep_frame(ps1 *a, ps1 *b, ps1_lockstep *ls) {
         if (b->next_event > stop) b->next_event = stop;
         cpu_run(a); cpu_run(b); sched_run(a); sched_run(b);
         ls->stops++;
-        if (cpu_differ(a, b, what, sizeof what) || (ls->full_every && ls->stops % ls->full_every == 0 && full_differ(a, b, what, sizeof what)))
+        if (cpu_differ(a, b, what, sizeof what) || memory_differ(a, b, what, sizeof what) ||
+            (ls->full_every && ls->stops % ls->full_every == 0 && full_differ(a, b, what, sizeof what)))
             return report(a, b, ls, b->native_runs != runs, what);
     }
     return full_differ(a, b, what, sizeof what) ? report(a, b, ls, 0, what) : 0;

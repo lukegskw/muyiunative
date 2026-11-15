@@ -11,9 +11,11 @@ The source launcher can [build the complete disc set into one app](../../README.
 | Region / serial | USA / SLUS-01251                                                   |
 | Boot executable | `SLUS_012.51`                                                      |
 | Boot SHA-256    | `e30e40745d079aed7071c130785fb42406d8857bdf5484a101ec9baed143ee1c` |
-| Native CPU      | 7,904,116,658 instructions; none interpreted                       |
-| Lockstep        | 177,178,253 stops; native code agrees with the interpreter         |
-| Native display  | 320×218 at the recorded battle frame; hash `1f8773f9f941218a`      |
+| Native CPU      | 7,886,101,666 instructions; none interpreted                       |
+| Lockstep        | 1,243,432,335 block stops; native code agrees with the interpreter         |
+| Native display  | 320×218 at the recorded battle frame; hash `2dd095d09325b1c6`      |
+
+The 2026-11-08 replay refreshes the battle hash after the earlier MDEC timing update: unchanged baseline `d24ac2f` and the current interpreter produce the same frame and instruction count. No interpreter behavior was changed to restore the old picture. The default build combines the battle, title and fresh-card Load-menu captures, including persistent card callbacks recorded in the profile.
 
 The complete recorded route also passes Metal 4× with native VRAM and texture/CLUT caches matching software at every frame. This is an automated correctness check, not a report that all visual or audible symptoms are gone. These fixes are included in preview 0.8.0; the earlier 0.7.0 launcher predates them.
 
@@ -29,7 +31,7 @@ On 2026-11-03 the user identified the crate behind the opponent on the left of t
 
 The corrected alias bounds use the integer vertex extrema: over a legal 1023×511 triangle, truncating 12-bit gradients contributes less than 1534/4096 texel of error, so nearest rounding cannot leave that range. Actual window/cache-line/palette aliases remain guarded. A synthetic translated-buffer regression fails at 2×/4× before the correction and passes afterward. In a 100-field comparison after 40 warmup fields, the native region (x=[0,40), y=[60,115)) stays static; the number of changing fine pixels falls from 201 to zero at 2× and from 1,036 to zero at 4×. Native image samples and VRAM/cache checks remain unchanged. This corrects the measured crate oscillation; it does not claim to remove all PS1 geometry/texture movement or replace the separate CPU/GTE correction documented in [Crash's profile](../SCES-01420/README.md#missing-faces-and-spurious-triangles).
 
-The complete 24,720-field route is rechecked after this correction at Metal 4×: native VRAM/cache agree with software every field, all 7,904,116,658 CPU instructions remain native, and the updated fine display hash is `e96e2c2a5c0ac791` at 1280×872. The rebuilt local app also passes a 60-field bundled-resource boot with reference verification and a valid hardened-runtime signature.
+On 2026-11-03, the complete 24,720-field route was rechecked after this correction at Metal 4×: native VRAM/cache agree with software every field, all 7,904,116,658 CPU instructions remain native, and the updated fine display hash is `e96e2c2a5c0ac791` at 1280×872. The rebuilt local app also passes a 60-field bundled-resource boot with reference verification and a valid hardened-runtime signature.
 
 The route is also rechecked after the shared CPU/GTE interrupt correction on 2026-11-03: all instruction counts, lockstep stops and the fine display hash above remain unchanged, and the crate region remains static at 2×/4×. Both local apps include that runtime correction.
 
@@ -52,6 +54,8 @@ Normal NTSC memory cards from [FantasyAnime's FFIX saves](https://fantasyanime.c
 | Disc 3 → 4 | Black Mage Village cutscene loads; Cross advances dialogue. |
 
 The first request is reached from native Disc 1 reset. The later requests are initially prepared by booting the correct source disc in the reference interpreter, loading the normal card, and saving a compatible console state; restoring that state in the native app with identical compiled code precedes the menu swap. Independent 10,500-frame runs of the supplied native app then verify both preparations from reset in lockstep: Disc 2 agrees at 70,868,129 stops (99.79% native, display hash `534f77fd0e626432`), and Disc 3 at 70,867,736 stops (99.76% native, `96179efe711d3ee5`). Their final images show the Disc 3 and Disc 4 requests respectively. The interactive swaps themselves are not lockstep runs.
+
+The additional 2026-11-09 card-loading capture compiles the BIOS ROM functions and upper-RAM code first reached while reading a real card. Before this capture, that extra route had 922,317 interpreted program-RAM instructions (99.967349% native); resident callback hints alone did not cover those copied code versions. The final local binary combines the three default routes with this optional Disc-2 `load_progress` capture. All four pass per-block CPU/RAM checks with 100% program-RAM native execution, and the card route also passes GPU-only Metal 1× with full console/VRAM/cache agreement every frame. Its final `ed77e17fb476269e` image shows the South Gate field. Normal card writes remain unverified. Only hashes and counters are retained; every replay uses temporary copies of the isolated seed cards, whose original hashes remain unchanged.
 
 A separate premature swap, made on the memory-card selection menu before a disc request, hangs with repeating audio. Both native execution and an interpreter-only replay reach the same BIOS fatal loop with EPC `801f65a4`. The faulting data occurs one raw sector later on Disc 2 than on Disc 1, consistent with the game retaining file addresses from the previous disc. This is a recorded limitation, not a hardware-verified diagnosis or a runtime fix; the successful tests wait for the game's request.
 

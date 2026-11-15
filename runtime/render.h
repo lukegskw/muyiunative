@@ -1,5 +1,5 @@
-// Ordered host rendering operations (plan.md, phase 6). The software GPU remains canonical console state; an optional per-machine consumer independently draws
-// these operations in Metal. No Apple types belong in the runtime. This layout is also included by the offline Metal compiler; scalar fields keep its ABI explicit.
+// Ordered host rendering operations. A per-machine external rasterizer can own drawing, materializing VRAM/cache for CPU observations; verification draws
+// independently in software and Metal. No Apple types belong in the runtime. This layout is also included by the offline Metal compiler; scalar fields keep its ABI explicit.
 #pragma once
 #ifdef __METAL_VERSION__
 #include <metal_stdlib>

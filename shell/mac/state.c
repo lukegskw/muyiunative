@@ -14,7 +14,7 @@
 
 #define CONSOLE(X) X(ram) X(scratch) X(cpu) X(cycles) X(next_event) X(i_stat) X(i_mask) X(memctl) X(ram_size) X(cache_ctl) X(dpcr) X(dicr) X(post) \
     X(dma) X(dma_next) X(tmr) X(gpu) X(cd) X(spu) X(sio) X(mdec) X(tty) X(ntty) X(frame_done) X(exit_requested) X(exit_code)
-enum { FORMAT = 2 };   // media identity now includes every track's contents, not only its layout
+enum { FORMAT = 3 };   // appended host bookkeeping changes payload length; the immediately preceding format-2 console layout remains readable
 static const char filename[] = "quick.ps1state";
 typedef struct header {
     char magic[8]; uint32_t version, bytes, scale, fine_bytes;
@@ -68,13 +68,14 @@ static int transfer(int fd, void *data, size_t bytes, int writing) {
     return 0;
 }
 static uint64_t checksum(header h, const ps1 *m, const uint16_t *fine) {
-    h.checksum = 0; uint64_t v = hash(BASIS, &h, sizeof h); v = hash(v, m, sizeof *m); return hash(v, fine, h.fine_bytes);
+    h.checksum = 0; uint64_t v = hash(BASIS, &h, sizeof h); v = hash(v, m, h.bytes); return hash(v, fine, h.fine_bytes);
 }
 int front_state_exists(int directory) {
     struct stat st; return !fstatat(directory, filename, &st, AT_SYMLINK_NOFOLLOW) && S_ISREG(st.st_mode);
 }
 int front_state_save(int directory, const char *game, ps1 *m, uint64_t frame, int scale, const uint16_t *fine, char *error) {
     if (!ready(m, error)) return -1;
+    if (gpu_sync(m)) { snprintf(error, FRONT_STATE_ERROR, "Could not synchronize the rendered console state."); return -1; }
     if (!game || !*game || strlen(game) >= 128 || (scale != 0 && scale != 2 && scale != 4) || (scale && !fine)) {
         snprintf(error, FRONT_STATE_ERROR, "The game or rendering state is invalid."); return -1;
     }
@@ -118,15 +119,17 @@ static front_snapshot *read_state(int directory, const char *game, ps1 *m, const
     if (fd < 0) { io_error(error, "load"); return NULL; }
     header h; struct stat st; front_snapshot *s = NULL;
     if (fstat(fd, &st) || !S_ISREG(st.st_mode) || st.st_size < (off_t)sizeof h || transfer(fd, &h, sizeof h, 0)) goto invalid;
-    if (memcmp(h.magic, "MYUSTATE", 8) || h.version != FORMAT || h.bytes != sizeof(ps1) || h.layout != layout() ||
+    int current_format = h.version == FORMAT && h.bytes == sizeof(ps1);
+    int previous_format = h.version == 2 && h.bytes == offsetof(ps1, render_sync);
+    if (memcmp(h.magic, "MYUSTATE", 8) || (!current_format && !previous_format) || h.layout != layout() ||
         (h.scale != 0 && h.scale != 2 && h.scale != 4) || h.fine_bytes != sizeof m->gpu.vram * h.scale * h.scale ||
-        st.st_size != (off_t)(sizeof h + sizeof(ps1) + h.fine_bytes)) goto invalid;
+        st.st_size != (off_t)(sizeof h + h.bytes + h.fine_bytes)) goto invalid;
     if (!game || strlen(game) >= sizeof h.game || strncmp(h.game, game, sizeof h.game) || h.bios != hash(BASIS, m->bios, sizeof m->bios)) {
         snprintf(error, FRONT_STATE_ERROR, "This state belongs to a different game or BIOS."); goto fail;
     }
     s = calloc(1, sizeof *s);
-    if (!s || !(s->machine = malloc(sizeof *s->machine)) || (h.fine_bytes && !(s->fine = malloc(h.fine_bytes)))) { io_error(error, "allocate"); goto fail; }
-    if (transfer(fd, s->machine, sizeof *s->machine, 0) || transfer(fd, s->fine, h.fine_bytes, 0) || checksum(h, s->machine, s->fine) != h.checksum) goto invalid;
+    if (!s || !(s->machine = calloc(1, sizeof *s->machine)) || (h.fine_bytes && !(s->fine = malloc(h.fine_bytes)))) { io_error(error, "allocate"); goto fail; }
+    if (transfer(fd, s->machine, h.bytes, 0) || transfer(fd, s->fine, h.fine_bytes, 0) || checksum(h, s->machine, s->fine) != h.checksum) goto invalid;
     if (s->machine->sio.device == 2 || s->machine->cd.shell_open) goto invalid;
     s->frame = h.frame; s->scale = (int)h.scale; s->disc_index = current;
     if (select_media(s, m, product, h.media, error)) goto fail;

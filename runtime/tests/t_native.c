@@ -42,6 +42,7 @@ int main(void) {
               cpu_decode(native_words[i].word), native_words[i].op);
 
     ps1 *a = machine(0), *b = machine(1);
+    ps1_coverage coverage = {.entry = native_base}; b->coverage = &coverage;
     int stops = 0, same = 1;
     while (!(a->exit_requested && b->exit_requested) && stops < 100000 && same) {
         a->next_event = b->next_event = a->cycles + 50;
@@ -51,6 +52,13 @@ int main(void) {
     CHECK(same, "the native code and the interpreter agree at every stop");
     CHECK(a->exit_requested && a->exit_code == 0 && b->exit_requested, "the program reaches its exit port (%d stops, %llu cycles)", stops, (unsigned long long)a->cycles);
     CHECK(b->native_runs > 20, "the native code ran: entered %llu times", (unsigned long long)b->native_runs);
+    static const char *const names[] = {
+#define NAME(n) #n,
+        CPU_OPS(NAME)
+#undef NAME
+    };
+    for (unsigned i = 0; i < CPU_NOPS; i++)
+        CHECK(coverage.operations[i / 64] & (UINT64_C(1) << (i % 64)), "%s executes through generated native code", names[i]);
     CHECK(mem_read32(a, 0x8003001c) == 16 && mem_read32(a, 0x80030020) == 0x445566,
           "an IRQ at a generated GTE block issues GPF exactly once before the BIOS-style return skips it");
     // Eight synchronous exceptions return to JR RA and its delay slot; the IRQ returns past GPF into a block and interprets its nine remaining instructions.
@@ -66,6 +74,6 @@ int main(void) {
     CHECK(n > 10 && log[2 * 10] >> 31 && (log[2 * 11] & 0x100), "SYSCALL in a delay slot sets CAUSE.BD; the software interrupt's bit is in CAUSE");
 
     fprintf(stderr, "native: %d checks, %d failed\n", checks, fails);
-    ps1_free(a); ps1_free(b);
+    ps1_coverage_free(&coverage); b->coverage = NULL; ps1_free(a); ps1_free(b);
     return fails != 0;
 }
